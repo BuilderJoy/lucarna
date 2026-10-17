@@ -44,7 +44,7 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Git workflow
 
-One branch per roadmap phase, named `fase-N-tema` (e.g. `fase-6-empaquetado`), cut from an up-to-date `main`. Commits on the branch update `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes. Open a PR into `main` when the phase's tests and `cargo clippy` are clean; never commit phase work straight to `main`. Commit trailer: `Co-Authored-By: <model in use>`.
+All work happens on the long-lived `develop` branch; `main` only receives merges at milestones (e.g. the v0.1 release in the roadmap), through a PR. Commit per roadmap item or phase, updating `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes, and push `develop` after each. Keep tests and `cargo clippy` clean before every push. Commit trailer: `Co-Authored-By: <model in use>`.
 
 ### Session bar
 
