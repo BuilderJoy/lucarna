@@ -42,6 +42,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Git workflow
+
+One branch per roadmap phase, named `fase-N-tema` (e.g. `fase-6-empaquetado`), cut from an up-to-date `main`. Commits on the branch update `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes. Open a PR into `main` when the phase's tests and `cargo clippy` are clean; never commit phase work straight to `main`. Commit trailer: `Co-Authored-By: <model in use>`.
+
 ### Session bar
 
 `app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server.
