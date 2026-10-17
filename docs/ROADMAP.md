@@ -241,7 +241,7 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 | Windows | `.exe` + MSI | Ícono `.ico` incrustado. `windows_subsystem = "windows"` para que no abra consola. Firma opcional; sin ella, SmartScreen avisa. |
 | Linux | AppImage o tarball | Ícono `.png` + `.desktop`. |
 
-- **Ícono en la ventana:** `ViewportBuilder::with_icon` desde un PNG incrustado con `include_bytes!`.
+- **Ícono en la ventana ✅ (2026-10-17):** `ViewportBuilder::with_icon` con `assets/logo.png` incrustado. El PNG se genera desde el SVG con `rsvg-convert` (comando en el README).
 - **CI:** GitHub Actions con matriz macOS/Windows/Linux que corre `cargo fmt --check`, `cargo clippy -D warnings` y `cargo test`, y un job con el contenedor x11vnc para los tests `--ignored`. Los releases se publican al crear un tag.
 
 **Tamaño:** M (2–3 días, más el trámite de Apple).
