@@ -127,7 +127,9 @@ Es la mejor opción con internet lento porque usa JPEG en zonas con foto, pero e
 
 Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especificación pública**: la fuente de verdad es el código de UltraVNC (`rfb/rfbproto.h`, el visor en `vncviewer/FileTransfer.cpp` y el servidor en `winvnc/vncclient.cpp`).
 
-### 2.1 Spike de investigación (antes de escribir código)
+### 2.1 Spike de investigación (antes de escribir código) ✅ en papel (2026-10-17)
+
+**Hecho:** [docs/ultravnc-ft.md](ultravnc-ft.md), leído del código fuente oficial (commit `0cd8b41`). Falta confirmar con tráfico real (punto 5) y documentar subida y comandos antes de implementar la escritura.
 
 1. Leer `rfbproto.h` de la versión estable actual y anotar en `docs/ultravnc-ft.md`:
    - el tipo de mensaje (`rfbFileTransfer`, que se espera sea 7),
