@@ -6,7 +6,7 @@
 
 <p align="center">Free, open-source VNC viewer for macOS, Windows and Linux, aiming at UltraVNC-compatible file transfer.</p>
 
-Encodings: ZRLE, Zlib, Hextile, CopyRect, Raw. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+Encodings: ZRLE, Zlib, Hextile, CopyRect, Raw. Saved connections on the start dashboard, with passwords kept in the OS keychain (never on disk). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 The PNG is rendered from the SVG source; after editing `assets/logo.svg`, run:
 
@@ -29,7 +29,7 @@ src/
   session/           Session aggregate: owns the socket, routes server messages to features
   shared/wire.rs     big-endian wire primitives
   features/
-    connection/      ServerAddress, handshake, VNC auth, connect form
+    connection/      ServerAddress, handshake, VNC auth, saved connections, dashboard
     remote_screen/   Framebuffer, encodings, screen view
     input/           keysyms, key/pointer events
     clipboard/       cut text both ways

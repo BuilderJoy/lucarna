@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Lucarna: cross-platform VNC viewer (Rust 2024, eframe/egui), targeting UltraVNC-compatible file transfer. Dependencies are deliberately minimal (`eframe`, `des` for VNC auth); prefer std over new crates.
+Lucarna: cross-platform VNC viewer (Rust 2024, eframe/egui), targeting UltraVNC-compatible file transfer. Dependencies are deliberately minimal (`eframe` with `persistence`, `des` for VNC auth, `flate2` for zlib encodings, `keyring` for saved passwords); prefer std over new crates.
 
 ## Commands
 
@@ -41,6 +41,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 - Clipboard text is Latin-1 on the wire. `clipboard::forward_paste` must run before `input.forward` in `app.rs` so paste reaches the server before Ctrl+V.
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Saved connections
+
+`connection/saved.rs`: names and addresses in `connections.txt` under `eframe::storage_dir("Lucarna")`; passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the start screen.
 
 ### Security rule
 

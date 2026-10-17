@@ -8,4 +8,5 @@ description = "Cross-platform VNC viewer with UltraVNC file transfer"
 [dependencies]
 des = "0.9.0"
 flate2 = "1.1"
-eframe = "0.37.0"
+eframe = { version = "0.37.0", features = ["persistence"] }
+keyring = "4.2"

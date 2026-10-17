@@ -15,6 +15,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
+| Fase 3.5: dashboard con conexiones guardadas, contraseñas en el llavero del SO | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -186,7 +187,7 @@ features/file_transfer/
 | 3.2 | Modo solo ver | Toggle en la barra que salta `input.forward` y `forward_paste`. | XS |
 | 3.3 | Escalado | Ajustar a ventana (lo actual) o 1:1 con scroll (`ScrollArea`). `Viewport::to_remote` ya abstrae el mapeo. | S |
 | 3.4 | Pantalla completa | `ViewportCommand::Fullscreen` con un atajo, por ejemplo ⌘⇧F. La barra se oculta y aparece al acercar el ratón arriba. | S |
-| 3.5 | Conexiones guardadas | Lista de servidores recientes con nombre y dirección. Se activa la feature `persistence` de eframe, que no agrega crates nuevos. **Las contraseñas no se guardan en texto plano**: o no se guardan, o van al llavero del SO, que sería una dependencia nueva y se decide entonces. | S-M |
+| 3.5 | Conexiones guardadas ✅ (2026-10-17) | Lista de servidores recientes con nombre y dirección. Se activa la feature `persistence` de eframe, que no agrega crates nuevos. **Hecho:** el dashboard de inicio lista las conexiones y permite conectar, editar y borrar. Nombre y dirección van a `connections.txt` en la carpeta de datos de eframe (feature `persistence`). Las contraseñas van solo al llavero del SO con el crate `keyring` 4 (Keychain, Credential Manager o Secret Service), una entrada por dirección. | S-M |
 | 3.6 | Reconexión | Botón "Reconectar" en el formulario cuando la sesión se cae, con la última dirección precargada. | XS |
 | 3.7 | Teclas especiales | Menú con Ctrl+Esc, Alt+Tab, Win, Alt+F4, Print Screen, AltGr para teclados en español, y la tecla Super/Windows (keysym 0xffeb). | S |
 | 3.8 | Portapapeles extendido | Pseudo-encoding Extended Clipboard (0xC0A1E5CE) para UTF-8. Hay que verificar en el spike si UltraVNC lo soporta. Si no, se mantiene Latin-1. | M |

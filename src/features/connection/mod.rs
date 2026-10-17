@@ -3,7 +3,8 @@
 mod address;
 mod auth;
 pub mod handshake;
+mod saved;
 mod view;
 
 pub use address::ServerAddress;
-pub use view::ConnectForm;
+pub use view::Dashboard;

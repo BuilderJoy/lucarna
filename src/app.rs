@@ -1,10 +1,10 @@
-//! App shell: switches between the connect form and a live session.
+//! App shell: switches between the dashboard and a live session.
 
 use std::sync::{mpsc, Arc, Mutex};
 
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
-use crate::features::connection::{ConnectForm, ServerAddress};
+use crate::features::connection::{Dashboard, ServerAddress};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, ScreenView};
 use crate::features::clipboard;
@@ -22,7 +22,7 @@ struct LiveSession {
 
 #[derive(Default)]
 pub struct App {
-    form: ConnectForm,
+    dashboard: Dashboard,
     events: Option<mpsc::Receiver<Event>>,
     live: Option<LiveSession>,
 }
@@ -33,7 +33,7 @@ impl App {
         let ctx = ctx.clone();
         std::thread::spawn(move || session::run(&address, &password, tx, || ctx.request_repaint()));
         self.events = Some(rx);
-        self.form.status.clear();
+        self.dashboard.status.clear();
     }
 
     fn poll_events(&mut self, ctx: &egui::Context) {
@@ -42,13 +42,13 @@ impl App {
         while let Ok(event) = rx.try_recv() {
             match event {
                 Event::Connected { name, outbound, screen } => {
-                    self.form.status.clear();
+                    self.dashboard.status.clear();
                     self.live = Some(LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), has_frame: false });
                 }
                 Event::ScreenUpdated => self.live.iter_mut().for_each(|l| l.has_frame = true),
                 Event::ServerClipboard(text) => ctx.copy_text(text),
                 Event::Closed(reason) => {
-                    self.form.status = reason;
+                    self.dashboard.status = reason;
                     self.live = None;
                     closed = true;
                 }
@@ -65,7 +65,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.poll_events(&ctx);
         let Some(live) = &mut self.live else {
-            if let Some((address, password)) = self.form.show(ui, self.events.is_some()) {
+            if let Some((address, password)) = self.dashboard.show(ui, self.events.is_some()) {
                 self.connect(&ctx, address, password);
             }
             return;
