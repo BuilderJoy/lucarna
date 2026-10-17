@@ -1,6 +1,18 @@
-# Lucarna
+<p align="center">
+  <img src="assets/logo.png" alt="Lucarna logo" width="160">
+</p>
 
-Free, open-source VNC viewer for macOS, Windows and Linux, aiming at UltraVNC-compatible file transfer.
+<h1 align="center">Lucarna</h1>
+
+<p align="center">Free, open-source VNC viewer for macOS, Windows and Linux, aiming at UltraVNC-compatible file transfer.</p>
+
+Encodings: ZRLE, Zlib, Hextile, CopyRect, Raw. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+The PNG is rendered from the SVG source; after editing `assets/logo.svg`, run:
+
+```bash
+rsvg-convert -w 512 -h 512 assets/logo.svg -o assets/logo.png
+```
 
 ```bash
 cargo run --release
