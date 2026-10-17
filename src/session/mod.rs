@@ -118,7 +118,7 @@ mod tests {
         assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");
 
         // File transfer (x11vnc -ultrafilexfer maps C:\ to /). Downloads land in ~/Downloads and are removed.
-        let mut next_files = || {
+        let next_files = || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
                 let left = deadline.saturating_duration_since(std::time::Instant::now());

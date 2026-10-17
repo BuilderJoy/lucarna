@@ -17,6 +17,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Fase 3.5: dashboard con conexiones guardadas, contraseñas en el llavero del SO | ✅ |
 | Fase 2.2 (solo lectura): permiso, unidades, navegar carpetas y descargar archivos | ✅ |
+| Fase 3.2, 3.3, 3.4, 3.7: solo ver, escalado Fit/1:1, pantalla completa, menú de teclas | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -189,12 +190,12 @@ features/file_transfer/
 | # | Tarea | Detalle | Tamaño |
 |---|---|---|---|
 | 3.1 | **Cursor local** | Se anuncia el pseudo-encoding Cursor (-239). El rect trae `x,y` = hotspot, `w,h`, `w*h` píxeles y una máscara de `ceil(w/8)*h` bytes. Se dibuja como textura que sigue al ratón local y se oculta el cursor del SO sobre el viewport (`CursorIcon::None`). Se valida el tamaño, por ejemplo hasta 256×256. Elimina la sensación de retraso. | S |
-| 3.2 | Modo solo ver | Toggle en la barra que salta `input.forward` y `forward_paste`. | XS |
-| 3.3 | Escalado | Ajustar a ventana (lo actual) o 1:1 con scroll (`ScrollArea`). `Viewport::to_remote` ya abstrae el mapeo. | S |
-| 3.4 | Pantalla completa | `ViewportCommand::Fullscreen` con un atajo, por ejemplo ⌘⇧F. La barra se oculta y aparece al acercar el ratón arriba. | S |
+| 3.2 | Modo solo ver ✅ (2026-10-17) | Botón "View only" en la barra que salta `input.forward` y `forward_paste`. | XS |
+| 3.3 | Escalado ✅ (2026-10-17) | Botón Fit / 1:1 en la barra. 1:1 es un píxel remoto por píxel físico (en Retina, 0.5 puntos) con `ScrollArea`; **solo las barras de desplazamiento mueven la vista**, porque la rueda y el arrastre son del equipo remoto. `Viewport` ahora también conoce la parte visible. | S |
+| 3.4 | Pantalla completa ✅ (2026-10-17) | Botón "Full screen" y atajo ⌘⇧F (Ctrl+Shift+F fuera de macOS), que se consume antes de reenviar teclas. En pantalla completa la barra flota sobre la imagen (no la desplaza) y aparece al acercar el ratón al borde superior o mientras haya un menú abierto. | S |
 | 3.5 | Conexiones guardadas ✅ (2026-10-17) | Lista de servidores recientes con nombre y dirección. Se activa la feature `persistence` de eframe, que no agrega crates nuevos. **Hecho:** el dashboard de inicio lista las conexiones y permite conectar, editar y borrar. Nombre y dirección van a `connections.txt` en la carpeta de datos de eframe (feature `persistence`). Las contraseñas van solo al llavero del SO con el crate `keyring` 4 (Keychain, Credential Manager o Secret Service), una entrada por dirección. | S-M |
 | 3.6 | Reconexión | Botón "Reconectar" en el formulario cuando la sesión se cae, con la última dirección precargada. | XS |
-| 3.7 | Teclas especiales | Menú con Ctrl+Esc, Alt+Tab, Win, Alt+F4, Print Screen, AltGr para teclados en español, y la tecla Super/Windows (keysym 0xffeb). | S |
+| 3.7 | Teclas especiales ✅ parcial (2026-10-17) | Menú "Keys" con Ctrl+Esc, Alt+Tab, Alt+F4, tecla Windows (0xffeb) y Print Screen; se pulsan en orden y se sueltan al revés. **Falta AltGr** para teclados en español: hoy los caracteres se mandan como keysym ya resuelto, y hay que probar si UltraVNC los acepta bien (`@`, `\`, `{`). | S |
 | 3.8 | Portapapeles extendido | Pseudo-encoding Extended Clipboard (0xC0A1E5CE) para UTF-8. Hay que verificar en el spike si UltraVNC lo soporta. Si no, se mantiene Latin-1. | M |
 | 3.9 | Campana | Mensaje 2: sonido o rebote del ícono del dock. | XS |
 

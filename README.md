@@ -6,7 +6,7 @@
 
 <p align="center">Free, open-source VNC viewer for macOS, Windows and Linux, aiming at UltraVNC-compatible file transfer.</p>
 
-Encodings: ZRLE, Zlib, Hextile, CopyRect, Raw. Saved connections on the start dashboard, with passwords kept in the OS keychain (never on disk). UltraVNC file transfer: browse the server's drives and download files (upload coming next). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+Encodings: ZRLE, Zlib, Hextile, CopyRect, Raw. Saved connections on the start dashboard, with passwords kept in the OS keychain (never on disk). Session bar: view-only, fit or 1:1 scaling, full screen (⌘⇧F), special keys menu. UltraVNC file transfer: browse the server's drives and download files (upload coming next). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 The PNG is rendered from the SVG source; after editing `assets/logo.svg`, run:
 

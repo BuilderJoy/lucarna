@@ -8,4 +8,4 @@ mod zrle;
 
 pub use framebuffer::Framebuffer;
 pub use protocol::{negotiate, Decoder, read_update, request_update, skip_colour_map};
-pub use view::{ScreenView, Viewport};
+pub use view::{Scale, ScreenView, Viewport};

@@ -4,9 +4,21 @@ use eframe::egui::{self, Color32, ColorImage, Pos2, Rect, TextureHandle, Texture
 
 use super::Framebuffer;
 
+/// How the remote screen is fitted into the window.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum Scale {
+    /// Shrink or grow to fill the window.
+    #[default]
+    Fit,
+    /// One remote pixel per physical screen pixel, with scroll bars when it doesn't fit.
+    Actual,
+}
+
 /// Where the remote screen is drawn locally; maps local points to remote pixels.
 pub struct Viewport {
     rect: Rect,
+    /// The part of `rect` that is actually on screen (smaller than `rect` when scrolled).
+    visible: Rect,
     scale: f32,
     width: f32,
     height: f32,
@@ -14,7 +26,7 @@ pub struct Viewport {
 
 impl Viewport {
     pub fn contains(&self, p: Pos2) -> bool {
-        self.rect.contains(p)
+        self.rect.contains(p) && self.visible.contains(p)
     }
 
     pub fn to_remote(&self, p: Pos2) -> (u16, u16) {
@@ -29,8 +41,8 @@ pub struct ScreenView {
 }
 
 impl ScreenView {
-    /// Paints the screen scaled to fit the available space.
-    pub fn show(&mut self, ui: &mut egui::Ui, screen: &Mutex<Framebuffer>) -> Viewport {
+    /// Paints the screen according to `mode`.
+    pub fn show(&mut self, ui: &mut egui::Ui, screen: &Mutex<Framebuffer>, mode: Scale) -> Viewport {
         let (width, height) = {
             let mut fb = screen.lock().unwrap();
             let full = [0, 0, fb.width, fb.height];
@@ -49,11 +61,30 @@ impl ScreenView {
             (fb.width as f32, fb.height as f32)
         };
 
-        let avail = ui.available_rect_before_wrap();
-        let scale = (avail.width() / width).min(avail.height() / height);
-        let rect = Rect::from_center_size(avail.center(), egui::vec2(width * scale, height * scale));
-        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-        ui.painter().image(self.texture.as_ref().unwrap().id(), rect, uv, Color32::WHITE);
-        Viewport { rect, scale, width, height }
+        let id = self.texture.as_ref().unwrap().id();
+        let paint = |ui: &egui::Ui, rect: Rect| {
+            ui.painter().image(id, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        };
+        match mode {
+            Scale::Fit => {
+                let avail = ui.available_rect_before_wrap();
+                let scale = (avail.width() / width).min(avail.height() / height);
+                let rect = Rect::from_center_size(avail.center(), egui::vec2(width * scale, height * scale));
+                paint(ui, rect);
+                Viewport { rect, visible: rect, scale, width, height }
+            }
+            Scale::Actual => {
+                let scale = 1.0 / ui.ctx().pixels_per_point();
+                let size = egui::vec2(width * scale, height * scale);
+                let avail = ui.available_size();
+                // Dragging and the mouse wheel belong to the remote machine, so only the scroll bars scroll.
+                egui::ScrollArea::both().auto_shrink(false).scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR).show(ui, |ui| {
+                    let (area, _) = ui.allocate_exact_size(size.max(avail), egui::Sense::hover());
+                    let rect = Rect::from_center_size(area.center(), size);
+                    paint(ui, rect);
+                    Viewport { rect, visible: ui.clip_rect(), scale, width, height }
+                }).inner
+            }
+        }
     }
 }

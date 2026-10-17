@@ -42,6 +42,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+### Session bar
+
+`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server.
+
 ### File transfer (UltraVNC, message type 7)
 
 Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on the wire (UltraVNC never swaps it); `size`/`length` are big-endian. `RemoteFiles` (UI handle, in `Event::Connected`) sends requests; `file_transfer::Receiver` lives on the session thread, assembles listings and writes downloads to `~/Downloads` via a `.part` file. A FileHeader is only accepted if the UI requested that file. The server answers nothing when FT is disabled, so the UI times out.

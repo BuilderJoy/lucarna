@@ -6,6 +6,11 @@ pub const SHIFT: u32 = 0xffe1;
 pub const CONTROL: u32 = 0xffe3;
 pub const ALT: u32 = 0xffe9;
 pub const DELETE: u32 = 0xffff;
+pub const ESCAPE: u32 = 0xff1b;
+pub const TAB: u32 = 0xff09;
+pub const F4: u32 = 0xffc1;
+pub const PRINT: u32 = 0xff61;
+pub const SUPER: u32 = 0xffeb;
 
 pub fn from_char(c: char) -> u32 {
     match c as u32 {

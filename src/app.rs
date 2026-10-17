@@ -6,7 +6,7 @@ use eframe::egui::{self, Align, Color32, Layout, RichText};
 
 use crate::features::connection::{Dashboard, ServerAddress};
 use crate::features::input::{self, InputForwarder};
-use crate::features::remote_screen::{Framebuffer, ScreenView};
+use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
 use crate::features::clipboard;
 use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::session::{self, Event, Outbound};
@@ -19,6 +19,11 @@ struct LiveSession {
     input: InputForwarder,
     files: Arc<RemoteFiles>,
     files_view: FilesView,
+    /// Don't forward keyboard, mouse or clipboard to the server.
+    view_only: bool,
+    scale: Scale,
+    /// Where the session bar floats in full screen, so clicks on it don't reach the remote machine.
+    bar_rect: Option<egui::Rect>,
     /// False until the first FramebufferUpdate lands; a full Raw frame can take seconds on slow links.
     has_frame: bool,
 }
@@ -47,7 +52,7 @@ impl App {
                 Event::Connected { name, outbound, screen, files } => {
                     self.dashboard.status.clear();
                     #[rustfmt::skip]
-                    let live = LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), files, files_view: FilesView::default(), has_frame: false };
+                    let live = LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), files, files_view: FilesView::default(), view_only: false, scale: Scale::default(), bar_rect: None, has_frame: false };
                     self.live = Some(live);
                 }
                 Event::Files(update) => {
@@ -80,27 +85,29 @@ impl eframe::App for App {
             }
             return;
         };
+        // Our own shortcut: consumed before input forwarding so the remote machine never sees it.
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let toggle = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::F));
+        if toggle {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        }
         let bar = egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 6));
-        egui::Panel::top("bar").frame(bar).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let dot = if live.has_frame { Color32::from_rgb(80, 200, 120) } else { ui.visuals().warn_fg_color };
-                ui.label(RichText::new("●").color(dot));
-                ui.label(RichText::new(&live.name).strong());
-                let (w, h) = live.screen.lock().unwrap().size();
-                ui.label(RichText::new(format!("{w}×{h}")).weak());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Disconnect").clicked() {
-                        live.outbound.close();
-                    }
-                    if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse and download the server's files").clicked() {
-                        live.files_view.open = !live.files_view.open;
-                    }
-                    if ui.button("Ctrl+Alt+Del").on_hover_text("Send Ctrl+Alt+Del to the remote machine").clicked() {
-                        let _ = input::ctrl_alt_del(&live.outbound);
-                    }
-                });
+        if !fullscreen {
+            live.bar_rect = None;
+            egui::Panel::top("bar").frame(bar).show(ui, |ui| bar_contents(ui, live, fullscreen));
+        } else {
+            // In full screen the bar floats over the screen and only appears when the pointer reaches the top.
+            let near_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 48.0));
+            let show = near_top || ctx.any_popup_open() || !live.has_frame;
+            live.bar_rect = show.then(|| {
+                egui::Area::new(egui::Id::unique("fullscreen_bar")).anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO).order(egui::Order::Foreground).show(&ctx, |ui| {
+                    bar.show(ui, |ui| {
+                        ui.set_width(ctx.content_rect().width() - 24.0);
+                        bar_contents(ui, live, fullscreen);
+                    });
+                }).response.rect
             });
-        });
+        }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ui, |ui| {
             if !live.has_frame {
                 ui.vertical_centered(|ui| {
@@ -111,16 +118,60 @@ impl eframe::App for App {
                 });
                 return;
             }
-            let viewport = live.view.show(ui, &live.screen);
-            // Clicks on the files window must not reach the remote machine.
-            let over_files = live.files_view.rect.is_some_and(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
-            if !over_files {
+            let viewport = live.view.show(ui, &live.screen, live.scale);
+            // Clicks on our own windows must not reach the remote machine.
+            let over_ui = [live.files_view.rect, live.bar_rect].into_iter().flatten().any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+            if !over_ui && !live.view_only {
                 clipboard::forward_paste(ui, &live.outbound);
                 live.input.forward(ui, &viewport, &live.outbound);
             }
         });
         live.files_view.show(&ctx, &live.files);
     }
+}
+
+fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
+    ui.horizontal(|ui| {
+        let dot = if live.has_frame { Color32::from_rgb(80, 200, 120) } else { ui.visuals().warn_fg_color };
+        ui.label(RichText::new("●").color(dot));
+        ui.label(RichText::new(&live.name).strong());
+        let (w, h) = live.screen.lock().unwrap().size();
+        ui.label(RichText::new(format!("{w}×{h}")).weak());
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button("Disconnect").clicked() {
+                live.outbound.close();
+            }
+            if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse and download the server's files").clicked() {
+                live.files_view.open = !live.files_view.open;
+            }
+            ui.menu_button("Keys", |ui| {
+                for (label, keys) in input::SHORTCUTS {
+                    if ui.button(*label).clicked() {
+                        let _ = input::combo(&live.outbound, keys);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Send key combinations your own system would intercept");
+            if ui.button("Ctrl+Alt+Del").on_hover_text("Send Ctrl+Alt+Del to the remote machine").clicked() {
+                let _ = input::ctrl_alt_del(&live.outbound);
+            }
+            ui.separator();
+            let shortcut = if cfg!(target_os = "macos") { "⌘⇧F" } else { "Ctrl+Shift+F" };
+            if ui.selectable_label(fullscreen, "Full screen").on_hover_text(shortcut).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+            }
+            let (label, tip) = match live.scale {
+                Scale::Fit => ("Fit", "Fit to window. Click for actual size (1:1, scroll bars)"),
+                Scale::Actual => ("1:1", "Actual size. Click to fit the window"),
+            };
+            if ui.button(label).on_hover_text(tip).clicked() {
+                live.scale = if live.scale == Scale::Fit { Scale::Actual } else { Scale::Fit };
+            }
+            ui.selectable_label(live.view_only, "View only").on_hover_text("Don't send keyboard, mouse or clipboard to the server").clicked().then(|| live.view_only = !live.view_only);
+        });
+    });
 }
 
 /// Dark theme with the amber accent of the logo.
