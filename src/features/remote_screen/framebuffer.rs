@@ -3,6 +3,40 @@ use std::io;
 use crate::shared::wire::invalid;
 
 const MAX_DIM: usize = 16384;
+const MAX_CURSOR: usize = 256;
+
+/// The server's mouse cursor shape, sent as a pseudo-rectangle so we can draw it locally without lag.
+#[derive(Debug, PartialEq)]
+pub struct Cursor {
+    /// Remote pixel inside the image that sits under the pointer.
+    pub hotspot: (usize, usize),
+    pub size: [usize; 2],
+    /// RGBA; empty when the server hides the cursor.
+    pub rgba: Vec<u8>,
+}
+
+impl Cursor {
+    /// `pixels` are BGRX (our pixel format) and `mask` has one bit per pixel, rows padded to a byte, MSB first.
+    pub fn new(hotspot: (usize, usize), [w, h]: [usize; 2], pixels: &[u8], mask: &[u8]) -> Self {
+        let row = w.div_ceil(8);
+        let rgba = (0..w * h)
+            .flat_map(|i| {
+                let p = &pixels[i * 4..i * 4 + 4];
+                let opaque = mask[(i / w) * row + (i % w) / 8] >> (7 - i % w % 8) & 1;
+                [p[2], p[1], p[0], opaque * 255]
+            })
+            .collect();
+        Self { hotspot, size: [w, h], rgba }
+    }
+
+    /// Wire byte counts for a w×h cursor: (pixel bytes, mask bytes). Rejects sizes above `MAX_CURSOR`.
+    pub fn wire_sizes(w: usize, h: usize) -> io::Result<(usize, usize)> {
+        if w > MAX_CURSOR || h > MAX_CURSOR {
+            return Err(invalid(format!("cursor too large {w}x{h}")));
+        }
+        Ok((w * h * 4, w.div_ceil(8) * h))
+    }
+}
 
 /// The remote desktop image. Pixels are BGRX (32bpp little-endian, red shift 16).
 pub struct Framebuffer {
@@ -11,6 +45,8 @@ pub struct Framebuffer {
     pub pixels: Vec<u8>,
     /// Region changed since the last upload, as [x0, y0, x1, y1] (exclusive).
     pub dirty: Option<[usize; 4]>,
+    /// A new cursor shape the view hasn't picked up yet.
+    pub cursor: Option<Cursor>,
 }
 
 impl Framebuffer {
@@ -18,7 +54,7 @@ impl Framebuffer {
         if width == 0 || height == 0 || width > MAX_DIM || height > MAX_DIM {
             return Err(invalid(format!("unsupported screen size {width}x{height}")));
         }
-        Ok(Self { width, height, pixels: vec![0; width * height * 4], dirty: Some([0, 0, width, height]) })
+        Ok(Self { width, height, pixels: vec![0; width * height * 4], dirty: Some([0, 0, width, height]), cursor: None })
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -75,6 +111,18 @@ mod tests {
         fb.put(2, 3, 1, 1, &[0; 4]);
         fb.put(5, 1, 2, 2, &[0; 16]);
         assert_eq!(fb.dirty, Some([2, 1, 7, 4]));
+    }
+
+    #[test]
+    fn cursor_mask_selects_opaque_pixels() {
+        // 9×1 cursor: the mask row spans two bytes. Pixels 0 and 8 are opaque, the rest transparent.
+        let pixels: Vec<u8> = (0..9).flat_map(|i| [i, 20, 30, 0]).collect();
+        let c = Cursor::new((1, 0), [9, 1], &pixels, &[0b1000_0000, 0b1000_0000]);
+        let alpha: Vec<u8> = c.rgba.chunks(4).map(|p| p[3]).collect();
+        assert_eq!(alpha, [255, 0, 0, 0, 0, 0, 0, 0, 255]);
+        assert_eq!(&c.rgba[..4], [30, 20, 0, 255], "BGRX becomes RGBA");
+        assert_eq!(Cursor::wire_sizes(9, 3).unwrap(), (108, 6));
+        assert!(Cursor::wire_sizes(257, 1).is_err());
     }
 
     #[test]

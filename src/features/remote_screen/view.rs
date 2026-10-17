@@ -35,15 +35,36 @@ impl Viewport {
     }
 }
 
+/// The server's cursor, ready to draw. No texture means the server hides its cursor.
+struct CursorShape {
+    texture: Option<TextureHandle>,
+    hotspot: egui::Vec2,
+    size: egui::Vec2,
+}
+
 #[derive(Default)]
 pub struct ScreenView {
     texture: Option<TextureHandle>,
+    /// None until the server sends a cursor; until then the system cursor stays visible.
+    cursor: Option<CursorShape>,
 }
 
 impl ScreenView {
+    /// Draws the server's cursor at the local pointer, so it follows the mouse with no network delay.
+    /// Pass `active = false` while the pointer is over our own windows.
+    pub fn draw_cursor(&self, ui: &egui::Ui, viewport: &Viewport, active: bool) {
+        let Some(shape) = &self.cursor else { return };
+        let Some(p) = ui.input(|i| i.pointer.hover_pos()).filter(|p| active && viewport.contains(*p)) else { return };
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+        if let Some(t) = &shape.texture {
+            let rect = Rect::from_min_size(p - shape.hotspot * viewport.scale, shape.size * viewport.scale);
+            ui.painter().image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        }
+    }
+
     /// Paints the screen according to `mode`.
     pub fn show(&mut self, ui: &mut egui::Ui, screen: &Mutex<Framebuffer>, mode: Scale) -> Viewport {
-        let (width, height) = {
+        let (width, height, new_cursor) = {
             let mut fb = screen.lock().unwrap();
             let full = [0, 0, fb.width, fb.height];
             let dirty = fb.dirty.take();
@@ -58,8 +79,13 @@ impl ScreenView {
                     }
                 }
             }
-            (fb.width as f32, fb.height as f32)
+            (fb.width as f32, fb.height as f32, fb.cursor.take())
         };
+        if let Some(c) = new_cursor {
+            let [w, h] = c.size;
+            let texture = (w > 0 && h > 0).then(|| ui.ctx().load_texture("cursor", ColorImage::from_rgba_unmultiplied(c.size, &c.rgba), TextureOptions::NEAREST));
+            self.cursor = Some(CursorShape { texture, hotspot: egui::vec2(c.hotspot.0 as f32, c.hotspot.1 as f32), size: egui::vec2(w as f32, h as f32) });
+        }
 
         let id = self.texture.as_ref().unwrap().id();
         let paint = |ui: &egui::Ui, rect: Rect| {

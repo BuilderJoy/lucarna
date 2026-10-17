@@ -117,6 +117,15 @@ mod tests {
         assert!(matches!(rx.recv().unwrap(), Event::ScreenUpdated));
         assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");
 
+        // The server sends its cursor shape once we advertise the Cursor pseudo-encoding.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while screen.lock().unwrap().cursor.is_none() {
+            assert!(std::time::Instant::now() < deadline, "no cursor shape received");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let cursor = screen.lock().unwrap().cursor.take().unwrap();
+        assert!(cursor.size[0] > 0 && cursor.rgba.chunks(4).any(|p| p[3] == 255), "cursor has visible pixels");
+
         // File transfer (x11vnc -ultrafilexfer maps C:\ to /). Downloads land in ~/Downloads and are removed.
         let next_files = || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);

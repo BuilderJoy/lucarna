@@ -121,6 +121,7 @@ impl eframe::App for App {
             let viewport = live.view.show(ui, &live.screen, live.scale);
             // Clicks on our own windows must not reach the remote machine.
             let over_ui = [live.files_view.rect, live.bar_rect].into_iter().flatten().any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+            live.view.draw_cursor(ui, &viewport, !over_ui);
             if !over_ui && !live.view_only {
                 clipboard::forward_paste(ui, &live.outbound);
                 live.input.forward(ui, &viewport, &live.outbound);
