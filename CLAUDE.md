@@ -42,6 +42,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+### File transfer (UltraVNC, message type 7)
+
+Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on the wire (UltraVNC never swaps it); `size`/`length` are big-endian. `RemoteFiles` (UI handle, in `Event::Connected`) sends requests; `file_transfer::Receiver` lives on the session thread, assembles listings and writes downloads to `~/Downloads` via a `.part` file. A FileHeader is only accepted if the UI requested that file. The server answers nothing when FT is disabled, so the UI times out.
+
 ### Saved connections
 
 `connection/saved.rs`: names and addresses in `connections.txt` under `eframe::storage_dir("Lucarna")`; passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the start screen.

@@ -17,11 +17,11 @@ const ENC_ZRLE: i32 = 16;
 const ENC_LAST_RECT: i32 = -224;
 const ENC_DESKTOP_SIZE: i32 = -223;
 
-/// Asks for BGRX true colour and the encodings we can decode.
-pub fn negotiate(s: &mut impl Write) -> io::Result<()> {
+/// Asks for BGRX true colour and the encodings we can decode, plus `extra` pseudo-encodings other features handle.
+pub fn negotiate(s: &mut impl Write, extra: &[i32]) -> io::Result<()> {
     #[rustfmt::skip]
     s.write_all(&[0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])?;
-    let encodings = [ENC_ZRLE, ENC_ZLIB, ENC_HEXTILE, ENC_COPY_RECT, ENC_RAW, ENC_LAST_RECT, ENC_DESKTOP_SIZE];
+    let encodings = [&[ENC_ZRLE, ENC_ZLIB, ENC_HEXTILE, ENC_COPY_RECT, ENC_RAW, ENC_LAST_RECT, ENC_DESKTOP_SIZE][..], extra].concat();
     let mut m = vec![2, 0];
     m.extend_from_slice(&(encodings.len() as u16).to_be_bytes());
     for e in encodings {

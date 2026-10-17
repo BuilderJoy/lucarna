@@ -10,15 +10,17 @@ UltraVNC no publica una especificación. Este documento sale de leer el código 
 
 ## Mensaje
 
-Un solo tipo de mensaje RFB, **7**, en las dos direcciones. Cabecera de 12 bytes, big-endian como el resto de RFB:
+Un solo tipo de mensaje RFB, **7**, en las dos direcciones. Cabecera de 12 bytes:
 
 | Offset | Tipo | Campo | Uso |
 |---|---|---|---|
 | 0 | u8 | `type` | siempre 7 |
 | 1 | u8 | `contentType` | qué es (tabla abajo) |
-| 2 | u16 | `contentParam` | subtipo o flags |
-| 4 | u32 | `size` | tamaño, flag o código de error según el caso |
-| 8 | u32 | `length` | bytes de datos que siguen |
+| 2 | u16 **little-endian** | `contentParam` | subtipo o flags |
+| 4 | u32 big-endian | `size` | tamaño, flag o código de error según el caso |
+| 8 | u32 big-endian | `length` | bytes de datos que siguen |
+
+**✅ Confirmado contra libvncserver (x11vnc `-ultrafilexfer`):** `contentParam` va en little-endian. UltraVNC lo asigna sin `Swap16IfLE` en Windows, mientras que `size` y `length` sí pasan por `Swap32IfLE`. libvncserver lo declara como `uint8_t contentParam; uint8_t pad;`, así que solo lee el byte bajo e ignora flags altos como `0x8000`. Si se manda en big-endian, el pedido de permiso llega con `contentParam=0` y el servidor lo rechaza como cliente "≤RC18".
 
 Siguen `length` bytes de datos. **Excepción:** `FileHeader` del servidor lleva 4 bytes más después de los datos (ver Descarga).
 

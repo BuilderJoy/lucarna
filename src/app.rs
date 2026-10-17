@@ -8,6 +8,7 @@ use crate::features::connection::{Dashboard, ServerAddress};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, ScreenView};
 use crate::features::clipboard;
+use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::session::{self, Event, Outbound};
 
 struct LiveSession {
@@ -16,6 +17,8 @@ struct LiveSession {
     screen: Arc<Mutex<Framebuffer>>,
     view: ScreenView,
     input: InputForwarder,
+    files: Arc<RemoteFiles>,
+    files_view: FilesView,
     /// False until the first FramebufferUpdate lands; a full Raw frame can take seconds on slow links.
     has_frame: bool,
 }
@@ -41,9 +44,16 @@ impl App {
         let mut closed = false;
         while let Ok(event) = rx.try_recv() {
             match event {
-                Event::Connected { name, outbound, screen } => {
+                Event::Connected { name, outbound, screen, files } => {
                     self.dashboard.status.clear();
-                    self.live = Some(LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), has_frame: false });
+                    #[rustfmt::skip]
+                    let live = LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), files, files_view: FilesView::default(), has_frame: false };
+                    self.live = Some(live);
+                }
+                Event::Files(update) => {
+                    if let Some(l) = &mut self.live {
+                        l.files_view.apply(update);
+                    }
                 }
                 Event::ScreenUpdated => self.live.iter_mut().for_each(|l| l.has_frame = true),
                 Event::ServerClipboard(text) => ctx.copy_text(text),
@@ -82,6 +92,9 @@ impl eframe::App for App {
                     if ui.button("Disconnect").clicked() {
                         live.outbound.close();
                     }
+                    if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse and download the server's files").clicked() {
+                        live.files_view.open = !live.files_view.open;
+                    }
                     if ui.button("Ctrl+Alt+Del").on_hover_text("Send Ctrl+Alt+Del to the remote machine").clicked() {
                         let _ = input::ctrl_alt_del(&live.outbound);
                     }
@@ -99,9 +112,14 @@ impl eframe::App for App {
                 return;
             }
             let viewport = live.view.show(ui, &live.screen);
-            clipboard::forward_paste(ui, &live.outbound);
-            live.input.forward(ui, &viewport, &live.outbound);
+            // Clicks on the files window must not reach the remote machine.
+            let over_files = live.files_view.rect.is_some_and(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+            if !over_files {
+                clipboard::forward_paste(ui, &live.outbound);
+                live.input.forward(ui, &viewport, &live.outbound);
+            }
         });
+        live.files_view.show(&ctx, &live.files);
     }
 }
 

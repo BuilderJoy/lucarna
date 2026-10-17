@@ -9,11 +9,13 @@ use std::time::Duration;
 use crate::features::connection::{handshake, ServerAddress};
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::clipboard;
+use crate::features::file_transfer::{self, RemoteFiles};
 use crate::shared::wire::{invalid, read_u8};
 
 pub enum Event {
-    Connected { name: String, outbound: Arc<Outbound>, screen: Arc<Mutex<Framebuffer>> },
+    Connected { name: String, outbound: Arc<Outbound>, screen: Arc<Mutex<Framebuffer>>, files: Arc<RemoteFiles> },
     ScreenUpdated,
+    Files(file_transfer::Update),
     ServerClipboard(String),
     Closed(String),
 }
@@ -41,13 +43,15 @@ pub fn run(address: &ServerAddress, password: &str, tx: Sender<Event>, notify: i
         let init = handshake::perform(&mut s, password)?;
         s.set_read_timeout(None)?;
         let screen = Arc::new(Mutex::new(Framebuffer::new(init.width.into(), init.height.into())?));
-        remote_screen::negotiate(&mut s)?;
+        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
         let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
         remote_screen::request_update(&outbound, false, &screen)?;
-        let _ = tx.send(Event::Connected { name: init.name, outbound: outbound.clone(), screen: screen.clone() });
+        let files = Arc::new(RemoteFiles::new(outbound.clone()));
+        let _ = tx.send(Event::Connected { name: init.name, outbound: outbound.clone(), screen: screen.clone(), files: files.clone() });
         // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
         let mut s = BufReader::with_capacity(1 << 16, s);
         let mut decoder = remote_screen::Decoder::default();
+        let mut receiver = file_transfer::Receiver::default();
 
         loop {
             match read_u8(&mut s)? {
@@ -62,6 +66,12 @@ pub fn run(address: &ServerAddress, password: &str, tx: Sender<Event>, notify: i
                 3 => {
                     let _ = tx.send(Event::ServerClipboard(clipboard::read_server_text(&mut s)?));
                     notify();
+                }
+                7 => {
+                    if let Some(update) = receiver.handle(file_transfer::read(&mut s)?, &files)? {
+                        let _ = tx.send(Event::Files(update));
+                        notify();
+                    }
                 }
                 t => return Err(invalid(format!("unknown server message {t}"))),
             }
@@ -103,9 +113,42 @@ mod tests {
 
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || run(&address, &password, tx, || {}));
-        let Event::Connected { outbound, screen, .. } = rx.recv().unwrap() else { panic!("not connected") };
+        let Event::Connected { outbound, screen, files, .. } = rx.recv().unwrap() else { panic!("not connected") };
         assert!(matches!(rx.recv().unwrap(), Event::ScreenUpdated));
         assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");
+
+        // File transfer (x11vnc -ultrafilexfer maps C:\ to /). Downloads land in ~/Downloads and are removed.
+        let mut next_files = || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                match rx.recv_timeout(left).expect("file transfer answer") {
+                    Event::Files(u) => break u,
+                    Event::Closed(r) => panic!("closed: {r}"),
+                    _ => {}
+                }
+            }
+        };
+        files.open();
+        assert!(matches!(next_files(), file_transfer::Update::Access(true)));
+        assert!(matches!(next_files(), file_transfer::Update::Drives(d) if !d.is_empty()));
+        files.list("C:\\srv\\ft\\");
+        let file_transfer::Update::Listing { entries, .. } = next_files() else { panic!("no listing") };
+        let random = entries.iter().find(|e| e.name == "random.bin").expect("random.bin listed");
+        assert_eq!((random.size, random.is_dir), (100_000, false));
+        for (name, size) in [("hello.txt", 27), ("random.bin", 100_000)] {
+            files.download(&format!("C:\\srv\\ft\\{name}"));
+            let dest = loop {
+                match next_files() {
+                    file_transfer::Update::Progress { .. } => {}
+                    file_transfer::Update::Downloaded(dest) => break dest,
+                    u => panic!("download of {name} failed: {u:?}"),
+                }
+            };
+            let len = std::fs::metadata(&dest).unwrap().len();
+            std::fs::remove_file(&dest).unwrap();
+            assert_eq!(len, size, "{name}");
+        }
         outbound.close();
     }
 }

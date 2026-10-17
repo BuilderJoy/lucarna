@@ -16,6 +16,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Fase 3.5: dashboard con conexiones guardadas, contraseñas en el llavero del SO | ✅ |
+| Fase 2.2 (solo lectura): permiso, unidades, navegar carpetas y descargar archivos | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -144,6 +145,8 @@ Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especific
 **Salida:** documento con los bytes exactos de cada mensaje, confirmados contra la captura. **Tamaño:** M (2–3 días).
 
 ### 2.2 Implementación (nuevo slice)
+
+**Solo lectura hecha (2026-10-17):** `features/file_transfer/` con `protocol.rs`, `transfer.rs` y `view.rs`. Hace el permiso, lista unidades, navega con doble clic y descarga con barra de progreso y cancelación. Las descargas van a `~/Downloads` (sin diálogo nativo, por ahora). Se escriben a un `.part` y se renombran al terminar, y los nombres se sanean. Probado en vivo contra x11vnc `-ultrafilexfer` (libvncserver); **falta probar contra UltraVNC Server en Windows**. La prueba con libvncserver descubrió que `contentParam` viaja en little-endian. Pendiente: subir archivos, comandos, carpetas (zip `!UVNCDIR-`) y arrastrar y soltar.
 
 ```
 features/file_transfer/
