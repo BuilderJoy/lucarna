@@ -1,0 +1,111 @@
+//! Session aggregate: one live connection to a VNC server. Owns the socket and
+//! routes each server message to the feature that understands it.
+
+use std::io::{self, BufReader, Write};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::sync::{mpsc::Sender, Arc, Mutex};
+use std::time::Duration;
+
+use crate::features::connection::{handshake, ServerAddress};
+use crate::features::remote_screen::{self, Framebuffer};
+use crate::features::clipboard;
+use crate::shared::wire::{invalid, read_u8};
+
+pub enum Event {
+    Connected { name: String, outbound: Arc<Outbound>, screen: Arc<Mutex<Framebuffer>> },
+    ScreenUpdated,
+    ServerClipboard(String),
+    Closed(String),
+}
+
+/// Client-to-server channel, shared by the UI and the reader thread.
+pub struct Outbound(Mutex<TcpStream>);
+
+impl Outbound {
+    pub fn send(&self, msg: &[u8]) -> io::Result<()> {
+        self.0.lock().unwrap().write_all(msg)
+    }
+
+    pub fn close(&self) {
+        let _ = self.0.lock().unwrap().shutdown(Shutdown::Both);
+    }
+}
+
+/// Connects and runs the session on the calling thread until it ends.
+pub fn run(address: &ServerAddress, password: &str, tx: Sender<Event>, notify: impl Fn()) {
+    let result: io::Result<()> = (|| {
+        let mut s = connect(address)?;
+        s.set_nodelay(true)?;
+        // A server that accepts but never speaks would otherwise hang the handshake forever.
+        s.set_read_timeout(Some(TIMEOUT))?;
+        let init = handshake::perform(&mut s, password)?;
+        s.set_read_timeout(None)?;
+        let screen = Arc::new(Mutex::new(Framebuffer::new(init.width.into(), init.height.into())?));
+        remote_screen::negotiate(&mut s)?;
+        let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
+        remote_screen::request_update(&outbound, false, &screen)?;
+        let _ = tx.send(Event::Connected { name: init.name, outbound: outbound.clone(), screen: screen.clone() });
+        // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
+        let mut s = BufReader::with_capacity(1 << 16, s);
+        let mut decoder = remote_screen::Decoder::default();
+
+        loop {
+            match read_u8(&mut s)? {
+                0 => {
+                    remote_screen::read_update(&mut s, &screen, &mut decoder)?;
+                    let _ = tx.send(Event::ScreenUpdated);
+                    notify();
+                    remote_screen::request_update(&outbound, true, &screen)?;
+                }
+                1 => remote_screen::skip_colour_map(&mut s)?,
+                2 => {} // bell
+                3 => {
+                    let _ = tx.send(Event::ServerClipboard(clipboard::read_server_text(&mut s)?));
+                    notify();
+                }
+                t => return Err(invalid(format!("unknown server message {t}"))),
+            }
+        }
+    })();
+    let _ = tx.send(Event::Closed(match result {
+        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => e.to_string(),
+        _ => "connection closed".into(),
+    }));
+    notify();
+}
+
+const TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Tries every resolved address (IPv6 and IPv4) with a timeout, instead of the OS default of minutes.
+fn connect(address: &ServerAddress) -> io::Result<TcpStream> {
+    let mut last = io::Error::new(io::ErrorKind::NotFound, "host not found");
+    address
+        .as_str()
+        .to_socket_addrs()?
+        .find_map(|a| TcpStream::connect_timeout(&a, TIMEOUT).map_err(|e| last = e).ok())
+        .ok_or(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VNC_TEST_ADDR=host:port VNC_TEST_PASSWORD=pw cargo test -- --ignored
+    #[test]
+    #[ignore = "needs a live VNC server"]
+    fn live_server() {
+        let address = ServerAddress::parse(&std::env::var("VNC_TEST_ADDR").unwrap()).unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(&address, "wrong-pw", tx, || {});
+        assert!(matches!(rx.recv().unwrap(), Event::Closed(r) if r.contains("authentication failed")));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || run(&address, &password, tx, || {}));
+        let Event::Connected { outbound, screen, .. } = rx.recv().unwrap() else { panic!("not connected") };
+        assert!(matches!(rx.recv().unwrap(), Event::ScreenUpdated));
+        assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");
+        outbound.close();
+    }
+}

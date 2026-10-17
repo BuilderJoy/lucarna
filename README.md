@@ -1,0 +1,43 @@
+# Lucarna
+
+Free, open-source VNC viewer for macOS, Windows and Linux, aiming at UltraVNC-compatible file transfer.
+
+```bash
+cargo run --release
+```
+
+## Architecture
+
+Vertical slices, one per feature, named in the domain's language (RFB, RFC 6143):
+
+```
+src/
+  main.rs            entry point
+  app.rs             UI shell: connect form <-> live session
+  session/           Session aggregate: owns the socket, routes server messages to features
+  shared/wire.rs     big-endian wire primitives
+  features/
+    connection/      ServerAddress, handshake, VNC auth, connect form
+    remote_screen/   Framebuffer, encodings, screen view
+    input/           keysyms, key/pointer events
+    clipboard/       cut text both ways
+```
+
+Rules:
+- A feature owns its domain types, its wire messages (`protocol.rs`) and its UI (`view.rs`).
+- Features expose only what `mod.rs` re-exports. Cross-feature use goes through those exports.
+- `session` is the only place that reads the socket; add a new server message by adding a match arm there that calls into your feature.
+- Anything a malicious server sends is validated before use (sizes, rectangles, lengths).
+
+## Tests
+
+```bash
+cargo test
+docker build -t lucarna-test-server tests/server
+docker run -d --rm --name lucarna-test -p 5999:5900 lucarna-test-server
+VNC_TEST_ADDR=127.0.0.1:5999 VNC_TEST_PASSWORD=secret cargo test -- --ignored
+```
+
+## License
+
+GPL-2.0-or-later
