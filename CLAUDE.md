@@ -37,7 +37,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 ### Protocol specifics
 
 - Pixel format is forced to 32bpp BGRX true colour in `negotiate`; supported encodings: ZRLE, Zlib, Hextile, CopyRect, Raw, plus pseudo LastRect, DesktopSize and Cursor. A Cursor rect carries the hotspot in x/y (not a position), so it is handled before the bounds check; the shape lands in `Framebuffer::cursor` and `ScreenView::draw_cursor` paints it at the local pointer, hiding the OS cursor only once a shape has arrived. Unsupported encoding = error, so add new encodings to both the `negotiate` list and `read_update`. Zlib streams span the whole session, so their state lives in `remote_screen::Decoder`, created once in `session::run`.
-- Security types: None (1) and VNC auth (2) only; RFB 3.3 legacy path handled separately in `handshake.rs`.
+- Security types: None (1), VNC auth (2), MS-Logon II (0x71) and III (0x76); RFB 3.3 legacy path (including `0xFFFFFFFA` = MS-Logon II) handled in `handshake.rs`. `pick` chooses by whether a user name was given and never answers the UltraVNC marker (17). Details and the weak-crypto caveat in `docs/ultravnc-auth.md`. Credentials travel as `connection::Credentials` (user may be empty); the user name is saved in `connections.txt`, the password only in the keychain.
 - Clipboard text is Latin-1 on the wire. `clipboard::forward_paste` must run before `input.forward` in `app.rs` so paste reaches the server before Ctrl+V.
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).

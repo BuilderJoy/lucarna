@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
-use crate::features::connection::{Dashboard, ServerAddress};
+use crate::features::connection::{Credentials, Dashboard, ServerAddress};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
 use crate::features::clipboard;
@@ -36,10 +36,10 @@ pub struct App {
 }
 
 impl App {
-    fn connect(&mut self, ctx: &egui::Context, address: ServerAddress, password: String) {
+    fn connect(&mut self, ctx: &egui::Context, address: ServerAddress, creds: Credentials) {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || session::run(&address, &password, tx, || ctx.request_repaint()));
+        std::thread::spawn(move || session::run(&address, &creds, tx, || ctx.request_repaint()));
         self.events = Some(rx);
         self.dashboard.status.clear();
     }
@@ -80,8 +80,8 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.poll_events(&ctx);
         let Some(live) = &mut self.live else {
-            if let Some((address, password)) = self.dashboard.show(ui, self.events.is_some()) {
-                self.connect(&ctx, address, password);
+            if let Some((address, creds)) = self.dashboard.show(ui, self.events.is_some()) {
+                self.connect(&ctx, address, creds);
             }
             return;
         };

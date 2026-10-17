@@ -32,3 +32,35 @@ pub fn read_string(s: &mut impl Read, max: usize) -> io::Result<String> {
     }
     Ok(String::from_utf8_lossy(&read_bytes(s, len)?).into_owned())
 }
+
+/// A fake connection for tests: reads come from `input`, writes are collected in `output`.
+#[cfg(test)]
+pub struct Duplex {
+    pub input: io::Cursor<Vec<u8>>,
+    pub output: Vec<u8>,
+}
+
+#[cfg(test)]
+impl Duplex {
+    pub fn new(input: Vec<u8>) -> Self {
+        Self { input: io::Cursor::new(input), output: Vec::new() }
+    }
+}
+
+#[cfg(test)]
+impl Read for Duplex {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.input.read(buf)
+    }
+}
+
+#[cfg(test)]
+impl io::Write for Duplex {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.output.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}

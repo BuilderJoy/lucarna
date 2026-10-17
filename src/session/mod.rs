@@ -6,7 +6,7 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::Duration;
 
-use crate::features::connection::{handshake, ServerAddress};
+use crate::features::connection::{handshake, Credentials, ServerAddress};
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::clipboard;
 use crate::features::file_transfer::{self, RemoteFiles};
@@ -34,13 +34,13 @@ impl Outbound {
 }
 
 /// Connects and runs the session on the calling thread until it ends.
-pub fn run(address: &ServerAddress, password: &str, tx: Sender<Event>, notify: impl Fn()) {
+pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, notify: impl Fn()) {
     let result: io::Result<()> = (|| {
         let mut s = connect(address)?;
         s.set_nodelay(true)?;
         // A server that accepts but never speaks would otherwise hang the handshake forever.
         s.set_read_timeout(Some(TIMEOUT))?;
-        let init = handshake::perform(&mut s, password)?;
+        let init = handshake::perform(&mut s, creds)?;
         s.set_read_timeout(None)?;
         let screen = Arc::new(Mutex::new(Framebuffer::new(init.width.into(), init.height.into())?));
         remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
@@ -108,11 +108,11 @@ mod tests {
         let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
 
         let (tx, rx) = std::sync::mpsc::channel();
-        run(&address, "wrong-pw", tx, || {});
+        run(&address, &Credentials { user: String::new(), password: "wrong-pw".into() }, tx, || {});
         assert!(matches!(rx.recv().unwrap(), Event::Closed(r) if r.contains("authentication failed")));
 
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || run(&address, &password, tx, || {}));
+        std::thread::spawn(move || run(&address, &Credentials { user: String::new(), password }, tx, || {}));
         let Event::Connected { outbound, screen, files, .. } = rx.recv().unwrap() else { panic!("not connected") };
         assert!(matches!(rx.recv().unwrap(), Event::ScreenUpdated));
         assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");

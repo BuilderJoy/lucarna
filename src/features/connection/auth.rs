@@ -1,5 +1,12 @@
 use des::cipher::{BlockCipherEncrypt, KeyInit};
 
+/// What the user typed to log in. `user` is empty for plain VNC password servers.
+#[derive(Clone, Default)]
+pub struct Credentials {
+    pub user: String,
+    pub password: String,
+}
+
 /// VNC auth: DES-encrypt the challenge with the password, each key byte bit-reversed.
 pub fn vnc_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     let mut key = [0u8; 8];

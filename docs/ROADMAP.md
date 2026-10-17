@@ -19,6 +19,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 2.2 (solo lectura): permiso, unidades, navegar carpetas y descargar archivos | ✅ |
 | Fase 3.2, 3.3, 3.4, 3.7: solo ver, escalado Fit/1:1, pantalla completa, menú de teclas | ✅ |
 | Fase 3.1: cursor local (pseudo-encoding Cursor) | ✅ |
+| Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -202,7 +203,18 @@ features/file_transfer/
 
 ---
 
-## Fase 4: MS-Logon (usuario y contraseña de Windows)
+## Fase 4: MS-Logon (usuario y contraseña de Windows) ✅ (2026-10-17)
+
+**Hecho:** [docs/ultravnc-auth.md](ultravnc-auth.md) y `connection/mslogon.rs`. Lo que el spike descubrió y cambió el plan:
+
+- **Hay dos versiones:** II (0x71, DH de 31 bits) y **III (0x76, X25519)** en el UltraVNC reciente. El servidor anuncia siempre las dos. Lucarna implementa ambas y prefiere la III.
+- **El III no usa AES-GCM** aunque sus comentarios lo digan: la clave de 8 bytes (SHA-256 del secreto, recortada) cifra con DES-CBC, igual que el II. Mejora el intercambio de claves, pero el cifrado de las credenciales sigue siendo DES. Detalle y recomendación de túnel en el documento.
+- **Dependencias nuevas:** `x25519-dalek` (sin features por defecto; única crate nueva en compilarse), y `getrandom` y `sha2`, que ya estaban en el árbol por eframe.
+- **UI:** campo "User" siempre visible en el dashboard, guardado en `connections.txt` (tercera columna opcional, los archivos viejos siguen cargando). La contraseña va al llavero como antes. Sin usuario solo se usa VNC auth/None; si el servidor solo ofrece MS-Logon, el error pide un usuario.
+- **Verificación:** el cifrado coincide con los vectores del `d3des.c` original compilado en el Mac. El flujo completo se probó contra un servidor simulado en los tests. **Falta probar contra un UltraVNC Server real**, que no se puede levantar en Linux ni Docker.
+- **No soportado:** SC Prompt (0x68, el usuario remoto acepta la conexión) y las capas extra de autenticación (`0xFFFFFFFF`): dan un error claro.
+
+Plan original, para referencia:
 
 Muchos UltraVNC en empresas usan MS-Logon II en vez de contraseña VNC.
 

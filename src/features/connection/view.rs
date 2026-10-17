@@ -1,7 +1,7 @@
 use eframe::egui::{self, Align, ColorImage, Key, Layout, RichText, TextureHandle, TextureOptions};
 
 use super::saved::{self, SavedConnection};
-use super::ServerAddress;
+use super::{Credentials, ServerAddress};
 
 /// Start screen: saved connections on the left, a form to connect, add or edit on the right.
 pub struct Dashboard {
@@ -10,6 +10,7 @@ pub struct Dashboard {
     selected: Option<usize>,
     name: String,
     address: String,
+    user: String,
     password: String,
     logo: Option<TextureHandle>,
     pub status: String,
@@ -22,6 +23,7 @@ impl Default for Dashboard {
             selected: None,
             name: String::new(),
             address: String::new(),
+            user: String::new(),
             password: String::new(),
             logo: None,
             status: String::new(),
@@ -29,7 +31,7 @@ impl Default for Dashboard {
     }
 }
 
-type Request = Option<(ServerAddress, String)>;
+type Request = Option<(ServerAddress, Credentials)>;
 
 impl Dashboard {
     /// Returns the target when the user asks to connect.
@@ -98,11 +100,12 @@ impl Dashboard {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&c.name).strong());
-                            ui.label(RichText::new(c.address.as_str()).weak());
+                            let who = if c.user.is_empty() { String::new() } else { format!("{} @ ", c.user) };
+                            ui.label(RichText::new(format!("{who}{}", c.address.as_str())).weak());
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui.button("Connect").clicked() {
-                                request = Some((c.address.clone(), saved::password(&c.address).unwrap_or_default()));
+                                request = Some((c.address.clone(), Credentials { user: c.user.clone(), password: saved::password(&c.address).unwrap_or_default() }));
                             }
                             if ui.button("Edit").clicked() {
                                 edit = Some(i);
@@ -115,7 +118,7 @@ impl Dashboard {
         });
         if let Some(i) = edit {
             let c = &self.saved[i];
-            (self.name, self.address) = (c.name.clone(), c.address.as_str().into());
+            (self.name, self.address, self.user) = (c.name.clone(), c.address.as_str().into(), c.user.clone());
             self.password = saved::password(&c.address).unwrap_or_default();
             self.selected = Some(i);
             self.status.clear();
@@ -146,6 +149,7 @@ impl Dashboard {
                 };
                 field(ui, "Name", &mut self.name, "optional, e.g. Office PC", false);
                 let addr = field(ui, "Server", &mut self.address, "host, host:display or host::port", false);
+                field(ui, "User", &mut self.user, "only for MS-Logon (Windows login)", false);
                 let pw = field(ui, "Password", &mut self.password, "", true);
                 let enter = (addr.lost_focus() || pw.lost_focus()) && ui.input(|i| i.key_pressed(Key::Enter));
                 let target = ServerAddress::parse(&self.address);
@@ -155,7 +159,7 @@ impl Dashboard {
                     .fill(ui.visuals().selection.bg_fill)
                     .min_size(egui::vec2(ui.available_width(), 34.0));
                 if ui.add_enabled(target.is_some(), connect).clicked() || enter {
-                    request = target.clone().map(|a| (a, self.password.clone()));
+                    request = target.clone().map(|a| (a, Credentials { user: self.user.trim().into(), password: self.password.clone() }));
                 }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -187,7 +191,7 @@ impl Dashboard {
         self.saved.retain(|c| c.address != address);
         let name = self.name.trim();
         let name = if name.is_empty() { address.as_str().to_string() } else { name.to_string() };
-        self.saved.push(SavedConnection { name, address: address.clone() });
+        self.saved.push(SavedConnection { name, address: address.clone(), user: self.user.trim().into() });
         self.saved.sort_by_key(|c| c.name.to_lowercase());
         self.selected = self.saved.iter().position(|c| c.address == address);
         errors.extend(saved::set_password(&address, &self.password).err());
@@ -206,6 +210,7 @@ impl Dashboard {
         self.selected = None;
         self.name.clear();
         self.address.clear();
+        self.user.clear();
         self.password.clear();
         self.status.clear();
     }
