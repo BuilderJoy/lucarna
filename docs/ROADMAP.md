@@ -7,13 +7,14 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Área | Estado |
 |---|---|
 | Handshake RFB 3.3 / 3.8, seguridad None y VNC Auth | ✅ |
-| Pantalla: Raw, CopyRect, DesktopSize, ZRLE | ✅ |
+| Pantalla: Raw, CopyRect, DesktopSize, ZRLE, Zlib, Hextile, LastRect | ✅ |
 | Teclado, ratón, rueda, Cmd→Ctrl en macOS | ✅ |
 | Portapapeles de texto Latin-1 en ambos sentidos | ✅ |
 | Botón Ctrl+Alt+Del | ✅ |
 | Tema, formulario de conexión, spinner hasta el primer frame | ✅ |
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
+| Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -90,7 +91,7 @@ Formato (RFC 6143 §7.7.6):
 
 **Tamaño:** M (2–3 días).
 
-### 1.3 Zlib (6) y Hextile (5): baratas, para servidores viejos
+### 1.3 Zlib (6) y Hextile (5): baratas, para servidores viejos ✅ (2026-10-17)
 
 - **Zlib:** píxeles raw dentro de un flujo zlib persistente. Son ~30 líneas una vez que existe `Decoder`.
 - **Hextile:** tiles de 16×16 sin zlib, con bits de flags `Raw`, `BackgroundSpecified`, `ForegroundSpecified`, `AnySubrects` y `SubrectsColoured`. El fondo y el frente se arrastran de un tile al siguiente.
@@ -98,6 +99,8 @@ Formato (RFC 6143 §7.7.6):
 **Tamaño:** S (1 día las dos).
 
 ### 1.4 Pseudo-encodings útiles
+
+**LastRect ✅ (2026-10-17).** CompressLevel no se anuncia todavía: el servidor elige un nivel razonable por defecto, y se agrega si hace falta ajustar ancho de banda contra CPU. QualityLevel va con Tight.
 
 | Pseudo | Valor | Para qué |
 |---|---|---|
@@ -279,8 +282,8 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 
 | Orden | Fase | Tamaño estimado |
 |---|---|---|
-| 1 | Fase 0: rendimiento y robustez | 1 día |
-| 2 | Fase 1.2–1.4: ZRLE, Zlib, Hextile | 3–4 días |
+| 1 | Fase 0: rendimiento y robustez ✅ | 1 día |
+| 2 | Fase 1.2–1.4: ZRLE, Zlib, Hextile ✅ | 3–4 días |
 | 3 | Fase 2: transferencia de archivos | 2–3 semanas con el spike |
 | 4 | Fase 6: empaquetado → **release v0.1** | 2–3 días |
 | 5 | Fase 3: ergonomía | 1 semana |

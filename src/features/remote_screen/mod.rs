@@ -1,6 +1,7 @@
 //! Remote screen: receiving and showing the server's framebuffer.
 
 mod framebuffer;
+mod hextile;
 mod protocol;
 mod view;
 mod zrle;

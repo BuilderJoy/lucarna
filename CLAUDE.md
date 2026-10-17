@@ -36,7 +36,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 ### Protocol specifics
 
-- Pixel format is forced to 32bpp BGRX true colour in `negotiate`; supported encodings: ZRLE, Raw, CopyRect, DesktopSize. Unsupported encoding = error, so add new encodings to both the `negotiate` list and `read_update`. Zlib streams span the whole session, so their state lives in `remote_screen::Decoder`, created once in `session::run`.
+- Pixel format is forced to 32bpp BGRX true colour in `negotiate`; supported encodings: ZRLE, Zlib, Hextile, CopyRect, Raw, plus pseudo LastRect and DesktopSize. Unsupported encoding = error, so add new encodings to both the `negotiate` list and `read_update`. Zlib streams span the whole session, so their state lives in `remote_screen::Decoder`, created once in `session::run`.
 - Security types: None (1) and VNC auth (2) only; RFB 3.3 legacy path handled separately in `handshake.rs`.
 - Clipboard text is Latin-1 on the wire. `clipboard::forward_paste` must run before `input.forward` in `app.rs` so paste reaches the server before Ctrl+V.
 

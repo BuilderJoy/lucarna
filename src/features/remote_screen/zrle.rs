@@ -11,7 +11,7 @@ const TILE: usize = 64;
 
 type Pixel = [u8; 4];
 
-/// Inflates one rectangle's data from the shared stream, refusing more than `max` bytes of output.
+/// Inflates one rectangle (ZRLE or Zlib)'s data from the shared stream, refusing more than `max` bytes of output.
 pub fn inflate(z: &mut Decompress, input: &[u8], max: usize) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut pos = 0;
@@ -21,13 +21,13 @@ pub fn inflate(z: &mut Decompress, input: &[u8], max: usize) -> io::Result<Vec<u
         z.decompress_vec(&input[pos..], &mut out, FlushDecompress::Sync).map_err(|e| invalid(e.to_string()))?;
         pos += (z.total_in() - before_in) as usize;
         if out.len() > max {
-            return Err(invalid("ZRLE data too large"));
+            return Err(invalid("zlib data too large"));
         }
         if pos == input.len() && out.len() < out.capacity() {
             return Ok(out);
         }
         if (z.total_in(), z.total_out()) == (before_in, before_out) {
-            return Err(invalid("ZRLE stream stalled"));
+            return Err(invalid("zlib stream stalled"));
         }
     }
 }
