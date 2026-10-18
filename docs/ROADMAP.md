@@ -7,7 +7,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Área | Estado |
 |---|---|
 | Handshake RFB 3.3 / 3.8, seguridad None y VNC Auth | ✅ |
-| Pantalla: Raw, CopyRect, DesktopSize, ZRLE, Zlib, Hextile, LastRect | ✅ |
+| Pantalla: Tight (con JPEG), ZRLE, Zlib, Hextile, Raw, CopyRect, DesktopSize, LastRect | ✅ |
 | Teclado, ratón, rueda, Cmd→Ctrl en macOS | ✅ |
 | Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ✅ |
 | Botón Ctrl+Alt+Del | ✅ |
@@ -113,7 +113,16 @@ Formato (RFC 6143 §7.7.6):
 | CompressLevel | -256 … -247 | Nivel de compresión 0–9. |
 | QualityLevel | -32 … -23 | Calidad JPEG en Tight. Va en la Fase 1.5. |
 
-### 1.5 Tight (7): después de la transferencia de archivos
+### 1.5 Tight (7) ✅ (2026-10-18)
+
+**Hecho:** `remote_screen/tight.rs`, siguiendo `libvncclient/tight.c`: fill, JPEG (con `zune-jpeg`, que ya se compilaba por eframe, con ancho y alto máximos antes de decodificar) y básico con filtros copy, palette y gradient sobre 4 flujos zlib persistentes que el byte de control puede reiniciar. TPIXEL en orden R, G, B (confirmado también en `Pack24` del codificador de UltraVNC). Validaciones que libvncclient no hace: índice de paleta fuera de rango y JPEG de otro tamaño que el rectángulo.
+
+- **Negociación:** Tight va **primero** en la lista, con QualityLevel 8 (`-24`): los servidores solo usan JPEG en zonas tipo foto y el texto sigue sin pérdida. Calidad fija; se vuelve opción por conexión si alguien la necesita.
+- **Prueba en vivo (`live_tight_matches_raw`):** la misma pantalla de x11vnc con Raw y con Tight sin JPEG sale **idéntica byte a byte**; con JPEG, la desviación media es menor de 3 por canal. Se ejercitaron fill, JPEG, copy y palette con los streams 0, 1 y 2. La imagen de pruebas ahora pinta rampas de 256 colores y truecolor (`tests/server/colors.sh`).
+- **El gradiente** no lo usan ni libvncserver ni el codificador de UltraVNC (solo servidores TightVNC): está cubierto por test unitario.
+- **Fuera:** la variante "NoZlib/PNG" (`0x0A`) de TigerVNC/TurboVNC, que solo se manda si el cliente la anuncia.
+
+Plan original, para referencia:
 
 Es la mejor opción con internet lento porque usa JPEG en zonas con foto, pero es la más compleja:
 

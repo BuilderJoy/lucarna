@@ -306,4 +306,38 @@ mod tests {
         }
         outbound.close();
     }
+
+
+    /// Tight must reproduce exactly what Raw shows when JPEG is off, and stay close to it with JPEG on.
+    #[test]
+    #[ignore = "needs a live VNC server"]
+    fn live_tight_matches_raw() {
+        let address = ServerAddress::parse(&std::env::var("VNC_TEST_ADDR").unwrap()).unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
+        let grab = |encodings: &[i32]| -> Vec<u8> {
+            let creds = Credentials { user: String::new(), password: password.clone() };
+            let mut s = connect(&address).unwrap();
+            s.set_read_timeout(Some(TIMEOUT)).unwrap();
+            let init = handshake::perform(&mut s, &creds).unwrap();
+            let screen = Mutex::new(Framebuffer::new(init.width.into(), init.height.into()).unwrap());
+            remote_screen::negotiate(&mut s, &[]).unwrap();
+            // A second SetEncodings replaces the first: from here on only `encodings` may be used.
+            let mut m = vec![2, 0];
+            m.extend((encodings.len() as u16).to_be_bytes());
+            encodings.iter().for_each(|e| m.extend(e.to_be_bytes()));
+            s.write_all(&m).unwrap();
+            let out = Outbound(Mutex::new(s.try_clone().unwrap()));
+            remote_screen::request_update(&out, false, &screen).unwrap();
+            let mut r = BufReader::new(s);
+            assert_eq!(read_u8(&mut r).unwrap(), 0, "expected a FramebufferUpdate");
+            remote_screen::read_update(&mut r, &screen, &mut remote_screen::Decoder::default()).unwrap();
+            out.close();
+            screen.into_inner().unwrap().pixels.chunks(4).flat_map(|p| [p[0], p[1], p[2]]).collect()
+        };
+        let raw = grab(&[0]);
+        assert!(grab(&[7]) == raw, "Tight without JPEG differs from Raw");
+        let jpeg = grab(&[7, -24]);
+        let drift = raw.iter().zip(&jpeg).map(|(a, b)| u64::from(a.abs_diff(*b))).sum::<u64>() as f64 / raw.len() as f64;
+        assert!(drift < 3.0, "Tight with JPEG drifts too far from Raw: {drift:.2} per channel");
+    }
 }

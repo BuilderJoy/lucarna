@@ -20,7 +20,7 @@ VNC_TEST_ADDR=127.0.0.1:5999 VNC_TEST_PASSWORD=secret cargo test -- --ignored
 
 VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server". From a terminal, adding a blank line to `Cargo.toml` and then `git checkout Cargo.toml` forces a workspace reload and a fresh check (touching `.rs` files does not).
 
-Tests live in `#[cfg(test)]` modules inside `src/`; `tests/server/` only holds the Dockerfile.
+Tests live in `#[cfg(test)]` modules inside `src/`; `tests/server/` holds the x11vnc Dockerfile and `colors.sh` (colour ramps so Tight uses JPEG and its filters); `tests/fixtures/` holds binary test inputs such as the Tight JPEG.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 ### Protocol specifics
 
-- Pixel format is forced to 32bpp BGRX true colour in `negotiate`; supported encodings: ZRLE, Zlib, Hextile, CopyRect, Raw, plus pseudo LastRect, DesktopSize and Cursor. A Cursor rect carries the hotspot in x/y (not a position), so it is handled before the bounds check; the shape lands in `Framebuffer::cursor` and `ScreenView::draw_cursor` paints it at the local pointer, hiding the OS cursor only once a shape has arrived. Unsupported encoding = error, so add new encodings to both the `negotiate` list and `read_update`. Zlib streams span the whole session, so their state lives in `remote_screen::Decoder`, created once in `session::run`.
+- Pixel format is forced to 32bpp BGRX true colour in `negotiate`; supported encodings: Tight (preferred, with JPEG quality 8), ZRLE, Zlib, Hextile, CopyRect, Raw, plus pseudo LastRect, DesktopSize and Cursor. Tight and ZRLE colours differ: Tight TPIXEL is R,G,B; ZRLE CPIXEL is the low 3 bytes of our little-endian pixel (B,G,R). A Cursor rect carries the hotspot in x/y (not a position), so it is handled before the bounds check; the shape lands in `Framebuffer::cursor` and `ScreenView::draw_cursor` paints it at the local pointer, hiding the OS cursor only once a shape has arrived. Unsupported encoding = error, so add new encodings to both the `negotiate` list and `read_update`. Zlib streams span the whole session, so their state lives in `remote_screen::Decoder`, created once in `session::run`.
 - Security types: None (1), VNC auth (2), MS-Logon II (0x71) and III (0x76); RFB 3.3 legacy path (including `0xFFFFFFFA` = MS-Logon II) handled in `handshake.rs`. `pick` chooses by whether a user name was given and never answers the UltraVNC marker (17). Details and the weak-crypto caveat in `docs/ultravnc-auth.md`. Credentials travel as `connection::Credentials` (user may be empty); the user name is saved in `connections.txt`, the password only in the keychain.
 - Clipboard: `clipboard::RemoteClipboard` advertises `ENC_EXTENDED_CLIPBOARD` (`0xC0A1E5CE`) in `SetEncodings`. When the server negotiates Extended Clipboard (`length < 0` with `CLIP_CAPS`), text is exchanged as zlib-compressed UTF-8 (`CLIP_PROVIDE | CLIP_UTF8`, `CLIP_NOTIFY`, `CLIP_REQUEST`, `CLIP_PEEK`); otherwise it falls back to classic RFB Latin-1. `RemoteClipboard::forward_paste` must run before `input.forward` in `app.rs` so paste reaches the server before Ctrl+V.
 

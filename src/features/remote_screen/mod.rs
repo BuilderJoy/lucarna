@@ -3,6 +3,7 @@
 mod framebuffer;
 mod hextile;
 mod protocol;
+mod tight;
 mod view;
 mod zrle;
 

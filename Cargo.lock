@@ -2042,6 +2042,7 @@ dependencies = [
  "lucide-icons",
  "sha2",
  "x25519-dalek",
+ "zune-jpeg",
 ]
 
 [[package]]
