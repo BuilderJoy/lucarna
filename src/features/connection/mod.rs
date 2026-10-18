@@ -9,4 +9,5 @@ mod view;
 
 pub use address::ServerAddress;
 pub use auth::Credentials;
-pub use view::Dashboard;
+pub use saved::SessionOptions;
+pub use view::{ConnectRequest, Dashboard};

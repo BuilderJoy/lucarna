@@ -26,7 +26,11 @@ impl Cursor {
                 [p[2], p[1], p[0], opaque * 255]
             })
             .collect();
-        Self { hotspot, size: [w, h], rgba }
+        Self {
+            hotspot,
+            size: [w, h],
+            rgba,
+        }
     }
 
     /// Wire byte counts for a w×h cursor: (pixel bytes, mask bytes). Rejects sizes above `MAX_CURSOR`.
@@ -54,7 +58,13 @@ impl Framebuffer {
         if width == 0 || height == 0 || width > MAX_DIM || height > MAX_DIM {
             return Err(invalid(format!("unsupported screen size {width}x{height}")));
         }
-        Ok(Self { width, height, pixels: vec![0; width * height * 4], dirty: Some([0, 0, width, height]), cursor: None })
+        Ok(Self {
+            width,
+            height,
+            pixels: vec![0; width * height * 4],
+            dirty: Some([0, 0, width, height]),
+            cursor: None,
+        })
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -88,6 +98,35 @@ impl Framebuffer {
     /// The region as RGBA, ready for a texture.
     pub fn rgba(&self, [x0, y0, x1, y1]: [usize; 4]) -> Vec<u8> {
         self.get(x0, y0, x1 - x0, y1 - y0).chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], 255]).collect()
+    }
+
+    /// Downscales the screen into an aspect-preserving RGBA thumbnail of at most `max_w × max_h`.
+    pub fn thumbnail(&self, max_w: usize, max_h: usize) -> (u16, u16, Vec<u8>) {
+        let scale = (max_w as f64 / self.width as f64).min(max_h as f64 / self.height as f64).min(1.0);
+        let tw = ((self.width as f64 * scale).round() as usize).max(1);
+        let th = ((self.height as f64 * scale).round() as usize).max(1);
+        let mut rgba = Vec::with_capacity(tw * th * 4);
+        for ty in 0..th {
+            let y0 = ty * self.height / th;
+            let y1 = ((ty + 1) * self.height / th).max(y0 + 1).min(self.height);
+            let sy = [y0, (y0 + y1) / 2];
+            for tx in 0..tw {
+                let x0 = tx * self.width / tw;
+                let x1 = ((tx + 1) * self.width / tw).max(x0 + 1).min(self.width);
+                let sx = [x0, (x0 + x1) / 2];
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for &y in &sy {
+                    for &x in &sx {
+                        let i = (y * self.width + x) * 4;
+                        b += u32::from(self.pixels[i]);
+                        g += u32::from(self.pixels[i + 1]);
+                        r += u32::from(self.pixels[i + 2]);
+                    }
+                }
+                rgba.extend_from_slice(&[(r / 4) as u8, (g / 4) as u8, (b / 4) as u8, 255]);
+            }
+        }
+        (tw as u16, th as u16, rgba)
     }
 }
 
@@ -128,5 +167,15 @@ mod tests {
     #[test]
     fn rejects_huge_screen() {
         assert!(Framebuffer::new(65535, 65535).is_err());
+    }
+
+    #[test]
+    fn thumbnail_preserves_aspect_and_converts_bgrx() {
+        let mut fb = Framebuffer::new(400, 200).unwrap();
+        fb.put(0, 0, 400, 200, &[10, 20, 30, 0].repeat(400 * 200));
+        let (w, h, rgba) = fb.thumbnail(100, 100);
+        assert_eq!((w, h), (100, 50));
+        assert_eq!(rgba.len(), 100 * 50 * 4);
+        assert_eq!(&rgba[..4], &[30, 20, 10, 255]);
     }
 }

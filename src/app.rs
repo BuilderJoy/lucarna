@@ -1,17 +1,21 @@
 //! App shell: switches between the dashboard and a live session.
 
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
-use crate::features::connection::{Credentials, Dashboard, ServerAddress};
+use crate::features::clipboard;
+use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions};
+use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
-use crate::features::clipboard;
-use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::session::{self, Event, Outbound};
 
+const PREVIEW_INTERVAL: Duration = Duration::from_secs(5);
+
 struct LiveSession {
+    address: ServerAddress,
     name: String,
     outbound: Arc<Outbound>,
     screen: Arc<Mutex<Framebuffer>>,
@@ -21,6 +25,9 @@ struct LiveSession {
     files_view: FilesView,
     /// Don't forward keyboard, mouse or clipboard to the server.
     view_only: bool,
+    share_clipboard: bool,
+    save_preview: bool,
+    last_preview: Option<Instant>,
     scale: Scale,
     /// Where the session bar floats in full screen, so clicks on it don't reach the remote machine.
     bar_rect: Option<egui::Rect>,
@@ -31,14 +38,17 @@ struct LiveSession {
 #[derive(Default)]
 pub struct App {
     dashboard: Dashboard,
+    pending: Option<(ServerAddress, SessionOptions)>,
     events: Option<mpsc::Receiver<Event>>,
     live: Option<LiveSession>,
 }
 
 impl App {
-    fn connect(&mut self, ctx: &egui::Context, address: ServerAddress, creds: Credentials) {
+    fn connect(&mut self, ctx: &egui::Context, req: ConnectRequest) {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
+        let (address, creds) = (req.address.clone(), req.creds);
+        self.pending = Some((req.address, req.options));
         std::thread::spawn(move || session::run(&address, &creds, tx, move || ctx.request_repaint()));
         self.events = Some(rx);
         self.dashboard.status.clear();
@@ -49,10 +59,39 @@ impl App {
         let mut closed = false;
         while let Ok(event) = rx.try_recv() {
             match event {
-                Event::Connected { name, outbound, screen, files } => {
+                Event::Connected {
+                    name,
+                    outbound,
+                    screen,
+                    files,
+                } => {
                     self.dashboard.status.clear();
-                    #[rustfmt::skip]
-                    let live = LiveSession { name, outbound, screen, view: ScreenView::default(), input: InputForwarder::default(), files, files_view: FilesView::default(), view_only: false, scale: Scale::default(), bar_rect: None, has_frame: false };
+                    let (address, opts) = self
+                        .pending
+                        .take()
+                        .unwrap_or_else(|| (ServerAddress::parse("127.0.0.1").unwrap(), SessionOptions::default()));
+                    self.dashboard.mark_connected(&address);
+                    if opts.fullscreen {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                    }
+                    let scale = if opts.scale_1_1 { Scale::Actual } else { Scale::Fit };
+                    let live = LiveSession {
+                        address,
+                        name,
+                        outbound,
+                        screen,
+                        view: ScreenView::default(),
+                        input: InputForwarder::default(),
+                        files,
+                        files_view: FilesView::default(),
+                        view_only: opts.view_only,
+                        share_clipboard: opts.share_clipboard,
+                        save_preview: opts.save_preview,
+                        last_preview: None,
+                        scale,
+                        bar_rect: None,
+                        has_frame: false,
+                    };
                     self.live = Some(live);
                 }
                 Event::Files(update) => {
@@ -60,11 +99,34 @@ impl App {
                         l.files_view.apply(update, &l.files);
                     }
                 }
-                Event::ScreenUpdated => self.live.iter_mut().for_each(|l| l.has_frame = true),
-                Event::ServerClipboard(text) => ctx.copy_text(text),
+                Event::ScreenUpdated => {
+                    if let Some(l) = &mut self.live {
+                        l.has_frame = true;
+                        if l.save_preview && l.last_preview.is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL) {
+                            let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
+                            self.dashboard.update_preview(ctx, &l.address, w, h, &rgba);
+                            l.last_preview = Some(Instant::now());
+                        }
+                    }
+                }
+                Event::ServerClipboard(text) => {
+                    if self.live.as_ref().is_some_and(|l| l.share_clipboard && !l.view_only) {
+                        ctx.copy_text(text);
+                    }
+                }
                 Event::Closed(reason) => {
+                    if let Some(l) = self.live.take()
+                        && l.has_frame
+                        && l.save_preview
+                    {
+                        let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
+                        self.dashboard.update_preview(ctx, &l.address, w, h, &rgba);
+                    }
+                    if ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                    }
                     self.dashboard.status = reason;
-                    self.live = None;
+                    self.pending = None;
                     closed = true;
                 }
             }
@@ -80,8 +142,8 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.poll_events(&ctx);
         let Some(live) = &mut self.live else {
-            if let Some((address, creds)) = self.dashboard.show(ui, self.events.is_some()) {
-                self.connect(&ctx, address, creds);
+            if let Some(req) = self.dashboard.show(ui, self.events.is_some()) {
+                self.connect(&ctx, req);
             }
             return;
         };
@@ -100,12 +162,17 @@ impl eframe::App for App {
             let near_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 48.0));
             let show = near_top || ctx.any_popup_open() || !live.has_frame;
             live.bar_rect = show.then(|| {
-                egui::Area::new(egui::Id::unique("fullscreen_bar")).anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO).order(egui::Order::Foreground).show(&ctx, |ui| {
-                    bar.show(ui, |ui| {
-                        ui.set_width(ctx.content_rect().width() - 24.0);
-                        bar_contents(ui, live, fullscreen);
-                    });
-                }).response.rect
+                egui::Area::new(egui::Id::unique("fullscreen_bar"))
+                    .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+                    .order(egui::Order::Foreground)
+                    .show(&ctx, |ui| {
+                        bar.show(ui, |ui| {
+                            ui.set_width(ctx.content_rect().width() - 24.0);
+                            bar_contents(ui, live, fullscreen);
+                        });
+                    })
+                    .response
+                    .rect
             });
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ui, |ui| {
@@ -120,10 +187,15 @@ impl eframe::App for App {
             }
             let viewport = live.view.show(ui, &live.screen, live.scale);
             // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
-            let over_ui = [live.files_view.rect, live.bar_rect].into_iter().flatten().any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+            let over_ui = [live.files_view.rect, live.bar_rect]
+                .into_iter()
+                .flatten()
+                .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
             live.view.draw_cursor(ui, &viewport, !over_ui);
             if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
-                clipboard::forward_paste(ui, &live.outbound);
+                if live.share_clipboard {
+                    clipboard::forward_paste(ui, &live.outbound);
+                }
                 live.input.forward(ui, &viewport, &live.outbound);
             }
         });
@@ -133,7 +205,11 @@ impl eframe::App for App {
 
 fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
     ui.horizontal(|ui| {
-        let dot = if live.has_frame { Color32::from_rgb(80, 200, 120) } else { ui.visuals().warn_fg_color };
+        let dot = if live.has_frame {
+            Color32::from_rgb(80, 200, 120)
+        } else {
+            ui.visuals().warn_fg_color
+        };
         ui.label(RichText::new("●").color(dot));
         ui.label(RichText::new(&live.name).strong());
         let (w, h) = live.screen.lock().unwrap().size();
@@ -142,7 +218,11 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
             if ui.button("Disconnect").clicked() {
                 live.outbound.close();
             }
-            if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse, download and upload files").clicked() {
+            if ui
+                .selectable_label(live.files_view.open, "Files")
+                .on_hover_text("Browse, download and upload files")
+                .clicked()
+            {
                 live.files_view.open = !live.files_view.open;
             }
             ui.menu_button("Keys", |ui| {
@@ -170,7 +250,10 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
             if ui.button(label).on_hover_text(tip).clicked() {
                 live.scale = if live.scale == Scale::Fit { Scale::Actual } else { Scale::Fit };
             }
-            ui.selectable_label(live.view_only, "View only").on_hover_text("Don't send keyboard, mouse or clipboard to the server").clicked().then(|| live.view_only = !live.view_only);
+            ui.selectable_label(live.view_only, "View only")
+                .on_hover_text("Don't send keyboard, mouse or clipboard to the server")
+                .clicked()
+                .then(|| live.view_only = !live.view_only);
         });
     });
 }

@@ -54,9 +54,9 @@ All work happens on the long-lived `develop` branch; `main` only receives merges
 
 Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on the wire (UltraVNC never swaps it); `size`/`length` are big-endian. Both `FileHeader` (4) and `FileTransferOffer` (8) carry 4 extra trailing bytes (`sizeH`, high 32 bits of file size) outside `length`. `RemoteFiles` (UI handle, in `Event::Connected`) sends requests and spawns background upload streaming when the server answers `FileAcceptHeader`; `file_transfer::Receiver` lives on the session thread, tracks negotiated block size (`8 KiB` default for `libvncserver`, `32 KiB` when UltraVNC sends `FileTransferProtocolVersion` v3+), assembles listings, and writes downloads to the active local directory via a `.lucarna-part` file. `FilesView` is a two-pane (`Local` | `Remote`) browser supporting drag-and-drop upload queues and remote commands (`CDirCreate`, `CFileDelete`, `CFileRename`).
 
-### Saved connections
+### Saved connections & Address Book
 
-`connection/saved.rs`: names and addresses in `connections.txt` under `eframe::storage_dir("Lucarna")`; passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the start screen.
+`connection/saved.rs`: names, addresses, usernames, labels, favorites, per-connection `SessionOptions` and `last_connected` timestamps in `connections.txt` under `eframe::storage_dir("Lucarna")` (backward-compatible with 2- and 3-column files); compressed RGBA desktop preview thumbnails in `previews/<address>.lcpv` (`Framebuffer::thumbnail`); passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the RealVNC-style Address Book start screen with sidebar label filtering, grid/list views, context menus, keyboard shortcuts and the per-connection `Properties` dialog.
 
 ### Security rule
 
