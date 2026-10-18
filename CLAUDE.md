@@ -44,6 +44,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for humans, with diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); keep it in sync when modules, threads or the message dispatch change.
 
+## Packaging and releases
+
+`packaging/` holds the per-platform recipes (`macos/bundle.sh`, `windows/lucarna.iss`, `linux/lucarna.desktop`, cargo-deb metadata in `Cargo.toml`); `.github/workflows/packages.yml` builds all three on every PR. To release: bump `version` in `Cargo.toml` on a branch, merge into `develop`, PR `develop` → `main`, then tag `main` with `vX.Y.Z` and push the tag; the workflow publishes a GitHub pre-release with the installers. Stay on 0.x until the app is tested against real UltraVNC servers.
+
 ## Git workflow
 
 `main` holds releases (milestones such as v0.1); `develop` is the integration branch and nobody commits to it directly. **Every new feature, fix or chore gets its own branch cut from an up-to-date `develop`**, named `feature/<topic>` (e.g. `feature/tight-encoding`), `fix/<topic>`, `chore/<topic>` or `docs/<topic>`. Commit there, updating `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes, and push the branch after each commit. When `cargo test` and `cargo clippy --all-targets` are clean, open a PR into `develop` (`gh pr create --base develop`) and leave the merge to the user; never merge your own PR unasked. A release is a PR from `develop` into `main`. Other sessions commit in parallel: `git fetch` and read `git log origin/develop` before starting and before editing files you haven't touched recently. Commit trailer: `Co-Authored-By: <model in use>`.
