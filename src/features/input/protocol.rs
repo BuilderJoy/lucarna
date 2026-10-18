@@ -2,7 +2,7 @@
 
 use std::io;
 
-use super::keysym::{ALT, CONTROL, DELETE, ESCAPE, F4, PRINT, SUPER, TAB};
+use super::keysym::{self, ALT, ALT_GR, CONTROL, DELETE, ESCAPE, F4, PRINT, SUPER, TAB};
 use crate::session::Outbound;
 
 pub fn key(out: &Outbound, down: bool, keysym: u32) -> io::Result<()> {
@@ -14,6 +14,11 @@ pub fn key(out: &Outbound, down: bool, keysym: u32) -> io::Result<()> {
 pub fn tap(out: &Outbound, keysym: u32) -> io::Result<()> {
     key(out, true, keysym)?;
     key(out, false, keysym)
+}
+
+/// Sends a character keysym (`@`, `\`, `{`, etc.).
+pub fn type_char(out: &Outbound, c: char) -> io::Result<()> {
+    tap(out, keysym::from_char(c))
 }
 
 pub fn pointer(out: &Outbound, buttons: u8, (x, y): (u16, u16)) -> io::Result<()> {
@@ -30,7 +35,11 @@ pub const SHORTCUTS: &[(&str, &[u32])] = &[
     ("Alt+F4", &[ALT, F4]),
     ("Windows key", &[SUPER]),
     ("Print Screen", &[PRINT]),
+    ("AltGr (ISO Level 3)", &[ALT_GR]),
 ];
+
+/// Symbols that require AltGr / Option on Spanish and Latin-American keyboards.
+pub const ALTGR_SYMBOLS: &[char] = &['@', '\\', '|', '{', '}', '[', ']', '~', '#', '€'];
 
 /// Windows' secure attention sequence, which the local OS would otherwise intercept.
 pub fn ctrl_alt_del(out: &Outbound) -> io::Result<()> {
@@ -52,6 +61,24 @@ mod tests {
 
     #[test]
     fn combo_releases_in_reverse() {
-        assert_eq!(combo_events(&[CONTROL, ALT, DELETE]).collect::<Vec<_>>(), [(true, CONTROL), (true, ALT), (true, DELETE), (false, DELETE), (false, ALT), (false, CONTROL)]);
+        assert_eq!(
+            combo_events(&[CONTROL, ALT, DELETE]).collect::<Vec<_>>(),
+            [
+                (true, CONTROL),
+                (true, ALT),
+                (true, DELETE),
+                (false, DELETE),
+                (false, ALT),
+                (false, CONTROL)
+            ]
+        );
+    }
+
+    #[test]
+    fn altgr_symbols_map_to_valid_keysyms() {
+        assert_eq!(keysym::from_char('@'), 0x40);
+        assert_eq!(keysym::from_char('\\'), 0x5c);
+        assert_eq!(keysym::from_char('{'), 0x7b);
+        assert_eq!(keysym::from_char('€'), 0x0100_20ac);
     }
 }

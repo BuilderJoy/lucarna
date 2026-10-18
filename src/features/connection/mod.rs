@@ -3,8 +3,11 @@
 mod address;
 mod auth;
 pub mod handshake;
+mod mslogon;
 mod saved;
 mod view;
 
 pub use address::ServerAddress;
-pub use view::Dashboard;
+pub use auth::Credentials;
+pub use saved::SessionOptions;
+pub use view::{ConnectRequest, Dashboard};

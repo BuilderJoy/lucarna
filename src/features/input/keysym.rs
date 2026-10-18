@@ -5,6 +5,7 @@ use eframe::egui::Key;
 pub const SHIFT: u32 = 0xffe1;
 pub const CONTROL: u32 = 0xffe3;
 pub const ALT: u32 = 0xffe9;
+pub const ALT_GR: u32 = 0xfe03;
 pub const DELETE: u32 = 0xffff;
 pub const ESCAPE: u32 = 0xff1b;
 pub const TAB: u32 = 0xff09;

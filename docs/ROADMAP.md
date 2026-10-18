@@ -2,23 +2,25 @@
 
 Plan para llegar desde el visor básico actual hasta un cliente que se pueda usar a diario contra UltraVNC Server, incluida la transferencia de archivos.
 
-## Dónde estamos (2026-10-17)
+## Dónde estamos (2026-10-18)
 
 | Área | Estado |
 |---|---|
 | Handshake RFB 3.3 / 3.8, seguridad None y VNC Auth | ✅ |
-| Pantalla: Raw, CopyRect, DesktopSize, ZRLE, Zlib, Hextile, LastRect | ✅ |
+| Pantalla: Tight (con JPEG), ZRLE, Zlib, Hextile, Raw, CopyRect, DesktopSize, LastRect | ✅ |
 | Teclado, ratón, rueda, Cmd→Ctrl en macOS | ✅ |
-| Portapapeles de texto Latin-1 en ambos sentidos | ✅ |
+| Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ✅ |
 | Botón Ctrl+Alt+Del | ✅ |
 | Tema, formulario de conexión, spinner hasta el primer frame | ✅ |
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
-| Fase 3.5: dashboard con conexiones guardadas, contraseñas en el llavero del SO | ✅ |
-| Fase 2.2 (solo lectura): permiso, unidades, navegar carpetas y descargar archivos | ✅ |
-| Fase 3.2, 3.3, 3.4, 3.7: solo ver, escalado Fit/1:1, pantalla completa, menú de teclas | ✅ |
-| Fase 3.1: cursor local (pseudo-encoding Cursor) | ✅ |
+| Fase 3.5: Address Book con vista previa del escritorio, etiquetas/grupos, favoritos, opciones por conexión y contraseñas en el llavero | ✅ |
+| Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (carpetas: se descargan como `.zip` sin descomprimir; pendiente prueba con UltraVNC en Windows) |
+| Fase 3.1–3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES, Extended Clipboard UTF-8 y campana (Bell) | ✅ |
+| Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
+| Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
+| Fase 7: túnel documentado como forma oficial de uso por internet (sin VeNCrypt ni DSM) | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -112,7 +114,16 @@ Formato (RFC 6143 §7.7.6):
 | CompressLevel | -256 … -247 | Nivel de compresión 0–9. |
 | QualityLevel | -32 … -23 | Calidad JPEG en Tight. Va en la Fase 1.5. |
 
-### 1.5 Tight (7): después de la transferencia de archivos
+### 1.5 Tight (7) ✅ (2026-10-18)
+
+**Hecho:** `remote_screen/tight.rs`, siguiendo `libvncclient/tight.c`: fill, JPEG (con `zune-jpeg`, que ya se compilaba por eframe, con ancho y alto máximos antes de decodificar) y básico con filtros copy, palette y gradient sobre 4 flujos zlib persistentes que el byte de control puede reiniciar. TPIXEL en orden R, G, B (confirmado también en `Pack24` del codificador de UltraVNC). Validaciones que libvncclient no hace: índice de paleta fuera de rango y JPEG de otro tamaño que el rectángulo.
+
+- **Negociación:** Tight va **primero** en la lista, con QualityLevel 8 (`-24`): los servidores solo usan JPEG en zonas tipo foto y el texto sigue sin pérdida. Calidad fija; se vuelve opción por conexión si alguien la necesita.
+- **Prueba en vivo (`live_tight_matches_raw`):** la misma pantalla de x11vnc con Raw y con Tight sin JPEG sale **idéntica byte a byte**; con JPEG, la desviación media es menor de 3 por canal. Se ejercitaron fill, JPEG, copy y palette con los streams 0, 1 y 2. La imagen de pruebas ahora pinta rampas de 256 colores y truecolor (`tests/server/colors.sh`).
+- **El gradiente** no lo usan ni libvncserver ni el codificador de UltraVNC (solo servidores TightVNC): está cubierto por test unitario.
+- **Fuera:** la variante "NoZlib/PNG" (`0x0A`) de TigerVNC/TurboVNC, que solo se manda si el cliente la anuncia.
+
+Plan original, para referencia:
 
 Es la mejor opción con internet lento porque usa JPEG en zonas con foto, pero es la más compleja:
 
@@ -130,9 +141,9 @@ Es la mejor opción con internet lento porque usa JPEG en zonas con foto, pero e
 
 Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especificación pública**: la fuente de verdad es el código de UltraVNC (`rfb/rfbproto.h`, el visor en `vncviewer/FileTransfer.cpp` y el servidor en `winvnc/vncclient.cpp`).
 
-### 2.1 Spike de investigación (antes de escribir código) ✅ en papel (2026-10-17)
+### 2.1 Spike de investigación (antes de escribir código) ✅ (2026-10-18)
 
-**Hecho:** [docs/ultravnc-ft.md](ultravnc-ft.md), leído del código fuente oficial (commit `0cd8b41`). Falta confirmar con tráfico real (punto 5) y documentar subida y comandos antes de implementar la escritura.
+**Hecho:** [docs/ultravnc-ft.md](ultravnc-ft.md), leído del código fuente oficial (commit `0cd8b41`) y de `libvncserver/rfbserver.c`. Documenta tanto lectura (permiso, unidades, listados, descarga) como escritura (`FileTransferOffer` con los 4 bytes extra `sizeH` fuera de `length`, `FileAcceptHeader`, tamaño de bloque negociado por `FileTransferProtocolVersion` vs 8 KiB fijo en `libvncserver`, comandos `CDirCreate`/`CFileDelete`/`CFileRename` y sus respuestas `CommandReturn`).
 
 1. Leer `rfbproto.h` de la versión estable actual y anotar en `docs/ultravnc-ft.md`:
    - el tipo de mensaje (`rfbFileTransfer`, que se espera sea 7),
@@ -146,9 +157,13 @@ Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especific
 
 **Salida:** documento con los bytes exactos de cada mensaje, confirmados contra la captura. **Tamaño:** M (2–3 días).
 
-### 2.2 Implementación (nuevo slice)
+### 2.2 Implementación (nuevo slice) ✅ (2026-10-18)
 
-**Solo lectura hecha (2026-10-17):** `features/file_transfer/` con `protocol.rs`, `transfer.rs` y `view.rs`. Hace el permiso, lista unidades, navega con doble clic y descarga con barra de progreso y cancelación. Las descargas van a `~/Downloads` (sin diálogo nativo, por ahora). Se escriben a un `.part` y se renombran al terminar, y los nombres se sanean. Probado en vivo contra x11vnc `-ultrafilexfer` (libvncserver); **falta probar contra UltraVNC Server en Windows**. La prueba con libvncserver descubrió que `contentParam` viaja en little-endian. Pendiente: subir archivos, comandos, carpetas (zip `!UVNCDIR-`) y arrastrar y soltar.
+**Hecho:** `features/file_transfer/` con `protocol.rs`, `transfer.rs` y `view.rs`. Ventana de dos columnas (`Local` | `Remote`, sin añadir `rfd`):
+
+- **Lectura:** permiso, unidades, navegación con doble clic en ambos paneles y descarga a la carpeta local activa (por defecto `~/Downloads`), escribiendo a `.lucarna-part` y renombrando al terminar, con nombres saneados.
+- **Escritura:** subida de archivos (`FileTransferOffer` → `FileAcceptHeader` → `FilePacket` en hilo propio con compresión zlib solo cuando reduce el bloque → `EndOfFile`), tamaño de bloque de 8 KiB por defecto compatible con `libvncserver` y 32 KiB cuando el servidor anuncia `FileTransferProtocolVersion` v3+, cola de subida, arrastrar y soltar desde el sistema (`egui::DroppedFile`), cancelación de descargas y subidas, y comandos remotos (`+ Folder`, `Rename`, `Delete` con confirmación). Mientras un campo de texto de la UI tiene el foco, no se reenvían teclas al servidor remoto.
+- **Carpetas (2026-10-18):** se descargan como `nombre.zip` (el zip `!UVNCDIR-` que arma el servidor), sin descomprimir en la app; subir carpetas sigue siendo crear la carpeta y subir sus archivos. **Pendiente:** prueba contra UltraVNC Server en Windows.
 
 ```
 features/file_transfer/
@@ -194,15 +209,26 @@ features/file_transfer/
 | 3.2 | Modo solo ver ✅ (2026-10-17) | Botón "View only" en la barra que salta `input.forward` y `forward_paste`. | XS |
 | 3.3 | Escalado ✅ (2026-10-17) | Botón Fit / 1:1 en la barra. 1:1 es un píxel remoto por píxel físico (en Retina, 0.5 puntos) con `ScrollArea`; **solo las barras de desplazamiento mueven la vista**, porque la rueda y el arrastre son del equipo remoto. `Viewport` ahora también conoce la parte visible. | S |
 | 3.4 | Pantalla completa ✅ (2026-10-17) | Botón "Full screen" y atajo ⌘⇧F (Ctrl+Shift+F fuera de macOS), que se consume antes de reenviar teclas. En pantalla completa la barra flota sobre la imagen (no la desplaza) y aparece al acercar el ratón al borde superior o mientras haya un menú abierto. | S |
-| 3.5 | Conexiones guardadas ✅ (2026-10-17) | Lista de servidores recientes con nombre y dirección. Se activa la feature `persistence` de eframe, que no agrega crates nuevos. **Hecho:** el dashboard de inicio lista las conexiones y permite conectar, editar y borrar. Nombre y dirección van a `connections.txt` en la carpeta de datos de eframe (feature `persistence`). Las contraseñas van solo al llavero del SO con el crate `keyring` 4 (Keychain, Credential Manager o Secret Service), una entrada por dirección. | S-M |
-| 3.6 | Reconexión | Botón "Reconectar" en el formulario cuando la sesión se cae, con la última dirección precargada. | XS |
-| 3.7 | Teclas especiales ✅ parcial (2026-10-17) | Menú "Keys" con Ctrl+Esc, Alt+Tab, Alt+F4, tecla Windows (0xffeb) y Print Screen; se pulsan en orden y se sueltan al revés. **Falta AltGr** para teclados en español: hoy los caracteres se mandan como keysym ya resuelto, y hay que probar si UltraVNC los acepta bien (`@`, `\`, `{`). | S |
-| 3.8 | Portapapeles extendido | Pseudo-encoding Extended Clipboard (0xC0A1E5CE) para UTF-8. Hay que verificar en el spike si UltraVNC lo soporta. Si no, se mantiene Latin-1. | M |
-| 3.9 | Campana | Mensaje 2: sonido o rebote del ícono del dock. | XS |
+| 3.5 | Conexiones guardadas y Address Book ✅ (2026-10-18) | Rediseñado al estilo RealVNC Viewer: barra superior de búsqueda y conexión rápida, barra lateral con `All connections`, `Favorites`, `Recent` y etiquetas (`LABELS`), vista en cuadrícula o lista con miniatura del escritorio remoto (`previews/*.lcpv` comprimida con zlib, o ilustración vectorial si aún no se conectó), menú contextual completo (`Connect`, `View only`, `Favorites`, `Labels`, `Rename` F2, `Duplicate` ⌘D, `Clear preview`, `Delete`, `Properties…` Alt+Enter), importar/exportar y opciones por conexión (`Fit`/`1:1`, `View only`, `Full screen`, `Share clipboard`, `Save preview`). Contraseñas solo en el llavero del SO (`keyring`). | M |
+| 3.6 | Reconexión ✅ (2026-10-18) | Cuando una sesión termina inesperadamente o falla al conectar, la barra inferior muestra el motivo junto con un botón **Reconnect (`<servidor>`)** que relanza el último `ConnectRequest` con un clic. | XS |
+| 3.7 | Teclas especiales y AltGr ✅ (2026-10-18) | Menú "Keys" con Ctrl+Esc, Alt+Tab, Alt+F4, tecla Windows (`0xffeb`), Print Screen, `AltGr (ISO Level 3)` (`0xfe03`) y botonera rápida de símbolos españoles/AltGr (`@`, `\`, `|`, `{`, `}`, `[`, `]`, `~`, `#`, `€`). Además, al escribir con `Option` en macOS se suelta temporalmente `Alt` remoto alrededor del carácter para que servidores Windows sinteticen su propio `AltGr` sin interpretarlo como `Alt+tecla`. | S |
+| 3.8 | Portapapeles extendido ✅ (2026-10-18) | Pseudo-encoding `Extended Clipboard` (`0xC0A1E5CE` / `-1063131698`) anunciado en `SetEncodings`. Si el servidor envía `CLIP_CAPS`, `RemoteClipboard` responde con capacidades UTF-8 y negocia `CLIP_PROVIDE`, `CLIP_NOTIFY`, `CLIP_REQUEST` y `CLIP_PEEK` con compresión zlib y normalización CRLF/NUL; si el servidor no lo anuncia, mantiene Latin-1 automáticamente. | M |
+| 3.9 | Campana ✅ (2026-10-18) | Mensaje 2 (`Bell`): `session::run` emite `Event::Bell`, solicita atención de la ventana (`ViewportCommand::RequestUserAttention`) y muestra un indicador visual `Bell` en la barra de sesión durante 2 s (revelando la barra flotante si está en pantalla completa). | XS |
 
 ---
 
-## Fase 4: MS-Logon (usuario y contraseña de Windows)
+## Fase 4: MS-Logon (usuario y contraseña de Windows) ✅ (2026-10-17)
+
+**Hecho:** [docs/ultravnc-auth.md](ultravnc-auth.md) y `connection/mslogon.rs`. Lo que el spike descubrió y cambió el plan:
+
+- **Hay dos versiones:** II (0x71, DH de 31 bits) y **III (0x76, X25519)** en el UltraVNC reciente. El servidor anuncia siempre las dos. Lucarna implementa ambas y prefiere la III.
+- **El III no usa AES-GCM** aunque sus comentarios lo digan: la clave de 8 bytes (SHA-256 del secreto, recortada) cifra con DES-CBC, igual que el II. Mejora el intercambio de claves, pero el cifrado de las credenciales sigue siendo DES. Detalle y recomendación de túnel en el documento.
+- **Dependencias nuevas:** `x25519-dalek` (sin features por defecto; única crate nueva en compilarse), y `getrandom` y `sha2`, que ya estaban en el árbol por eframe.
+- **UI:** campo "User" siempre visible en el dashboard, guardado en `connections.txt` (tercera columna opcional, los archivos viejos siguen cargando). La contraseña va al llavero como antes. Sin usuario solo se usa VNC auth/None; si el servidor solo ofrece MS-Logon, el error pide un usuario.
+- **Verificación:** el cifrado coincide con los vectores del `d3des.c` original compilado en el Mac. El flujo completo se probó contra un servidor simulado en los tests. **Falta probar contra un UltraVNC Server real**, que no se puede levantar en Linux ni Docker.
+- **No soportado:** SC Prompt (0x68, el usuario remoto acepta la conexión) y las capas extra de autenticación (`0xFFFFFFFF`): dan un error claro.
+
+Plan original, para referencia:
 
 Muchos UltraVNC en empresas usan MS-Logon II en vez de contraseña VNC.
 
@@ -221,7 +247,16 @@ Muchos UltraVNC en empresas usan MS-Logon II en vez de contraseña VNC.
 
 ---
 
-## Fase 5: chat y repetidor
+## Fase 5: chat y repetidor ✅ (2026-10-18)
+
+**Hecho, con lo mínimo** (leído de `TextChat.cpp`, `ClientConnection::NegotiateProxy` y el código del repetidor de UltraVNC):
+
+- **Chat:** `features/chat/` (`protocol.rs`, `view.rs`). Mensaje 11 con `3 pad + u32 length`; la longitud `0xFFFFFFFF/FE/FD` es Open/Close/Finished y cualquier otra es texto (máx. 16384 bytes, Latin-1 como el portapapeles). Botón **Chat** en la barra: abrirlo o cerrarlo se lo pide también al servidor. Si el servidor abre el chat o escribe, la ventana se abre sola y el Dock avisa. Mientras se escribe en ella no se reenvían teclas ni ratón al equipo remoto. Verificado con tests de formato y de límites; **sin probar contra un servidor**: x11vnc solo ofrece chat con el programa auxiliar `ssvnc`, que no está en el contenedor.
+- **Repetidor:** `handshake::via_repeater`. Se conecta al repetidor, que saluda con `RFB 000.000\n`; se le manda el destino en 250 bytes rellenos con ceros, `host:puerto` (Modo I) o `ID:1234` (Modo II), y después el repetidor reenvía el saludo real del servidor. Campo **Repeater** en las propiedades de la conexión, guardado como séptima columna de `connections.txt`; el campo **VNC Server** pasa a ser el destino. Probado de punta a punta contra x11vnc con un relé mínimo escrito en el test según el código del repetidor (`live_repeater`).
+- **Lo que quedó fuera a propósito:** chat Unicode (pseudo-encoding `0xFFFF8006`, hoy se manda Latin-1), la rama "el servidor no es un repetidor" (si pones un repetidor y no saluda con 0.0, falla con un error claro en vez de adivinar) y un puerto por defecto para el repetidor (el de UltraVNC suele ser 5901: escríbelo).
+- **Aviso:** en Modo II el repetidor retiene la conexión hasta que el servidor con ese ID se conecte a él; si tarda más de 10 s, Lucarna da un timeout.
+
+Plan original, para referencia:
 
 ### 5.1 Chat (mensaje TextChat, 11)
 
@@ -256,7 +291,11 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 
 ---
 
-## Fase 7: cifrado
+## Fase 7: cifrado ✅ la parte sin código (2026-10-18)
+
+**Hecho:** el README tiene la sección "Using Lucarna over the internet" con túnel SSH, VPN (Tailscale/WireGuard) y Cloudflare Tunnel como forma oficial de uso, y explica qué expone cada login (VNC auth, MS-Logon II y III) y que la sesión viaja sin cifrar. **No se implementaron** VeNCrypt ni los plugins DSM: el túnel cubre ambos casos y queda pendiente hasta que alguien los necesite de verdad.
+
+Plan original, para referencia:
 
 - **Plugins DSM de UltraVNC (SecureVNC, MSRC4):**
   - Hay que investigar si su fuente está publicada y bajo qué licencia, y si el formato es estable entre versiones.

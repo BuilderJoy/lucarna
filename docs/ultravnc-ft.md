@@ -134,14 +134,52 @@ El nombre depende de la rama:
 
 Mientras dura la descarga siguen llegando `FramebufferUpdate` entre los paquetes: el lector de sesión tiene que despachar todo.
 
-## Pendiente de documentar (antes de implementar la escritura)
+## Subir un archivo
 
-- Subida: `FileTransferOffer` → `FileAcceptHeader` → `FilePacket` → `EndOfFile`, con el prefijo de archivo parcial `!UVNCPFT-`.
-- Comandos `Command` (10) y `CommandReturn` (11): crear, borrar y renombrar.
+1. C→S, `FileTransferOffer`: `contentType=8`, `contentParam=0`, `size` = parte baja del tamaño y `length=n`. Después:
+   - n bytes con `"ruta_remota,MM/DD/YYYY HH:MM"` (fecha de modificación en UTC; en UTF-8 si el servidor habla v4);
+   - **4 bytes extra fuera de `length`:** u32 big-endian con la parte alta del tamaño (`sizeH`).
+2. S→C, `FileChecksums` (12, opcional): si el archivo de destino ya existía, el servidor manda antes checksums Adler-32 de 4 bytes por bloque. Se pueden ignorar y mandar todos los bloques normales.
+3. S→C, `FileAcceptHeader`: `contentType=9`, `size=0` si el servidor pudo crear el archivo o `0xFFFFFFFF` si falló (sin permisos, ruta fuera de raíz o disco lleno), `length=n` y la ruta de destino. En Windows el servidor crea primero `carpeta\!UVNCPFT-nombre` y lo renombra al final.
+4. C→S, `FilePacket` repetidos: `contentType=5`, `length` = bytes que siguen y `size` según el bloque:
+   - `size=1`: bloque comprimido con `compress()` (zlib independiente), siempre que sea más chico que el bloque original;
+   - `size=0`: bloque sin comprimir (cuando la compresión no reduce el tamaño).
+
+   El tamaño de bloque antes de comprimir es de **8 KiB** por defecto y sube a **32 KiB** cuando el servidor anunció v3/v4 con `FileTransferProtocolVersion` (17). Respetar los 8 KiB sin v4 es indispensable contra `libvncserver` (`x11vnc -ultrafilexfer`), cuyo buffer de descompresión fijo es de 8192 bytes.
+5. C→S, cierre:
+   - `EndOfFile` (6): terminó bien; el servidor trunca a la posición actual, aplica la fecha de modificación, cierra y renombra `!UVNCPFT-nombre` al nombre definitivo;
+   - `AbortFileTransfer` (7): cancelación o error de lectura local; el servidor cierra y borra el archivo parcial.
+
+## Comandos remotos (crear carpeta, borrar y renombrar)
+
+C→S, `Command` (`contentType=10`, `size=0`, `length=n` y los bytes del argumento en UTF-8):
+
+| `contentParam` | Nombre | Datos (`length` bytes) |
+|---|---|---|
+| 1 | `CDirCreate` | Ruta completa de la carpeta nueva (sin `\` final). |
+| 4 | `CFileDelete` | Ruta completa del archivo **o carpeta** a borrar (ni UltraVNC ni `libvncserver` implementan `CDirDelete=2`; en Windows borra carpetas recursivamente con `SHFileOperationW` y en `libvncserver` usa `rmdir`). |
+| 5 | `CFileRename` | `"ruta_actual*ruta_nueva"` separadas por `*` (sirve para archivos y carpetas; `CDirRename=6` tampoco se usa). |
+
+S→C, `CommandReturn` (`contentType=11`):
+
+| `contentParam` | Nombre | Respuesta a |
+|---|---|---|
+| 4 | `ADirCreate` | `CDirCreate` |
+| 7 | `AFileDelete` | `CFileDelete` |
+| 8 | `AFileRename` | `CFileRename` |
+
+En los tres casos, `size = 0` indica éxito y `size = 0xFFFFFFFF` indica error; `length` trae la ruta en eco (si se borró una carpeta en Windows, envuelta en `[ … ]\0`).
+
+## Carpetas comprimidas (`!UVNCDIR-`)
+
+Cuando el nombre pedido en `FileTransferRequest` va envuelto en `[ nombre ]`, o cuando el cliente sube un archivo cuyo nombre empieza por `!UVNCDIR-` y termina en `.zip`, UltraVNC comprime/descomprime la carpeta en un zip temporal (`!UVNCDIR-<nombre_utf8_en_hex>.zip`). El servidor borra el zip temporal al terminar. Si la carpeta está vacía o no se puede comprimir, responde con un `FileHeader` de error (`size = sizeH = 0xFFFFFFFF`).
+
+**En Lucarna (descarga):** el botón Download de una carpeta pide `ruta\[ nombre ]` y guarda lo que llega como `nombre.zip` en la carpeta local elegida, **sin descomprimirlo**: Finder y el Explorador lo abren con doble clic, y así no hace falta una dependencia de zip ni defenderse de rutas maliciosas dentro del zip. La subida de carpetas no se implementa: se crean con `CDirCreate` y sus archivos se suben uno a uno. **Sin probar contra UltraVNC:** libvncserver (x11vnc) no comprime carpetas.
 
 ## Seguridad en el cliente
 
-- Acotar `length` antes de reservar memoria: listados de 64 KiB como máximo y paquetes de archivo de 32 KiB + 1024.
+- Acotar `length` antes de reservar memoria: listados de 64 KiB como máximo y paquetes de archivo de 32 KiB + 1024 (hasta 1 MiB).
 - Inflar con salida acotada al tamaño de bloque.
 - Sanear el nombre de destino local: solo el último componente; nada de `..`, `/`, `\`, `:` ni rutas absolutas. Nunca escribir fuera de la carpeta elegida.
+- Validar nombres en comandos remotos (`CDirCreate`, `CFileRename`): rechazar nombres vacíos, `.`, `..` o con caracteres separadores (`\`, `/`, `:`, `*`, `?`, `"`, `<`, `>`, `|`).
 - Para descargas, escribir a un archivo temporal y renombrarlo al terminar.
