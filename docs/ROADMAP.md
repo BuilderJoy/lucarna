@@ -20,6 +20,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 3.1–3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES, Extended Clipboard UTF-8 y campana (Bell) | ✅ |
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
 | Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
+| Fase 7: túnel documentado como forma oficial de uso por internet (sin VeNCrypt ni DSM) | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -290,7 +291,11 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 
 ---
 
-## Fase 7: cifrado
+## Fase 7: cifrado ✅ la parte sin código (2026-10-18)
+
+**Hecho:** el README tiene la sección "Using Lucarna over the internet" con túnel SSH, VPN (Tailscale/WireGuard) y Cloudflare Tunnel como forma oficial de uso, y explica qué expone cada login (VNC auth, MS-Logon II y III) y que la sesión viaja sin cifrar. **No se implementaron** VeNCrypt ni los plugins DSM: el túnel cubre ambos casos y queda pendiente hasta que alguien los necesite de verdad.
+
+Plan original, para referencia:
 
 - **Plugins DSM de UltraVNC (SecureVNC, MSRC4):**
   - Hay que investigar si su fuente está publicada y bajo qué licencia, y si el formato es estable entre versiones.
