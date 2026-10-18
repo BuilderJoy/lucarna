@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use flate2::Decompress;
 
-use super::{hextile, zrle, Cursor, Framebuffer};
+use super::{hextile, tight, zrle, Cursor, Framebuffer};
 use crate::session::Outbound;
 use crate::shared::wire::{invalid, read_bytes, read_u16, read_u32, read_u8};
 
@@ -13,16 +13,20 @@ const ENC_RAW: i32 = 0;
 const ENC_COPY_RECT: i32 = 1;
 const ENC_HEXTILE: i32 = 5;
 const ENC_ZLIB: i32 = 6;
+const ENC_TIGHT: i32 = 7;
 const ENC_ZRLE: i32 = 16;
 const ENC_LAST_RECT: i32 = -224;
 const ENC_CURSOR: i32 = -239;
 const ENC_DESKTOP_SIZE: i32 = -223;
+/// Tight JPEG quality 8 of 0–9 (-32 + level). Servers only use JPEG for photo-like areas; text stays lossless.
+// ponytail: fixed quality; make it a per-connection option if someone needs pixel-exact photos or lower bandwidth.
+const ENC_JPEG_QUALITY_8: i32 = -24;
 
 /// Asks for BGRX true colour and the encodings we can decode, plus `extra` pseudo-encodings other features handle.
 pub fn negotiate(s: &mut impl Write, extra: &[i32]) -> io::Result<()> {
     #[rustfmt::skip]
     s.write_all(&[0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])?;
-    let encodings = [&[ENC_ZRLE, ENC_ZLIB, ENC_HEXTILE, ENC_COPY_RECT, ENC_RAW, ENC_LAST_RECT, ENC_DESKTOP_SIZE, ENC_CURSOR][..], extra].concat();
+    let encodings = [&[ENC_TIGHT, ENC_ZRLE, ENC_ZLIB, ENC_HEXTILE, ENC_COPY_RECT, ENC_RAW, ENC_LAST_RECT, ENC_DESKTOP_SIZE, ENC_CURSOR, ENC_JPEG_QUALITY_8][..], extra].concat();
     let mut m = vec![2, 0];
     m.extend_from_slice(&(encodings.len() as u16).to_be_bytes());
     for e in encodings {
@@ -43,11 +47,12 @@ pub fn request_update(out: &Outbound, incremental: bool, screen: &Mutex<Framebuf
 pub struct Decoder {
     zrle: Decompress,
     zlib: Decompress,
+    tight: tight::Tight,
 }
 
 impl Default for Decoder {
     fn default() -> Self {
-        Self { zrle: Decompress::new(true), zlib: Decompress::new(true) }
+        Self { zrle: Decompress::new(true), zlib: Decompress::new(true), tight: tight::Tight::default() }
     }
 }
 
@@ -94,6 +99,10 @@ pub fn read_update(s: &mut impl Read, screen: &Mutex<Framebuffer>, decoder: &mut
             ENC_ZRLE => {
                 let data = read_zlib(s, &mut decoder.zrle, zrle::max_inflated(w, h))?;
                 let pixels = zrle::decode(&data, w, h)?;
+                screen.lock().unwrap().put(x, y, w, h, &pixels);
+            }
+            ENC_TIGHT => {
+                let pixels = decoder.tight.read(s, w, h)?;
                 screen.lock().unwrap().put(x, y, w, h, &pixels);
             }
             ENC_ZLIB => {
