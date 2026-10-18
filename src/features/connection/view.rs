@@ -113,6 +113,7 @@ pub struct Dashboard {
     modal: Option<Modal>,
     logo: Option<TextureHandle>,
     previews: HashMap<String, Option<TextureHandle>>,
+    pub last_request: Option<ConnectRequest>,
     pub status: String,
 }
 
@@ -133,6 +134,7 @@ impl Default for Dashboard {
             modal: None,
             logo: None,
             previews: HashMap::new(),
+            last_request: None,
             status: String::new(),
         };
         if open_new {
@@ -181,10 +183,12 @@ impl Dashboard {
             });
         });
 
-        // Bottom status bar: device count, shortcuts hint, and connection status/error.
+        // Bottom status bar: device count, shortcuts hint, connection status/error, and quick reconnect.
         let bottom_frame = egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(16, 6));
         egui::Panel::bottom("address_book_bottom").frame(bottom_frame).show(ui, |ui| {
-            self.bottom_bar(ui, busy);
+            if let Some(r) = self.bottom_bar(ui, busy) {
+                request = Some(r);
+            }
         });
 
         // Left sidebar: Address book categories & user labels.
@@ -229,6 +233,9 @@ impl Dashboard {
             self.show_modal(&ctx);
         }
 
+        if let Some(r) = &request {
+            self.last_request = Some(r.clone());
+        }
         request
     }
 
@@ -1345,8 +1352,10 @@ impl Dashboard {
         }
     }
 
-    fn bottom_bar(&self, ui: &mut egui::Ui, busy: bool) {
+    fn bottom_bar(&mut self, ui: &mut egui::Ui, busy: bool) -> Option<ConnectRequest> {
+        let mut request = None;
         let count = self.visible_indices().len();
+        let accent = ui.visuals().selection.bg_fill;
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{count} device(s)")).strong().size(12.0));
             ui.separator();
@@ -1355,6 +1364,21 @@ impl Dashboard {
                 ui.label("Connecting to remote desktop…");
             } else if !self.status.is_empty() {
                 ui.label(RichText::new(&self.status).color(ui.visuals().warn_fg_color));
+                if let Some(last) = &self.last_request {
+                    let btn = egui::Button::new(
+                        RichText::new(format!("{} Reconnect ({})", char::from(Icon::RefreshCw), last.address.as_str()))
+                            .strong()
+                            .color(Color32::BLACK),
+                    )
+                    .fill(accent)
+                    .small();
+                    if ui.add(btn).on_hover_text(format!("Reconnect to {}", last.address.as_str())).clicked() {
+                        request = Some(last.clone());
+                    }
+                }
+                if ui.small_button(char::from(Icon::X).to_string()).on_hover_text("Dismiss message").clicked() {
+                    self.status.clear();
+                }
             } else {
                 let dup = if cfg!(target_os = "macos") { "⌘D" } else { "Ctrl+D" };
                 ui.label(
@@ -1366,6 +1390,7 @@ impl Dashboard {
                 );
             }
         });
+        request
     }
 
     fn visible_indices(&self) -> Vec<usize> {

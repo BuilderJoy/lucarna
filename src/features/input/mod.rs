@@ -4,5 +4,5 @@ mod keysym;
 mod protocol;
 mod view;
 
-pub use protocol::{combo, ctrl_alt_del, SHORTCUTS};
+pub use protocol::{ALTGR_SYMBOLS, SHORTCUTS, combo, ctrl_alt_del, type_char};
 pub use view::InputForwarder;

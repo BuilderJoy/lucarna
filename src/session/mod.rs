@@ -3,18 +3,24 @@
 
 use std::io::{self, BufReader, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
-use std::sync::{mpsc::Sender, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
 
-use crate::features::connection::{handshake, Credentials, ServerAddress};
-use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::clipboard;
+use crate::features::connection::{Credentials, ServerAddress, handshake};
 use crate::features::file_transfer::{self, RemoteFiles};
+use crate::features::remote_screen::{self, Framebuffer};
 use crate::shared::wire::{invalid, read_u8};
 
 pub enum Event {
-    Connected { name: String, outbound: Arc<Outbound>, screen: Arc<Mutex<Framebuffer>>, files: Arc<RemoteFiles> },
+    Connected {
+        name: String,
+        outbound: Arc<Outbound>,
+        screen: Arc<Mutex<Framebuffer>>,
+        files: Arc<RemoteFiles>,
+    },
     ScreenUpdated,
+    Bell,
     Files(file_transfer::Update),
     ServerClipboard(String),
     Closed(String),
@@ -51,7 +57,12 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
             let _ = tx_files.send(Event::Files(u));
             notify_files();
         }));
-        let _ = tx.send(Event::Connected { name: init.name, outbound: outbound.clone(), screen: screen.clone(), files: files.clone() });
+        let _ = tx.send(Event::Connected {
+            name: init.name,
+            outbound: outbound.clone(),
+            screen: screen.clone(),
+            files: files.clone(),
+        });
         // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
         let mut s = BufReader::with_capacity(1 << 16, s);
         let mut decoder = remote_screen::Decoder::default();
@@ -66,7 +77,10 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
                     remote_screen::request_update(&outbound, true, &screen)?;
                 }
                 1 => remote_screen::skip_colour_map(&mut s)?,
-                2 => {} // bell
+                2 => {
+                    let _ = tx.send(Event::Bell);
+                    notify();
+                }
                 3 => {
                     let _ = tx.send(Event::ServerClipboard(clipboard::read_server_text(&mut s)?));
                     notify();
@@ -112,12 +126,35 @@ mod tests {
         let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
 
         let (tx, rx) = std::sync::mpsc::channel();
-        run(&address, &Credentials { user: String::new(), password: "wrong-pw".into() }, tx, || {});
+        run(
+            &address,
+            &Credentials {
+                user: String::new(),
+                password: "wrong-pw".into(),
+            },
+            tx,
+            || {},
+        );
         assert!(matches!(rx.recv().unwrap(), Event::Closed(r) if r.contains("authentication failed")));
 
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || run(&address, &Credentials { user: String::new(), password }, tx, || {}));
-        let Event::Connected { outbound, screen, files, .. } = rx.recv().unwrap() else { panic!("not connected") };
+        std::thread::spawn(move || {
+            run(
+                &address,
+                &Credentials {
+                    user: String::new(),
+                    password,
+                },
+                tx,
+                || {},
+            )
+        });
+        let Event::Connected {
+            outbound, screen, files, ..
+        } = rx.recv().unwrap()
+        else {
+            panic!("not connected")
+        };
         assert!(matches!(rx.recv().unwrap(), Event::ScreenUpdated));
         assert!(screen.lock().unwrap().pixels.iter().any(|&b| b != 0), "screen is blank");
 
@@ -146,7 +183,9 @@ mod tests {
         assert!(matches!(next_files(), file_transfer::Update::Access(true)));
         assert!(matches!(next_files(), file_transfer::Update::Drives(d) if !d.is_empty()));
         files.list("C:\\srv\\ft\\");
-        let file_transfer::Update::Listing { entries, .. } = next_files() else { panic!("no listing") };
+        let file_transfer::Update::Listing { entries, .. } = next_files() else {
+            panic!("no listing")
+        };
         let random = entries.iter().find(|e| e.name == "random.bin").expect("random.bin listed");
         assert_eq!((random.size, random.is_dir), (100_000, false));
         let tmp = std::env::temp_dir();

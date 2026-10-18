@@ -30,7 +30,8 @@ impl InputForwarder {
             self.mods = m;
 
             if let Some(p) = i.pointer.hover_pos().filter(|p| viewport.contains(*p)) {
-                let buttons = i.pointer.primary_down() as u8 | (i.pointer.middle_down() as u8) << 1 | (i.pointer.secondary_down() as u8) << 2;
+                let buttons =
+                    i.pointer.primary_down() as u8 | (i.pointer.middle_down() as u8) << 1 | (i.pointer.secondary_down() as u8) << 2;
                 let pos = viewport.to_remote(p);
                 if (buttons, pos) != (self.buttons, self.pos) {
                     let _ = protocol::pointer(out, buttons, pos);
@@ -41,14 +42,26 @@ impl InputForwarder {
             for event in &i.events {
                 match event {
                     Event::Text(text) if !(m.ctrl || m.mac_cmd) => {
+                        // On macOS, Option+key (e.g. Option+2 → '@' on Spanish layouts) holds Alt while emitting
+                        // the composed character. Release remote Alt around the character tap so Windows VNC servers
+                        // can synthesize their own AltGr (Ctrl+Alt) state for that keysym instead of seeing Alt+char.
+                        if m.alt {
+                            let _ = protocol::key(out, false, keysym::ALT);
+                        }
                         for c in text.chars() {
                             let _ = protocol::tap(out, keysym::from_char(c));
                         }
+                        if m.alt {
+                            let _ = protocol::key(out, true, keysym::ALT);
+                        }
                     }
-                    Event::Key { key, pressed, modifiers, .. } => {
+                    Event::Key {
+                        key, pressed, modifiers, ..
+                    } => {
                         let sym = keysym::from_special_key(*key).or_else(|| {
                             let name = key.name();
-                            (name.len() == 1 && (modifiers.ctrl || modifiers.mac_cmd)).then(|| name.to_ascii_lowercase().as_bytes()[0] as u32)
+                            (name.len() == 1 && (modifiers.ctrl || modifiers.mac_cmd))
+                                .then(|| name.to_ascii_lowercase().as_bytes()[0] as u32)
                         });
                         if let Some(sym) = sym {
                             let _ = protocol::key(out, *pressed, sym);

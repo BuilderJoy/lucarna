@@ -13,6 +13,7 @@ use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
 use crate::session::{self, Event, Outbound};
 
 const PREVIEW_INTERVAL: Duration = Duration::from_secs(5);
+const BELL_FLASH: Duration = Duration::from_secs(2);
 
 struct LiveSession {
     address: ServerAddress,
@@ -28,6 +29,8 @@ struct LiveSession {
     share_clipboard: bool,
     save_preview: bool,
     last_preview: Option<Instant>,
+    bell_until: Option<Instant>,
+    user_disconnected: bool,
     scale: Scale,
     /// Where the session bar floats in full screen, so clicks on it don't reach the remote machine.
     bar_rect: Option<egui::Rect>,
@@ -45,6 +48,7 @@ pub struct App {
 
 impl App {
     fn connect(&mut self, ctx: &egui::Context, req: ConnectRequest) {
+        self.dashboard.last_request = Some(req.clone());
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let (address, creds) = (req.address.clone(), req.creds);
@@ -88,11 +92,20 @@ impl App {
                         share_clipboard: opts.share_clipboard,
                         save_preview: opts.save_preview,
                         last_preview: None,
+                        bell_until: None,
+                        user_disconnected: false,
                         scale,
                         bar_rect: None,
                         has_frame: false,
                     };
                     self.live = Some(live);
+                }
+                Event::Bell => {
+                    if let Some(l) = &mut self.live {
+                        l.bell_until = Some(Instant::now() + BELL_FLASH);
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+                    ctx.request_repaint_after(BELL_FLASH);
                 }
                 Event::Files(update) => {
                     if let Some(l) = &mut self.live {
@@ -115,6 +128,7 @@ impl App {
                     }
                 }
                 Event::Closed(reason) => {
+                    let intentional = self.live.as_ref().is_some_and(|l| l.user_disconnected);
                     if let Some(l) = self.live.take()
                         && l.has_frame
                         && l.save_preview
@@ -125,7 +139,11 @@ impl App {
                     if ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                     }
-                    self.dashboard.status = reason;
+                    if intentional {
+                        self.dashboard.status.clear();
+                    } else {
+                        self.dashboard.status = reason;
+                    }
                     self.pending = None;
                     closed = true;
                 }
@@ -160,7 +178,8 @@ impl eframe::App for App {
         } else {
             // In full screen the bar floats over the screen and only appears when the pointer reaches the top.
             let near_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 48.0));
-            let show = near_top || ctx.any_popup_open() || !live.has_frame;
+            let bell_active = live.bell_until.is_some_and(|t| Instant::now() < t);
+            let show = near_top || ctx.any_popup_open() || !live.has_frame || bell_active;
             live.bar_rect = show.then(|| {
                 egui::Area::new(egui::Id::unique("fullscreen_bar"))
                     .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
@@ -215,8 +234,13 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         ui.label(RichText::new(&live.name).strong());
         let (w, h) = live.screen.lock().unwrap().size();
         ui.label(RichText::new(format!("{w}×{h}")).weak());
+        if live.bell_until.is_some_and(|t| Instant::now() < t) {
+            let accent = ui.visuals().selection.bg_fill;
+            ui.label(RichText::new(format!("{} Bell", char::from(Icon::Bell))).color(accent).strong());
+        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui.button(format!("{} Disconnect", char::from(Icon::LogOut))).clicked() {
+                live.user_disconnected = true;
                 live.outbound.close();
             }
             if ui
@@ -227,15 +251,32 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 live.files_view.open = !live.files_view.open;
             }
             ui.menu_button(format!("{} Keys", char::from(Icon::Keyboard)), |ui| {
+                ui.set_min_width(175.0);
                 for (label, keys) in input::SHORTCUTS {
                     if ui.button(*label).clicked() {
                         let _ = input::combo(&live.outbound, keys);
                         ui.close();
                     }
                 }
+                ui.separator();
+                ui.label(RichText::new("AltGr / ES symbols").size(11.0).weak());
+                for row in input::ALTGR_SYMBOLS.chunks(5) {
+                    ui.horizontal(|ui| {
+                        for &ch in row {
+                            if ui
+                                .add(egui::Button::new(RichText::new(ch.to_string()).monospace()).min_size(egui::vec2(28.0, 24.0)))
+                                .on_hover_text(format!("Send '{ch}' to remote computer"))
+                                .clicked()
+                            {
+                                let _ = input::type_char(&live.outbound, ch);
+                                ui.close();
+                            }
+                        }
+                    });
+                }
             })
             .response
-            .on_hover_text("Send key combinations your own system would intercept");
+            .on_hover_text("Send key combinations and AltGr symbols");
             if ui
                 .button(format!("{} Ctrl+Alt+Del", char::from(Icon::ShieldAlert)))
                 .on_hover_text("Send Ctrl+Alt+Del to the remote machine")
