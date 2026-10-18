@@ -42,7 +42,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 - Security types: None (1), VNC auth (2), MS-Logon II (0x71) and III (0x76); RFB 3.3 legacy path (including `0xFFFFFFFA` = MS-Logon II) handled in `handshake.rs`. `pick` chooses by whether a user name was given and never answers the UltraVNC marker (17). Details and the weak-crypto caveat in `docs/ultravnc-auth.md`. Credentials travel as `connection::Credentials` (user may be empty); the user name is saved in `connections.txt`, the password only in the keychain.
 - Clipboard: `clipboard::RemoteClipboard` advertises `ENC_EXTENDED_CLIPBOARD` (`0xC0A1E5CE`) in `SetEncodings`. When the server negotiates Extended Clipboard (`length < 0` with `CLIP_CAPS`), text is exchanged as zlib-compressed UTF-8 (`CLIP_PROVIDE | CLIP_UTF8`, `CLIP_NOTIFY`, `CLIP_REQUEST`, `CLIP_PEEK`); otherwise it falls back to classic RFB Latin-1. `RemoteClipboard::forward_paste` must run before `input.forward` in `app.rs` so paste reaches the server before Ctrl+V.
 
-Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
+Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for humans, with diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); keep it in sync when modules, threads or the message dispatch change.
 
 ## Git workflow
 
