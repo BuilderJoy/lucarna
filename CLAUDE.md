@@ -48,11 +48,11 @@ All work happens on the long-lived `develop` branch; `main` only receives merges
 
 ### Session bar
 
-`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server.
+`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server, and `egui_wants_keyboard_input()` stops keyboard events while typing in our own UI text inputs.
 
 ### File transfer (UltraVNC, message type 7)
 
-Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on the wire (UltraVNC never swaps it); `size`/`length` are big-endian. `RemoteFiles` (UI handle, in `Event::Connected`) sends requests; `file_transfer::Receiver` lives on the session thread, assembles listings and writes downloads to `~/Downloads` via a `.part` file. A FileHeader is only accepted if the UI requested that file. The server answers nothing when FT is disabled, so the UI times out.
+Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on the wire (UltraVNC never swaps it); `size`/`length` are big-endian. Both `FileHeader` (4) and `FileTransferOffer` (8) carry 4 extra trailing bytes (`sizeH`, high 32 bits of file size) outside `length`. `RemoteFiles` (UI handle, in `Event::Connected`) sends requests and spawns background upload streaming when the server answers `FileAcceptHeader`; `file_transfer::Receiver` lives on the session thread, tracks negotiated block size (`8 KiB` default for `libvncserver`, `32 KiB` when UltraVNC sends `FileTransferProtocolVersion` v3+), assembles listings, and writes downloads to the active local directory via a `.lucarna-part` file. `FilesView` is a two-pane (`Local` | `Remote`) browser supporting drag-and-drop upload queues and remote commands (`CDirCreate`, `CFileDelete`, `CFileRename`).
 
 ### Saved connections
 

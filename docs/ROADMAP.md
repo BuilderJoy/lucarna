@@ -2,7 +2,7 @@
 
 Plan para llegar desde el visor básico actual hasta un cliente que se pueda usar a diario contra UltraVNC Server, incluida la transferencia de archivos.
 
-## Dónde estamos (2026-10-17)
+## Dónde estamos (2026-10-18)
 
 | Área | Estado |
 |---|---|
@@ -16,7 +16,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Fase 3.5: dashboard con conexiones guardadas, contraseñas en el llavero del SO | ✅ |
-| Fase 2.2 (solo lectura): permiso, unidades, navegar carpetas y descargar archivos | ✅ |
+| Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (pendiente zip de carpetas `!UVNCDIR-` y prueba con UltraVNC en Windows) |
 | Fase 3.2, 3.3, 3.4, 3.7: solo ver, escalado Fit/1:1, pantalla completa, menú de teclas | ✅ |
 | Fase 3.1: cursor local (pseudo-encoding Cursor) | ✅ |
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
@@ -131,9 +131,9 @@ Es la mejor opción con internet lento porque usa JPEG en zonas con foto, pero e
 
 Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especificación pública**: la fuente de verdad es el código de UltraVNC (`rfb/rfbproto.h`, el visor en `vncviewer/FileTransfer.cpp` y el servidor en `winvnc/vncclient.cpp`).
 
-### 2.1 Spike de investigación (antes de escribir código) ✅ en papel (2026-10-17)
+### 2.1 Spike de investigación (antes de escribir código) ✅ (2026-10-18)
 
-**Hecho:** [docs/ultravnc-ft.md](ultravnc-ft.md), leído del código fuente oficial (commit `0cd8b41`). Falta confirmar con tráfico real (punto 5) y documentar subida y comandos antes de implementar la escritura.
+**Hecho:** [docs/ultravnc-ft.md](ultravnc-ft.md), leído del código fuente oficial (commit `0cd8b41`) y de `libvncserver/rfbserver.c`. Documenta tanto lectura (permiso, unidades, listados, descarga) como escritura (`FileTransferOffer` con los 4 bytes extra `sizeH` fuera de `length`, `FileAcceptHeader`, tamaño de bloque negociado por `FileTransferProtocolVersion` vs 8 KiB fijo en `libvncserver`, comandos `CDirCreate`/`CFileDelete`/`CFileRename` y sus respuestas `CommandReturn`).
 
 1. Leer `rfbproto.h` de la versión estable actual y anotar en `docs/ultravnc-ft.md`:
    - el tipo de mensaje (`rfbFileTransfer`, que se espera sea 7),
@@ -147,9 +147,13 @@ Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especific
 
 **Salida:** documento con los bytes exactos de cada mensaje, confirmados contra la captura. **Tamaño:** M (2–3 días).
 
-### 2.2 Implementación (nuevo slice)
+### 2.2 Implementación (nuevo slice) ✅ (2026-10-18)
 
-**Solo lectura hecha (2026-10-17):** `features/file_transfer/` con `protocol.rs`, `transfer.rs` y `view.rs`. Hace el permiso, lista unidades, navega con doble clic y descarga con barra de progreso y cancelación. Las descargas van a `~/Downloads` (sin diálogo nativo, por ahora). Se escriben a un `.part` y se renombran al terminar, y los nombres se sanean. Probado en vivo contra x11vnc `-ultrafilexfer` (libvncserver); **falta probar contra UltraVNC Server en Windows**. La prueba con libvncserver descubrió que `contentParam` viaja en little-endian. Pendiente: subir archivos, comandos, carpetas (zip `!UVNCDIR-`) y arrastrar y soltar.
+**Hecho:** `features/file_transfer/` con `protocol.rs`, `transfer.rs` y `view.rs`. Ventana de dos columnas (`Local` | `Remote`, sin añadir `rfd`):
+
+- **Lectura:** permiso, unidades, navegación con doble clic en ambos paneles y descarga a la carpeta local activa (por defecto `~/Downloads`), escribiendo a `.lucarna-part` y renombrando al terminar, con nombres saneados.
+- **Escritura:** subida de archivos (`FileTransferOffer` → `FileAcceptHeader` → `FilePacket` en hilo propio con compresión zlib solo cuando reduce el bloque → `EndOfFile`), tamaño de bloque de 8 KiB por defecto compatible con `libvncserver` y 32 KiB cuando el servidor anuncia `FileTransferProtocolVersion` v3+, cola de subida, arrastrar y soltar desde el sistema (`egui::DroppedFile`), cancelación de descargas y subidas, y comandos remotos (`+ Folder`, `Rename`, `Delete` con confirmación). Mientras un campo de texto de la UI tiene el foco, no se reenvían teclas al servidor remoto.
+- **Pendiente para más adelante:** transferencia de carpetas completas como zip (`!UVNCDIR-`, que requiere `zip`) y prueba contra UltraVNC Server en Windows.
 
 ```
 features/file_transfer/

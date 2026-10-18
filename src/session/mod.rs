@@ -34,7 +34,7 @@ impl Outbound {
 }
 
 /// Connects and runs the session on the calling thread until it ends.
-pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, notify: impl Fn()) {
+pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, notify: impl Fn() + Clone + Send + Sync + 'static) {
     let result: io::Result<()> = (|| {
         let mut s = connect(address)?;
         s.set_nodelay(true)?;
@@ -46,7 +46,11 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
         remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
         let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
         remote_screen::request_update(&outbound, false, &screen)?;
-        let files = Arc::new(RemoteFiles::new(outbound.clone()));
+        let (tx_files, notify_files) = (tx.clone(), notify.clone());
+        let files = Arc::new(RemoteFiles::new(outbound.clone(), move |u| {
+            let _ = tx_files.send(Event::Files(u));
+            notify_files();
+        }));
         let _ = tx.send(Event::Connected { name: init.name, outbound: outbound.clone(), screen: screen.clone(), files: files.clone() });
         // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
         let mut s = BufReader::with_capacity(1 << 16, s);
@@ -126,7 +130,7 @@ mod tests {
         let cursor = screen.lock().unwrap().cursor.take().unwrap();
         assert!(cursor.size[0] > 0 && cursor.rgba.chunks(4).any(|p| p[3] == 255), "cursor has visible pixels");
 
-        // File transfer (x11vnc -ultrafilexfer maps C:\ to /). Downloads land in ~/Downloads and are removed.
+        // File transfer (x11vnc -ultrafilexfer maps C:\ to /).
         let next_files = || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
@@ -145,8 +149,9 @@ mod tests {
         let file_transfer::Update::Listing { entries, .. } = next_files() else { panic!("no listing") };
         let random = entries.iter().find(|e| e.name == "random.bin").expect("random.bin listed");
         assert_eq!((random.size, random.is_dir), (100_000, false));
+        let tmp = std::env::temp_dir();
         for (name, size) in [("hello.txt", 27), ("random.bin", 100_000)] {
-            files.download(&format!("C:\\srv\\ft\\{name}"));
+            files.download(&format!("C:\\srv\\ft\\{name}"), &tmp);
             let dest = loop {
                 match next_files() {
                     file_transfer::Update::Progress { .. } => {}
@@ -158,6 +163,54 @@ mod tests {
             std::fs::remove_file(&dest).unwrap();
             assert_eq!(len, size, "{name}");
         }
+
+        // Write side: create dir, upload multi-block file, rename, download back, and delete.
+        files.delete("C:\\srv\\ft\\sub\\uploaded.bin");
+        files.delete("C:\\srv\\ft\\sub\\renamed.bin");
+        files.delete("C:\\srv\\ft\\sub");
+        let _ = next_files();
+        let _ = next_files();
+        let _ = next_files();
+
+        files.create_dir("C:\\srv\\ft\\sub");
+        assert!(matches!(next_files(), file_transfer::Update::Command { ok: true, .. }));
+
+        let local_src = tmp.join("uploaded.bin");
+        let payload: Vec<u8> = (0..20_000u32).map(|i| (i.wrapping_mul(31) & 0xff) as u8).collect();
+        std::fs::write(&local_src, &payload).unwrap();
+        files.upload(&local_src, "C:\\srv\\ft\\sub\\");
+        loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Uploaded(name) => {
+                    assert_eq!(name, "uploaded.bin");
+                    break;
+                }
+                u => panic!("upload failed: {u:?}"),
+            }
+        }
+        std::fs::remove_file(&local_src).unwrap();
+
+        files.rename("C:\\srv\\ft\\sub\\uploaded.bin", "C:\\srv\\ft\\sub\\renamed.bin");
+        assert!(matches!(next_files(), file_transfer::Update::Command { ok: true, .. }));
+
+        files.download("C:\\srv\\ft\\sub\\renamed.bin", &tmp);
+        let dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(dest) => break dest,
+                u => panic!("download of renamed.bin failed: {u:?}"),
+            }
+        };
+        let downloaded = std::fs::read(&dest).unwrap();
+        std::fs::remove_file(&dest).unwrap();
+        assert_eq!(downloaded, payload);
+
+        files.delete("C:\\srv\\ft\\sub\\renamed.bin");
+        assert!(matches!(next_files(), file_transfer::Update::Command { ok: true, .. }));
+        files.delete("C:\\srv\\ft\\sub");
+        assert!(matches!(next_files(), file_transfer::Update::Command { ok: true, .. }));
+
         outbound.close();
     }
 }

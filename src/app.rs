@@ -39,7 +39,7 @@ impl App {
     fn connect(&mut self, ctx: &egui::Context, address: ServerAddress, creds: Credentials) {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || session::run(&address, &creds, tx, || ctx.request_repaint()));
+        std::thread::spawn(move || session::run(&address, &creds, tx, move || ctx.request_repaint()));
         self.events = Some(rx);
         self.dashboard.status.clear();
     }
@@ -57,7 +57,7 @@ impl App {
                 }
                 Event::Files(update) => {
                     if let Some(l) = &mut self.live {
-                        l.files_view.apply(update);
+                        l.files_view.apply(update, &l.files);
                     }
                 }
                 Event::ScreenUpdated => self.live.iter_mut().for_each(|l| l.has_frame = true),
@@ -119,10 +119,10 @@ impl eframe::App for App {
                 return;
             }
             let viewport = live.view.show(ui, &live.screen, live.scale);
-            // Clicks on our own windows must not reach the remote machine.
+            // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
             let over_ui = [live.files_view.rect, live.bar_rect].into_iter().flatten().any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
             live.view.draw_cursor(ui, &viewport, !over_ui);
-            if !over_ui && !live.view_only {
+            if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
                 clipboard::forward_paste(ui, &live.outbound);
                 live.input.forward(ui, &viewport, &live.outbound);
             }
@@ -142,7 +142,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
             if ui.button("Disconnect").clicked() {
                 live.outbound.close();
             }
-            if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse and download the server's files").clicked() {
+            if ui.selectable_label(live.files_view.open, "Files").on_hover_text("Browse, download and upload files").clicked() {
                 live.files_view.open = !live.files_view.open;
             }
             ui.menu_button("Keys", |ui| {
