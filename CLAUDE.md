@@ -18,6 +18,8 @@ docker run -d --rm --name lucarna-test -p 5999:5900 lucarna-test-server
 VNC_TEST_ADDR=127.0.0.1:5999 VNC_TEST_PASSWORD=secret cargo test -- --ignored
 ```
 
+VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server".
+
 Tests live in `#[cfg(test)]` modules inside `src/`; `tests/server/` only holds the Dockerfile.
 
 ## Architecture
@@ -44,7 +46,7 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Git workflow
 
-All work happens on the long-lived `develop` branch; `main` only receives merges at milestones (e.g. the v0.1 release in the roadmap), through a PR. Commit per roadmap item or phase, updating `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes, and push `develop` after each. Keep tests and `cargo clippy` clean before every push. Commit trailer: `Co-Authored-By: <model in use>`.
+`main` holds releases (milestones such as v0.1); `develop` is the integration branch and nobody commits to it directly. **Every new feature, fix or chore gets its own branch cut from an up-to-date `develop`**, named `feature/<topic>` (e.g. `feature/tight-encoding`), `fix/<topic>`, `chore/<topic>` or `docs/<topic>`. Commit there, updating `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes, and push the branch after each commit. When `cargo test` and `cargo clippy --all-targets` are clean, open a PR into `develop` (`gh pr create --base develop`) and leave the merge to the user; never merge your own PR unasked. A release is a PR from `develop` into `main`. Other sessions commit in parallel: `git fetch` and read `git log origin/develop` before starting and before editing files you haven't touched recently. Commit trailer: `Co-Authored-By: <model in use>`.
 
 ### Chat and repeater
 
