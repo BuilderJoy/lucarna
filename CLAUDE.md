@@ -46,9 +46,13 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 All work happens on the long-lived `develop` branch; `main` only receives merges at milestones (e.g. the v0.1 release in the roadmap), through a PR. Commit per roadmap item or phase, updating `docs/ROADMAP.md` (✅, date, deviations) and this file when architecture changes, and push `develop` after each. Keep tests and `cargo clippy` clean before every push. Commit trailer: `Co-Authored-By: <model in use>`.
 
+### Chat and repeater
+
+`features/chat/`: TextChat (message 11), `session::run` forwards `Event::Chat`, `ChatView` is the window. The server can open it, so `app.rs` also includes `chat.rect` in the pointer-blocking list. Repeater: `ConnectRequest.repeater` → `session::run(.., repeater, ..)` dials the repeater and calls `handshake::via_repeater(address)` before `handshake::perform`. With a repeater, `address` is the target (`host:port` or `ID:1234`), not what we dial. Latin-1 helpers live in `shared/wire.rs` (`from_latin1`, `to_latin1`).
+
 ### Session bar
 
-`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server, and `egui_wants_keyboard_input()` stops keyboard events while typing in our own UI text inputs.
+`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Chat, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server, and `egui_wants_keyboard_input()` stops keyboard events while typing in our own UI text inputs.
 
 ### File transfer (UltraVNC, message type 7)
 

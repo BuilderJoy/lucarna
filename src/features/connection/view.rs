@@ -14,6 +14,8 @@ use super::{Credentials, ServerAddress};
 #[derive(Clone)]
 pub struct ConnectRequest {
     pub address: ServerAddress,
+    /// UltraVNC repeater to dial first; `address` is then what the repeater should reach.
+    pub repeater: Option<ServerAddress>,
     pub creds: Credentials,
     pub options: SessionOptions,
 }
@@ -53,6 +55,7 @@ struct PropertiesEditor {
     name: String,
     address: String,
     user: String,
+    repeater: String,
     password: String,
     show_password: bool,
     labels_input: String,
@@ -69,6 +72,7 @@ impl Default for PropertiesEditor {
             name: String::new(),
             address: String::new(),
             user: String::new(),
+            repeater: String::new(),
             password: String::new(),
             show_password: false,
             labels_input: String::new(),
@@ -930,6 +934,7 @@ impl Dashboard {
                     password: saved::password(&c.address).unwrap_or_default(),
                 };
                 Some(ConnectRequest {
+                    repeater: ServerAddress::parse(&c.repeater),
                     address: c.address,
                     creds,
                     options,
@@ -1076,9 +1081,10 @@ impl Dashboard {
                             ui.add_space(6.0);
                             r
                         };
-                        let addr_resp = field(ui, "VNC Server", &mut self.editor.address, "host, host:display or host::port");
+                        let addr_resp = field(ui, "VNC Server", &mut self.editor.address, "host, host:display or host::port (ID:1234 behind a repeater)");
                         field(ui, "Friendly Name", &mut self.editor.name, "optional, e.g. Office PC");
                         field(ui, "Username", &mut self.editor.user, "optional, for MS-Logon (Windows login)");
+                        field(ui, "Repeater", &mut self.editor.repeater, "optional UltraVNC repeater, e.g. repeater.example.com:5901");
 
                         ui.label(RichText::new("Password").strong());
                         ui.horizontal(|ui| {
@@ -1109,6 +1115,7 @@ impl Dashboard {
                                 };
                                 self.save_editor(target.clone());
                                 request = Some(ConnectRequest {
+                                    repeater: ServerAddress::parse(&self.editor.repeater),
                                     address: target,
                                     creds,
                                     options: opts,
@@ -1184,6 +1191,7 @@ impl Dashboard {
                         };
                         self.save_editor(t.clone());
                         request = Some(ConnectRequest {
+                            repeater: ServerAddress::parse(&self.editor.repeater),
                             address: t,
                             creds,
                             options: opts,
@@ -1460,6 +1468,7 @@ impl Dashboard {
             name: String::new(),
             address: prefill_address.unwrap_or_default().to_string(),
             user: String::new(),
+            repeater: String::new(),
             password: String::new(),
             show_password: false,
             labels_input: initial_label,
@@ -1477,6 +1486,7 @@ impl Dashboard {
             name: c.name.clone(),
             address: c.address.as_str().to_string(),
             user: c.user.clone(),
+            repeater: c.repeater.clone(),
             password: saved::password(&c.address).unwrap_or_default(),
             show_password: false,
             labels_input: c.labels.join(", "),
@@ -1495,6 +1505,7 @@ impl Dashboard {
         };
         let labels = saved::parse_labels(&self.editor.labels_input);
         let user = self.editor.user.trim().to_string();
+        let repeater = self.editor.repeater.trim().to_string();
         let favorite = self.editor.favorite;
         let options = self.editor.options.clone();
 
@@ -1510,6 +1521,7 @@ impl Dashboard {
                 name,
                 address: address.clone(),
                 user,
+                repeater,
                 labels,
                 favorite,
                 options,
@@ -1521,6 +1533,7 @@ impl Dashboard {
                 name,
                 address: address.clone(),
                 user,
+                repeater,
                 labels,
                 favorite,
                 options,
@@ -1600,6 +1613,7 @@ impl Dashboard {
     fn quick_connect_request(&self, address: ServerAddress) -> ConnectRequest {
         if let Some(c) = self.saved.iter().find(|c| c.address == address) {
             ConnectRequest {
+                repeater: ServerAddress::parse(&c.repeater),
                 address: c.address.clone(),
                 creds: Credentials {
                     user: c.user.clone(),
@@ -1609,6 +1623,7 @@ impl Dashboard {
             }
         } else {
             ConnectRequest {
+                repeater: None,
                 creds: Credentials {
                     user: String::new(),
                     password: saved::password(&address).unwrap_or_default(),

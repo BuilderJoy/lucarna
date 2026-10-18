@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
+use crate::features::chat::{ChatView, Msg};
 use crate::features::clipboard::RemoteClipboard;
 use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions};
 use crate::features::file_transfer::{FilesView, RemoteFiles};
@@ -24,6 +25,7 @@ struct LiveSession {
     input: InputForwarder,
     files: Arc<RemoteFiles>,
     files_view: FilesView,
+    chat: ChatView,
     clipboard: Arc<RemoteClipboard>,
     /// Don't forward keyboard, mouse or clipboard to the server.
     view_only: bool,
@@ -52,9 +54,9 @@ impl App {
         self.dashboard.last_request = Some(req.clone());
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
-        let (address, creds) = (req.address.clone(), req.creds);
+        let (address, repeater, creds) = (req.address.clone(), req.repeater, req.creds);
         self.pending = Some((req.address, req.options));
-        std::thread::spawn(move || session::run(&address, &creds, tx, move || ctx.request_repaint()));
+        std::thread::spawn(move || session::run(&address, repeater.as_ref(), &creds, tx, move || ctx.request_repaint()));
         self.events = Some(rx);
         self.dashboard.status.clear();
     }
@@ -90,6 +92,7 @@ impl App {
                         input: InputForwarder::default(),
                         files,
                         files_view: FilesView::default(),
+                        chat: ChatView::default(),
                         clipboard,
                         view_only: opts.view_only,
                         share_clipboard: opts.share_clipboard,
@@ -109,6 +112,14 @@ impl App {
                     }
                     ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
                     ctx.request_repaint_after(BELL_FLASH);
+                }
+                Event::Chat(msg) => {
+                    if matches!(msg, Msg::Text(_)) {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+                    }
+                    if let Some(l) = &mut self.live {
+                        l.chat.apply(msg);
+                    }
                 }
                 Event::Files(update) => {
                     if let Some(l) = &mut self.live {
@@ -209,7 +220,7 @@ impl eframe::App for App {
             }
             let viewport = live.view.show(ui, &live.screen, live.scale);
             // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
-            let over_ui = [live.files_view.rect, live.bar_rect]
+            let over_ui = [live.files_view.rect, live.chat.rect, live.bar_rect]
                 .into_iter()
                 .flatten()
                 .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
@@ -222,6 +233,7 @@ impl eframe::App for App {
             }
         });
         live.files_view.show(&ctx, &live.files);
+        live.chat.show(&ctx, &live.outbound);
     }
 }
 
@@ -252,6 +264,13 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 .clicked()
             {
                 live.files_view.open = !live.files_view.open;
+            }
+            if ui
+                .selectable_label(live.chat.open, format!("{} Chat", char::from(Icon::MessageCircle)))
+                .on_hover_text("Chat with the person at the remote machine")
+                .clicked()
+            {
+                live.chat.toggle(&live.outbound);
             }
             ui.menu_button(format!("{} Keys", char::from(Icon::Keyboard)), |ui| {
                 ui.set_min_width(175.0);

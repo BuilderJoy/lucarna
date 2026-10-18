@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use super::auth::Credentials;
-use crate::shared::wire::{invalid, read_bytes};
+use crate::shared::wire::{invalid, read_bytes, to_latin1};
 
 const DH_LIMIT: u64 = 1 << 31;
 const USER_LEN: usize = 256;
@@ -53,7 +53,7 @@ fn send_credentials(s: &mut impl Write, creds: &Credentials, key: [u8; 8]) -> io
 
 /// Windows-ANSI text as Latin-1, NUL-padded to `size`; refuses text longer than `limit` instead of cutting it.
 fn latin1(text: &str, limit: usize, size: usize, what: &str) -> io::Result<Vec<u8>> {
-    let mut bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
+    let mut bytes = to_latin1(text);
     if bytes.len() > limit {
         return Err(invalid(format!("{what} too long for MS-Logon (max {limit})")));
     }

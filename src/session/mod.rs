@@ -6,6 +6,7 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
 
+use crate::features::chat;
 use crate::features::clipboard::{self, RemoteClipboard};
 use crate::features::connection::{Credentials, ServerAddress, handshake};
 use crate::features::file_transfer::{self, RemoteFiles};
@@ -22,6 +23,7 @@ pub enum Event {
     },
     ScreenUpdated,
     Bell,
+    Chat(chat::Msg),
     Files(file_transfer::Update),
     ServerClipboard(String),
     Closed(String),
@@ -41,12 +43,16 @@ impl Outbound {
 }
 
 /// Connects and runs the session on the calling thread until it ends.
-pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, notify: impl Fn() + Clone + Send + Sync + 'static) {
+/// With a `repeater`, we dial it instead and tell it to reach `address` (host:port or `ID:number`).
+pub fn run(address: &ServerAddress, repeater: Option<&ServerAddress>, creds: &Credentials, tx: Sender<Event>, notify: impl Fn() + Clone + Send + Sync + 'static) {
     let result: io::Result<()> = (|| {
-        let mut s = connect(address)?;
+        let mut s = connect(repeater.unwrap_or(address))?;
         s.set_nodelay(true)?;
         // A server that accepts but never speaks would otherwise hang the handshake forever.
         s.set_read_timeout(Some(TIMEOUT))?;
+        if repeater.is_some() {
+            handshake::via_repeater(&mut s, address)?;
+        }
         let init = handshake::perform(&mut s, creds)?;
         s.set_read_timeout(None)?;
         let screen = Arc::new(Mutex::new(Framebuffer::new(init.width.into(), init.height.into())?));
@@ -89,6 +95,10 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
                         let _ = tx.send(Event::ServerClipboard(text));
                         notify();
                     }
+                }
+                11 => {
+                    let _ = tx.send(Event::Chat(chat::read(&mut s)?));
+                    notify();
                 }
                 7 => {
                     if let Some(update) = receiver.handle(file_transfer::read(&mut s)?, &files)? {
@@ -133,6 +143,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         run(
             &address,
+            None,
             &Credentials {
                 user: String::new(),
                 password: "wrong-pw".into(),
@@ -146,6 +157,7 @@ mod tests {
         std::thread::spawn(move || {
             run(
                 &address,
+                None,
                 &Credentials {
                     user: String::new(),
                     password,
@@ -255,6 +267,43 @@ mod tests {
         files.delete("C:\\srv\\ft\\sub");
         assert!(matches!(next_files(), file_transfer::Update::Command { ok: true, .. }));
 
+        outbound.close();
+    }
+
+    /// Same server, reached through a minimal UltraVNC repeater built from UltraVNC's repeater source:
+    /// greet with version 0.0, read the 250-byte target, then relay both ways.
+    #[test]
+    #[ignore = "needs a live VNC server"]
+    fn live_repeater() {
+        use std::io::Read;
+        let target = ServerAddress::parse(&std::env::var("VNC_TEST_ADDR").unwrap()).unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let repeater = ServerAddress::parse(&format!("127.0.0.1:{}", listener.local_addr().unwrap().port())).unwrap();
+        std::thread::spawn(move || {
+            let (mut viewer, _) = listener.accept().unwrap();
+            viewer.write_all(b"RFB 000.000\n").unwrap();
+            let mut asked = [0u8; 250];
+            viewer.read_exact(&mut asked).unwrap();
+            let end = asked.iter().position(|&b| b == 0).unwrap();
+            let mut server = TcpStream::connect(std::str::from_utf8(&asked[..end]).unwrap()).unwrap();
+            let (mut from_viewer, mut to_server) = (viewer.try_clone().unwrap(), server.try_clone().unwrap());
+            std::thread::spawn(move || drop(io::copy(&mut from_viewer, &mut to_server)));
+            let _ = io::copy(&mut server, &mut viewer);
+        });
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || run(&target, Some(&repeater), &Credentials { user: String::new(), password }, tx, || {}));
+        let Event::Connected { outbound, .. } = rx.recv().unwrap() else { panic!("not connected through the repeater") };
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left).expect("a screen update through the repeater") {
+                Event::ScreenUpdated => break,
+                Event::Closed(r) => panic!("closed: {r}"),
+                _ => {}
+            }
+        }
         outbound.close();
     }
 }

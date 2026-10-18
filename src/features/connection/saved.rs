@@ -43,6 +43,8 @@ pub struct SavedConnection {
     pub address: ServerAddress,
     /// Windows user name for MS-Logon servers; empty for plain VNC passwords.
     pub user: String,
+    /// UltraVNC repeater to dial instead of `address` (then `address` is `host:port` or `ID:number`); empty for none.
+    pub repeater: String,
     /// User-defined organization labels/groups (e.g. "Cambridge", "London").
     pub labels: Vec<String>,
     pub favorite: bool,
@@ -58,6 +60,7 @@ impl SavedConnection {
             name: name.into(),
             address,
             user: user.into(),
+            repeater: String::new(),
             labels: Vec::new(),
             favorite: false,
             options: SessionOptions::default(),
@@ -113,22 +116,24 @@ pub fn import_from(path: &Path) -> Result<Vec<SavedConnection>, String> {
     Ok(parse(&text))
 }
 
-/// Format per line: `name\taddress\tuser[\tlabels\tflags\tlast_connected]`.
+/// Format per line: `name\taddress\tuser[\tlabels\tflags\tlast_connected\trepeater]`.
 /// Earlier 2-column and 3-column files remain valid.
 fn parse(text: &str) -> Vec<SavedConnection> {
     text.lines()
         .filter_map(|l| {
-            let mut cols = l.splitn(6, '\t');
+            let mut cols = l.splitn(7, '\t');
             let (name, address) = (cols.next()?, cols.next()?);
             let address = ServerAddress::parse(address)?;
             let user = cols.next().unwrap_or_default().into();
             let labels = parse_labels(cols.next().unwrap_or_default());
             let (favorite, options) = parse_flags(cols.next().unwrap_or_default());
             let last_connected = cols.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+            let repeater = cols.next().unwrap_or_default().trim().into();
             Some(SavedConnection {
                 name: name.into(),
                 address,
                 user,
+                repeater,
                 labels,
                 favorite,
                 options,
@@ -144,17 +149,18 @@ fn render(list: &[SavedConnection]) -> String {
         .map(|c| {
             let labels = c.labels.iter().map(|l| clean(l).replace(',', " ")).collect::<Vec<_>>().join(",");
             let flags = render_flags(c.favorite, &c.options);
-            if labels.is_empty() && flags.is_empty() && c.last_connected == 0 {
+            if labels.is_empty() && flags.is_empty() && c.last_connected == 0 && c.repeater.is_empty() {
                 format!("{}\t{}\t{}\n", clean(&c.name), c.address.as_str(), clean(&c.user))
             } else {
                 format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                     clean(&c.name),
                     c.address.as_str(),
                     clean(&c.user),
                     labels,
                     flags,
-                    c.last_connected
+                    c.last_connected,
+                    clean(&c.repeater)
                 )
             }
         })
@@ -299,6 +305,15 @@ mod tests {
                 SavedConnection::new("Old", ServerAddress::parse("10.0.0.9").unwrap(), ""),
             ]
         );
+    }
+
+    #[test]
+    fn repeater_round_trip() {
+        let mut c = SavedConnection::new("Behind NAT", ServerAddress::parse("ID:1234").unwrap(), "");
+        c.repeater = "repeater.example.com:5901".into();
+        let text = render(std::slice::from_ref(&c));
+        assert_eq!(text, "Behind NAT\tID:1234\t\t\t\t0\trepeater.example.com:5901\n");
+        assert_eq!(parse(&text), [c]);
     }
 
     #[test]

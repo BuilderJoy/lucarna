@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use super::auth::{self, Credentials};
 use super::mslogon;
+use super::ServerAddress;
 use crate::shared::wire::{invalid, read_bytes, read_string, read_u16, read_u32, read_u8};
 
 #[derive(Debug)]
@@ -32,6 +33,21 @@ fn pick(types: &[u8], creds: &Credentials) -> io::Result<u8> {
         return Err(invalid("this server needs a Windows user name (MS-Logon)"));
     }
     Err(invalid(format!("unsupported security types {types:?}")))
+}
+
+/// UltraVNC repeater: it greets with version 0.0, then wants the real target as a 250-byte NUL-padded
+/// "host:port" or "ID:number", and relays the server's own RFB version after that.
+pub fn via_repeater(s: &mut (impl Read + Write), target: &ServerAddress) -> io::Result<()> {
+    if read_bytes(s, 12)? != b"RFB 000.000\n" {
+        return Err(invalid("not an UltraVNC repeater"));
+    }
+    let target = target.as_str().as_bytes();
+    if target.len() >= 250 {
+        return Err(invalid("repeater target too long"));
+    }
+    let mut msg = [0u8; 250];
+    msg[..target.len()].copy_from_slice(target);
+    s.write_all(&msg)
 }
 
 pub fn perform(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<ServerInit> {
@@ -105,6 +121,20 @@ mod tests {
         m.extend(2u32.to_be_bytes());
         m.extend(b"pc");
         m
+    }
+
+    #[test]
+    fn repeater_receives_the_target_padded_to_250_bytes() {
+        let mut conn = Duplex::new(b"RFB 000.000\n".to_vec());
+        via_repeater(&mut conn, &ServerAddress::parse("ID:1234").unwrap()).unwrap();
+        assert_eq!(conn.output.len(), 250);
+        assert_eq!(&conn.output[..8], b"ID:1234\0");
+        assert!(conn.output[7..].iter().all(|&b| b == 0));
+        // A plain server (or anything else) behind the "repeater" is refused rather than misread.
+        let err = via_repeater(&mut Duplex::new(b"RFB 003.008\n".to_vec()), &ServerAddress::parse("pc").unwrap());
+        assert!(err.unwrap_err().to_string().contains("not an UltraVNC repeater"));
+        let long = ServerAddress::parse(&"h".repeat(250)).unwrap();
+        assert!(via_repeater(&mut Duplex::new(b"RFB 000.000\n".to_vec()), &long).is_err());
     }
 
     #[test]

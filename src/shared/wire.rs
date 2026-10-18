@@ -24,6 +24,16 @@ pub fn read_u32(s: &mut impl Read) -> io::Result<u32> {
     Ok(u32::from_be_bytes(read_bytes(s, 4)?.try_into().unwrap()))
 }
 
+/// Windows-ANSI text off the wire, read as Latin-1.
+pub fn from_latin1(b: &[u8]) -> String {
+    b.iter().map(|&c| char::from(c)).collect()
+}
+
+/// Characters outside Latin-1 become '?'.
+pub fn to_latin1(s: &str) -> Vec<u8> {
+    s.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect()
+}
+
 /// u32 length-prefixed string, rejected above `max` bytes.
 pub fn read_string(s: &mut impl Read, max: usize) -> io::Result<String> {
     let len = read_u32(s)? as usize;

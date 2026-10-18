@@ -19,6 +19,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (pendiente zip de carpetas `!UVNCDIR-` y prueba con UltraVNC en Windows) |
 | Fase 3.1–3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES, Extended Clipboard UTF-8 y campana (Bell) | ✅ |
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
+| Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -236,7 +237,16 @@ Muchos UltraVNC en empresas usan MS-Logon II en vez de contraseña VNC.
 
 ---
 
-## Fase 5: chat y repetidor
+## Fase 5: chat y repetidor ✅ (2026-10-18)
+
+**Hecho, con lo mínimo** (leído de `TextChat.cpp`, `ClientConnection::NegotiateProxy` y el código del repetidor de UltraVNC):
+
+- **Chat:** `features/chat/` (`protocol.rs`, `view.rs`). Mensaje 11 con `3 pad + u32 length`; la longitud `0xFFFFFFFF/FE/FD` es Open/Close/Finished y cualquier otra es texto (máx. 16384 bytes, Latin-1 como el portapapeles). Botón **Chat** en la barra: abrirlo o cerrarlo se lo pide también al servidor. Si el servidor abre el chat o escribe, la ventana se abre sola y el Dock avisa. Mientras se escribe en ella no se reenvían teclas ni ratón al equipo remoto. Verificado con tests de formato y de límites; **sin probar contra un servidor**: x11vnc solo ofrece chat con el programa auxiliar `ssvnc`, que no está en el contenedor.
+- **Repetidor:** `handshake::via_repeater`. Se conecta al repetidor, que saluda con `RFB 000.000\n`; se le manda el destino en 250 bytes rellenos con ceros, `host:puerto` (Modo I) o `ID:1234` (Modo II), y después el repetidor reenvía el saludo real del servidor. Campo **Repeater** en las propiedades de la conexión, guardado como séptima columna de `connections.txt`; el campo **VNC Server** pasa a ser el destino. Probado de punta a punta contra x11vnc con un relé mínimo escrito en el test según el código del repetidor (`live_repeater`).
+- **Lo que quedó fuera a propósito:** chat Unicode (pseudo-encoding `0xFFFF8006`, hoy se manda Latin-1), la rama "el servidor no es un repetidor" (si pones un repetidor y no saluda con 0.0, falla con un error claro en vez de adivinar) y un puerto por defecto para el repetidor (el de UltraVNC suele ser 5901: escríbelo).
+- **Aviso:** en Modo II el repetidor retiene la conexión hasta que el servidor con ese ID se conecte a él; si tarda más de 10 s, Lucarna da un timeout.
+
+Plan original, para referencia:
 
 ### 5.1 Chat (mensaje TextChat, 11)
 
