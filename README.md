@@ -53,6 +53,8 @@ UltraVNC's DSM encryption plugins (SecureVNC, MSRC4) are not supported, and VeNC
 
 ## Architecture
 
+Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 Vertical slices, one per feature, named in the domain's language (RFB, RFC 6143):
 
 ```
