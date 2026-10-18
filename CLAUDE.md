@@ -18,7 +18,7 @@ docker run -d --rm --name lucarna-test -p 5999:5900 lucarna-test-server
 VNC_TEST_ADDR=127.0.0.1:5999 VNC_TEST_PASSWORD=secret cargo test -- --ignored
 ```
 
-VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server".
+VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server". From a terminal, adding a blank line to `Cargo.toml` and then `git checkout Cargo.toml` forces a workspace reload and a fresh check (touching `.rs` files does not).
 
 Tests live in `#[cfg(test)]` modules inside `src/`; `tests/server/` only holds the Dockerfile.
 
