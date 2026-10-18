@@ -6,7 +6,7 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
 
-use crate::features::clipboard;
+use crate::features::clipboard::{self, RemoteClipboard};
 use crate::features::connection::{Credentials, ServerAddress, handshake};
 use crate::features::file_transfer::{self, RemoteFiles};
 use crate::features::remote_screen::{self, Framebuffer};
@@ -18,6 +18,7 @@ pub enum Event {
         outbound: Arc<Outbound>,
         screen: Arc<Mutex<Framebuffer>>,
         files: Arc<RemoteFiles>,
+        clipboard: Arc<RemoteClipboard>,
     },
     ScreenUpdated,
     Bell,
@@ -49,7 +50,7 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
         let init = handshake::perform(&mut s, creds)?;
         s.set_read_timeout(None)?;
         let screen = Arc::new(Mutex::new(Framebuffer::new(init.width.into(), init.height.into())?));
-        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
+        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION, clipboard::ENC_EXTENDED_CLIPBOARD])?;
         let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
         remote_screen::request_update(&outbound, false, &screen)?;
         let (tx_files, notify_files) = (tx.clone(), notify.clone());
@@ -57,11 +58,13 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
             let _ = tx_files.send(Event::Files(u));
             notify_files();
         }));
+        let clipboard = Arc::new(RemoteClipboard::new(outbound.clone()));
         let _ = tx.send(Event::Connected {
             name: init.name,
             outbound: outbound.clone(),
             screen: screen.clone(),
             files: files.clone(),
+            clipboard: clipboard.clone(),
         });
         // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
         let mut s = BufReader::with_capacity(1 << 16, s);
@@ -82,8 +85,10 @@ pub fn run(address: &ServerAddress, creds: &Credentials, tx: Sender<Event>, noti
                     notify();
                 }
                 3 => {
-                    let _ = tx.send(Event::ServerClipboard(clipboard::read_server_text(&mut s)?));
-                    notify();
+                    if let Some(text) = clipboard.read_server_msg(&mut s)? {
+                        let _ = tx.send(Event::ServerClipboard(text));
+                        notify();
+                    }
                 }
                 7 => {
                     if let Some(update) = receiver.handle(file_transfer::read(&mut s)?, &files)? {

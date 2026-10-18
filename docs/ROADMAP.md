@@ -9,7 +9,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Handshake RFB 3.3 / 3.8, seguridad None y VNC Auth | ✅ |
 | Pantalla: Raw, CopyRect, DesktopSize, ZRLE, Zlib, Hextile, LastRect | ✅ |
 | Teclado, ratón, rueda, Cmd→Ctrl en macOS | ✅ |
-| Portapapeles de texto Latin-1 en ambos sentidos | ✅ |
+| Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ✅ |
 | Botón Ctrl+Alt+Del | ✅ |
 | Tema, formulario de conexión, spinner hasta el primer frame | ✅ |
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
@@ -17,7 +17,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Fase 3.5: Address Book con vista previa del escritorio, etiquetas/grupos, favoritos, opciones por conexión y contraseñas en el llavero | ✅ |
 | Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (pendiente zip de carpetas `!UVNCDIR-` y prueba con UltraVNC en Windows) |
-| Fase 3.1–3.7, 3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES y campana (Bell) | ✅ |
+| Fase 3.1–3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES, Extended Clipboard UTF-8 y campana (Bell) | ✅ |
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
 | Todo lo demás | ❌ (ver fases) |
 
@@ -201,7 +201,7 @@ features/file_transfer/
 | 3.5 | Conexiones guardadas y Address Book ✅ (2026-10-18) | Rediseñado al estilo RealVNC Viewer: barra superior de búsqueda y conexión rápida, barra lateral con `All connections`, `Favorites`, `Recent` y etiquetas (`LABELS`), vista en cuadrícula o lista con miniatura del escritorio remoto (`previews/*.lcpv` comprimida con zlib, o ilustración vectorial si aún no se conectó), menú contextual completo (`Connect`, `View only`, `Favorites`, `Labels`, `Rename` F2, `Duplicate` ⌘D, `Clear preview`, `Delete`, `Properties…` Alt+Enter), importar/exportar y opciones por conexión (`Fit`/`1:1`, `View only`, `Full screen`, `Share clipboard`, `Save preview`). Contraseñas solo en el llavero del SO (`keyring`). | M |
 | 3.6 | Reconexión ✅ (2026-10-18) | Cuando una sesión termina inesperadamente o falla al conectar, la barra inferior muestra el motivo junto con un botón **Reconnect (`<servidor>`)** que relanza el último `ConnectRequest` con un clic. | XS |
 | 3.7 | Teclas especiales y AltGr ✅ (2026-10-18) | Menú "Keys" con Ctrl+Esc, Alt+Tab, Alt+F4, tecla Windows (`0xffeb`), Print Screen, `AltGr (ISO Level 3)` (`0xfe03`) y botonera rápida de símbolos españoles/AltGr (`@`, `\`, `|`, `{`, `}`, `[`, `]`, `~`, `#`, `€`). Además, al escribir con `Option` en macOS se suelta temporalmente `Alt` remoto alrededor del carácter para que servidores Windows sinteticen su propio `AltGr` sin interpretarlo como `Alt+tecla`. | S |
-| 3.8 | Portapapeles extendido | Pseudo-encoding Extended Clipboard (0xC0A1E5CE) para UTF-8. Hay que verificar en el spike si UltraVNC lo soporta. Si no, se mantiene Latin-1. | M |
+| 3.8 | Portapapeles extendido ✅ (2026-10-18) | Pseudo-encoding `Extended Clipboard` (`0xC0A1E5CE` / `-1063131698`) anunciado en `SetEncodings`. Si el servidor envía `CLIP_CAPS`, `RemoteClipboard` responde con capacidades UTF-8 y negocia `CLIP_PROVIDE`, `CLIP_NOTIFY`, `CLIP_REQUEST` y `CLIP_PEEK` con compresión zlib y normalización CRLF/NUL; si el servidor no lo anuncia, mantiene Latin-1 automáticamente. | M |
 | 3.9 | Campana ✅ (2026-10-18) | Mensaje 2 (`Bell`): `session::run` emite `Event::Bell`, solicita atención de la ventana (`ViewportCommand::RequestUserAttention`) y muestra un indicador visual `Bell` en la barra de sesión durante 2 s (revelando la barra flotante si está en pantalla completa). | XS |
 
 ---

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
-use crate::features::clipboard;
+use crate::features::clipboard::RemoteClipboard;
 use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions};
 use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::features::input::{self, InputForwarder};
@@ -24,6 +24,7 @@ struct LiveSession {
     input: InputForwarder,
     files: Arc<RemoteFiles>,
     files_view: FilesView,
+    clipboard: Arc<RemoteClipboard>,
     /// Don't forward keyboard, mouse or clipboard to the server.
     view_only: bool,
     share_clipboard: bool,
@@ -68,6 +69,7 @@ impl App {
                     outbound,
                     screen,
                     files,
+                    clipboard,
                 } => {
                     self.dashboard.status.clear();
                     let (address, opts) = self
@@ -88,6 +90,7 @@ impl App {
                         input: InputForwarder::default(),
                         files,
                         files_view: FilesView::default(),
+                        clipboard,
                         view_only: opts.view_only,
                         share_clipboard: opts.share_clipboard,
                         save_preview: opts.save_preview,
@@ -213,7 +216,7 @@ impl eframe::App for App {
             live.view.draw_cursor(ui, &viewport, !over_ui);
             if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
                 if live.share_clipboard {
-                    clipboard::forward_paste(ui, &live.outbound);
+                    live.clipboard.forward_paste(ui);
                 }
                 live.input.forward(ui, &viewport, &live.outbound);
             }
