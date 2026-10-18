@@ -16,7 +16,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |
 | Fase 3.5: Address Book con vista previa del escritorio, etiquetas/grupos, favoritos, opciones por conexión y contraseñas en el llavero | ✅ |
-| Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (pendiente zip de carpetas `!UVNCDIR-` y prueba con UltraVNC en Windows) |
+| Fase 2.1–2.2: transferencia de archivos (unidades, navegar, descargar, subir, cola/drag & drop, crear carpeta, renombrar y borrar) | ✅ (carpetas: se descargan como `.zip` sin descomprimir; pendiente prueba con UltraVNC en Windows) |
 | Fase 3.1–3.9: cursor local, solo ver, escalado Fit/1:1, pantalla completa, reconexión rápida, menú de teclas con AltGr/símbolos ES, Extended Clipboard UTF-8 y campana (Bell) | ✅ |
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
 | Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
@@ -153,7 +153,7 @@ Es lo que ningún cliente de macOS ofrece hoy. **El protocolo no tiene especific
 
 - **Lectura:** permiso, unidades, navegación con doble clic en ambos paneles y descarga a la carpeta local activa (por defecto `~/Downloads`), escribiendo a `.lucarna-part` y renombrando al terminar, con nombres saneados.
 - **Escritura:** subida de archivos (`FileTransferOffer` → `FileAcceptHeader` → `FilePacket` en hilo propio con compresión zlib solo cuando reduce el bloque → `EndOfFile`), tamaño de bloque de 8 KiB por defecto compatible con `libvncserver` y 32 KiB cuando el servidor anuncia `FileTransferProtocolVersion` v3+, cola de subida, arrastrar y soltar desde el sistema (`egui::DroppedFile`), cancelación de descargas y subidas, y comandos remotos (`+ Folder`, `Rename`, `Delete` con confirmación). Mientras un campo de texto de la UI tiene el foco, no se reenvían teclas al servidor remoto.
-- **Pendiente para más adelante:** transferencia de carpetas completas como zip (`!UVNCDIR-`, que requiere `zip`) y prueba contra UltraVNC Server en Windows.
+- **Carpetas (2026-10-18):** se descargan como `nombre.zip` (el zip `!UVNCDIR-` que arma el servidor), sin descomprimir en la app; subir carpetas sigue siendo crear la carpeta y subir sus archivos. **Pendiente:** prueba contra UltraVNC Server en Windows.
 
 ```
 features/file_transfer/

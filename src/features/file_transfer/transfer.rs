@@ -387,8 +387,12 @@ fn start(remote: &str, total: u64, dir: &Path) -> io::Result<Download> {
 }
 
 /// Last component of a remote Windows path, made safe as a local file name.
+/// A folder is requested as `[ name ]` and arrives as a zip the server made of it, so it is saved as `name.zip`.
+// ponytail: the zip is kept as is (Finder and Explorer unzip it); unzip in-app if users ask for it.
 fn local_name(remote: &str) -> String {
     let base = remote.rsplit(['\\', '/']).next().unwrap_or_default();
+    let folder = base.strip_prefix("[ ").and_then(|b| b.strip_suffix(" ]")).map(|dir| format!("{dir}.zip"));
+    let base = folder.as_deref().unwrap_or(base);
     let clean: String = base.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).collect();
     let clean = clean.trim_matches([' ', '.']);
     if clean.is_empty() { "download".into() } else { clean.into() }
@@ -417,6 +421,8 @@ mod tests {
         assert_eq!(local_name("C:\\x\\a:b|c"), "a_b_c");
         assert_eq!(local_name("../../etc/passwd"), "passwd");
         assert_eq!(local_name(""), "download");
+        assert_eq!(local_name("C:\\Users\\ana\\[ Fotos 2026 ]"), "Fotos 2026.zip");
+        assert_eq!(local_name("C:\\x\\[ a:b ]"), "a_b.zip", "folder names are sanitized too");
     }
 
     #[test]
