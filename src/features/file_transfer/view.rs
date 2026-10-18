@@ -354,12 +354,15 @@ impl FilesView {
                         }
                         ui.label(filetime(e.modified));
                         ui.horizontal(|ui| {
-                            if !e.is_dir
+                            let tip = if e.is_dir { "Download the folder as a .zip" } else { "Download to your Mac" };
+                            if e.name != ".."
                                 && ui
                                     .add_enabled(!busy, egui::Button::new(format!("{} Download", char::from(Icon::Download))).small())
+                                    .on_hover_text(tip)
                                     .clicked()
                             {
-                                fetch = Some(format!("{}{}", self.path, e.name));
+                                // UltraVNC zips a folder requested as `[ name ]` and sends the zip.
+                                fetch = Some(if e.is_dir { format!("{}[ {} ]", self.path, e.name) } else { format!("{}{}", self.path, e.name) });
                             }
                             if e.name != ".." {
                                 if ui.add_enabled(!busy, egui::Button::new("Rename").small()).clicked() {

@@ -172,7 +172,9 @@ En los tres casos, `size = 0` indica éxito y `size = 0xFFFFFFFF` indica error; 
 
 ## Carpetas comprimidas (`!UVNCDIR-`)
 
-Cuando el nombre pedido en `FileTransferRequest` va envuelto en `[ nombre ]`, o cuando el cliente sube un archivo cuyo nombre empieza por `!UVNCDIR-` y termina en `.zip`, UltraVNC comprime/descomprime la carpeta en un zip temporal (`!UVNCDIR-<nombre_utf8_en_hex>.zip`). No se implementa por ahora para no sumar una dependencia de zip; las carpetas se crean con `CDirCreate` y sus archivos se transfieren directamente.
+Cuando el nombre pedido en `FileTransferRequest` va envuelto en `[ nombre ]`, o cuando el cliente sube un archivo cuyo nombre empieza por `!UVNCDIR-` y termina en `.zip`, UltraVNC comprime/descomprime la carpeta en un zip temporal (`!UVNCDIR-<nombre_utf8_en_hex>.zip`). El servidor borra el zip temporal al terminar. Si la carpeta está vacía o no se puede comprimir, responde con un `FileHeader` de error (`size = sizeH = 0xFFFFFFFF`).
+
+**En Lucarna (descarga):** el botón Download de una carpeta pide `ruta\[ nombre ]` y guarda lo que llega como `nombre.zip` en la carpeta local elegida, **sin descomprimirlo**: Finder y el Explorador lo abren con doble clic, y así no hace falta una dependencia de zip ni defenderse de rutas maliciosas dentro del zip. La subida de carpetas no se implementa: se crean con `CDirCreate` y sus archivos se suben uno a uno. **Sin probar contra UltraVNC:** libvncserver (x11vnc) no comprime carpetas.
 
 ## Seguridad en el cliente
 
