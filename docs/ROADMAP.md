@@ -276,7 +276,18 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 
 ---
 
-## Fase 6: empaquetado y distribución
+## Fase 6: empaquetado y distribución ✅ (2026-10-18)
+
+**Hecho:** `.github/workflows/packages.yml` construye los instaladores en cada PR y, con un tag `v*`, los publica como *pre-release* en GitHub.
+
+- **macOS:** `.dmg` con `Lucarna.app` universal (arm64 + x86_64 con `lipo`), ícono `.icns` y firma ad-hoc, **sin notarizar**: Gatekeeper pide "Abrir" la primera vez. Probado en local: la app arranca desde el bundle.
+- **Windows:** instalador de Inno Setup (`.exe`), en español e inglés, instalable sin permisos de administrador, sin consola (`windows_subsystem`). Sin firma de código: SmartScreen avisa.
+- **Linux:** `.deb` (cargo-deb, con `.desktop` e ícono) y `.tar.gz` portable, compilados en Ubuntu 22.04 para que funcionen en glibc más viejas.
+- **Versión:** `0.1.0` (SemVer 0.x: aún en desarrollo, puede cambiar sin aviso) publicada como *pre-release*. El 1.0.0 queda para cuando esté probado contra UltraVNC real y estable.
+- **Íconos:** `packaging/icons.sh` regenera `assets/lucarna.icns` y `assets/lucarna.ico` desde el SVG. Se añadió `LICENSE` (texto de la GPL-2.0), que va dentro de cada paquete.
+- **Fuera por ahora:** notarización de Apple y firma de código de Windows (cuestan dinero y cuentas), AppImage/Flatpak, ARM en Windows y Linux, y el ícono dentro del `.exe` (el acceso directo usa el `.ico`).
+
+Plan original, para referencia:
 
 | Plataforma | Formato | Notas |
 |---|---|---|

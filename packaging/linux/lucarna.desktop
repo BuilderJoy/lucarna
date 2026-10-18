@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Lucarna
+Comment=VNC viewer with UltraVNC file transfer
+Exec=lucarna
+Icon=lucarna
+Terminal=false
+Categories=Network;RemoteAccess;
+StartupWMClass=lucarna

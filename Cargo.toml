@@ -4,6 +4,19 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-2.0-or-later"
 description = "Cross-platform VNC viewer with UltraVNC file transfer"
+repository = "https://github.com/BuilderJoy/lucarna"
+
+# Linux .deb, built with cargo-deb (see .github/workflows/packages.yml).
+[package.metadata.deb]
+maintainer = "Lucarna <https://github.com/BuilderJoy/lucarna/issues>"
+section = "net"
+extended-description = "VNC viewer for macOS, Windows and Linux with UltraVNC file transfer, MS-Logon, chat and repeater support."
+assets = [
+    ["target/release/lucarna", "usr/bin/", "755"],
+    ["packaging/linux/lucarna.desktop", "usr/share/applications/", "644"],
+    ["assets/logo.png", "usr/share/icons/hicolor/512x512/apps/lucarna.png", "644"],
+    ["LICENSE", "usr/share/doc/lucarna/copyright", "644"],
+]
 
 [dependencies]
 des = "0.9.0"
