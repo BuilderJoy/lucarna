@@ -6,6 +6,7 @@ use eframe::egui::{
     self, Align, Color32, ColorImage, CornerRadius, FontId, Id, Key, Layout, Modifiers, Order, Pos2, Rect, RichText, Sense, Stroke,
     StrokeKind, TextureHandle, TextureOptions, Ui, Vec2,
 };
+use lucide_icons::Icon;
 
 use super::saved::{self, SavedConnection, SessionOptions};
 use super::{Credentials, ServerAddress};
@@ -254,36 +255,42 @@ impl Dashboard {
             let parsed_addr = ServerAddress::parse(&self.omni);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.omni)
-                    .hint_text("🔍 Enter a VNC Server address or search connections…")
+                    .hint_text(format!("{}  Enter a VNC Server address or search connections…", char::from(Icon::Search)))
                     .desired_width(omni_width)
                     .margin(egui::vec2(10.0, 6.0)),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if !self.omni.is_empty() && ui.small_button("✕").on_hover_text("Clear search").clicked() {
+            if !self.omni.is_empty() && ui.small_button(char::from(Icon::X).to_string()).on_hover_text("Clear search").clicked() {
                 self.omni.clear();
             }
             if let Some(addr) = parsed_addr {
-                let connect_btn = egui::Button::new(RichText::new("Connect ↵").strong().color(Color32::BLACK)).fill(accent);
+                let connect_btn =
+                    egui::Button::new(RichText::new(format!("{} Connect", char::from(Icon::Play))).strong().color(Color32::BLACK))
+                        .fill(accent);
                 if ui.add(connect_btn).on_hover_text(format!("Connect directly to {}", addr.as_str())).clicked() || enter {
                     request = Some(self.quick_connect_request(addr.clone()));
                 }
-                if ui.button("+ Save").on_hover_text("Save this address to your Address Book").clicked() {
+                if ui
+                    .button(format!("{} Save", char::from(Icon::Plus)))
+                    .on_hover_text("Save this address to your Address Book")
+                    .clicked()
+                {
                     self.open_new_connection(Some(addr.as_str()));
                 }
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.menu_button("⋯", |ui| {
-                    if ui.button("➕ New connection…\t⌘N").clicked() {
+                ui.menu_button(char::from(Icon::Ellipsis).to_string(), |ui| {
+                    if ui.button(format!("{}  New connection…\t⌘N", char::from(Icon::Plus))).clicked() {
                         self.open_new_connection(None);
                         ui.close();
                     }
-                    if ui.button("🏷 New label…").clicked() {
+                    if ui.button(format!("{}  New label…", char::from(Icon::Tag))).clicked() {
                         self.modal = Some(Modal::NewLabel(String::new()));
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("📥 Import connections…").clicked() {
+                    if ui.button(format!("{}  Import connections…", char::from(Icon::FolderInput))).clicked() {
                         let default_path = default_backup_path();
                         self.modal = Some(Modal::ImportExport {
                             import: true,
@@ -291,7 +298,7 @@ impl Dashboard {
                         });
                         ui.close();
                     }
-                    if ui.button("📤 Export connections…").clicked() {
+                    if ui.button(format!("{}  Export connections…", char::from(Icon::FolderOutput))).clicked() {
                         let default_path = default_backup_path();
                         self.modal = Some(Modal::ImportExport {
                             import: false,
@@ -303,19 +310,20 @@ impl Dashboard {
                 .response
                 .on_hover_text("Address book actions");
 
-                let new_btn = egui::Button::new(RichText::new("+ New").strong().color(Color32::BLACK)).fill(accent);
+                let new_btn =
+                    egui::Button::new(RichText::new(format!("{} New", char::from(Icon::Plus))).strong().color(Color32::BLACK)).fill(accent);
                 if ui.add(new_btn).on_hover_text("Create a new connection (⌘N / Ctrl+N)").clicked() {
                     self.open_new_connection(None);
                 }
 
                 ui.separator();
 
-                let sort_label = match self.sort_by {
-                    SortBy::Name => "Sort: Name",
-                    SortBy::Recent => "Sort: Recent",
-                    SortBy::Address => "Sort: Server",
+                let sort_name = match self.sort_by {
+                    SortBy::Name => "Name",
+                    SortBy::Recent => "Recent",
+                    SortBy::Address => "Server",
                 };
-                ui.menu_button(sort_label, |ui| {
+                ui.menu_button(format!("{} {sort_name}", char::from(Icon::ArrowUpDown)), |ui| {
                     if ui.selectable_label(self.sort_by == SortBy::Name, "Name (A–Z)").clicked() {
                         self.sort_by = SortBy::Name;
                         ui.close();
@@ -330,11 +338,15 @@ impl Dashboard {
                     }
                 });
 
-                if ui.selectable_label(self.view_mode == ViewMode::List, "☰ List").on_hover_text("List view").clicked() {
+                if ui
+                    .selectable_label(self.view_mode == ViewMode::List, format!("{} List", char::from(Icon::List)))
+                    .on_hover_text("List view")
+                    .clicked()
+                {
                     self.view_mode = ViewMode::List;
                 }
                 if ui
-                    .selectable_label(self.view_mode == ViewMode::Grid, "⊞ Grid")
+                    .selectable_label(self.view_mode == ViewMode::Grid, format!("{} Grid", char::from(Icon::LayoutGrid)))
                     .on_hover_text("Thumbnail grid view")
                     .clicked()
                 {
@@ -354,13 +366,13 @@ impl Dashboard {
         let favs = self.saved.iter().filter(|c| c.favorite).count();
         let recent = self.saved.iter().filter(|c| c.last_connected > 0).count();
 
-        if sidebar_item(ui, "⊞  All connections", total, self.filter == Filter::All).clicked() {
+        if sidebar_item(ui, &format!("{}  All connections", char::from(Icon::LayoutGrid)), total, self.filter == Filter::All).clicked() {
             self.filter = Filter::All;
         }
-        if sidebar_item(ui, "★  Favorites", favs, self.filter == Filter::Favorites).clicked() {
+        if sidebar_item(ui, &format!("{}  Favorites", char::from(Icon::Star)), favs, self.filter == Filter::Favorites).clicked() {
             self.filter = Filter::Favorites;
         }
-        if sidebar_item(ui, "🕒  Recent", recent, self.filter == Filter::Recent).clicked() {
+        if sidebar_item(ui, &format!("{}  Recent", char::from(Icon::Clock)), recent, self.filter == Filter::Recent).clicked() {
             self.filter = Filter::Recent;
         }
 
@@ -368,7 +380,7 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.label(RichText::new("LABELS").size(11.0).strong().weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.small_button("+").on_hover_text("Create a new label").clicked() {
+                if ui.small_button(char::from(Icon::Plus).to_string()).on_hover_text("Create a new label").clicked() {
                     self.modal = Some(Modal::NewLabel(String::new()));
                 }
             });
@@ -388,16 +400,16 @@ impl Dashboard {
             egui::ScrollArea::vertical().id_salt("labels_scroll").show(ui, |ui| {
                 for (label, count) in labels {
                     let active = matches!(&self.filter, Filter::Label(l) if l.eq_ignore_ascii_case(&label));
-                    let resp = sidebar_item(ui, &format!("🏷  {label}"), count, active);
+                    let resp = sidebar_item(ui, &format!("{}  {label}", char::from(Icon::Tag)), count, active);
                     if resp.clicked() {
                         self.filter = Filter::Label(label.clone());
                     }
                     resp.context_menu(|ui| {
-                        if ui.button("✏ Rename label…").clicked() {
+                        if ui.button(format!("{}  Rename label…", char::from(Icon::Pencil))).clicked() {
                             label_to_rename = Some(label.clone());
                             ui.close();
                         }
-                        if ui.button("🗑 Delete label").clicked() {
+                        if ui.button(format!("{}  Delete label", char::from(Icon::Trash2))).clicked() {
                             label_to_delete = Some(label.clone());
                             ui.close();
                         }
@@ -419,7 +431,7 @@ impl Dashboard {
             Filter::All => "All connections".to_string(),
             Filter::Favorites => "Favorites".to_string(),
             Filter::Recent => "Recently connected".to_string(),
-            Filter::Label(l) => format!("🏷 {l}"),
+            Filter::Label(l) => format!("{}  {l}", char::from(Icon::Tag)),
         };
 
         ui.horizontal(|ui| {
@@ -428,7 +440,7 @@ impl Dashboard {
             if let Filter::Label(l) = &self.filter {
                 let l = l.clone();
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("+ Add connection here").clicked() {
+                    if ui.small_button(format!("{} Add connection here", char::from(Icon::Plus))).clicked() {
                         self.open_new_connection(None);
                         self.editor.labels_input = l;
                     }
@@ -444,9 +456,10 @@ impl Dashboard {
                 ui.add_space(4.0);
                 ui.label(RichText::new("Add a remote computer or type an address in the top bar to connect.").weak());
                 ui.add_space(12.0);
-                let btn = egui::Button::new(RichText::new("+ New connection").strong().color(Color32::BLACK))
-                    .fill(ui.visuals().selection.bg_fill)
-                    .min_size(egui::vec2(160.0, 34.0));
+                let btn =
+                    egui::Button::new(RichText::new(format!("{} New connection", char::from(Icon::Plus))).strong().color(Color32::BLACK))
+                        .fill(ui.visuals().selection.bg_fill)
+                        .min_size(egui::vec2(160.0, 34.0));
                 if ui.add(btn).clicked() {
                     self.open_new_connection(None);
                 }
@@ -587,13 +600,13 @@ impl Dashboard {
         } else if fav_resp.hovered() {
             Color32::WHITE
         } else {
-            Color32::from_rgb(0x64, 0x74, 0x8b)
+            Color32::from_rgb(0x47, 0x55, 0x69)
         };
         ui.painter().text(
             fav_rect.center(),
             egui::Align2::CENTER_CENTER,
-            if c.favorite { "★" } else { "☆" },
-            FontId::proportional(14.0),
+            char::from(Icon::Star).to_string(),
+            FontId::proportional(13.5),
             star_color,
         );
         if fav_resp.on_hover_text("Toggle favorite").clicked() {
@@ -606,8 +619,8 @@ impl Dashboard {
         ui.painter().text(
             dots_rect.center(),
             egui::Align2::CENTER_CENTER,
-            "⋯",
-            FontId::proportional(15.0),
+            char::from(Icon::Ellipsis).to_string(),
+            FontId::proportional(14.0),
             if dots_resp.hovered() {
                 Color32::WHITE
             } else {
@@ -689,22 +702,23 @@ impl Dashboard {
         let controls_rect = Rect::from_min_max(Pos2::new(rect.right() - 280.0, rect.top()), rect.max);
         let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect).layout(Layout::right_to_left(Align::Center)));
         child_ui.add_space(10.0);
-        if child_ui.button("Properties").clicked() {
+        if child_ui.button(format!("{} Properties", char::from(Icon::SlidersHorizontal))).clicked() {
             action = Some(TileAction::Properties(idx));
         }
-        let connect_btn = egui::Button::new(RichText::new("Connect").strong().color(Color32::BLACK)).fill(accent);
+        let connect_btn =
+            egui::Button::new(RichText::new(format!("{} Connect", char::from(Icon::Play))).strong().color(Color32::BLACK)).fill(accent);
         if child_ui.add(connect_btn).clicked() {
             action = Some(TileAction::Connect(idx, None));
         }
         if child_ui
-            .selectable_label(c.favorite, if c.favorite { "★" } else { "☆" })
+            .selectable_label(c.favorite, char::from(Icon::Star).to_string())
             .on_hover_text("Toggle favorite")
             .clicked()
         {
             action = Some(TileAction::ToggleFavorite(idx));
         }
         for label in c.labels.iter().rev() {
-            child_ui.label(RichText::new(format!("🏷 {label}")).size(11.0).color(accent));
+            child_ui.label(RichText::new(format!("{} {label}", char::from(Icon::Tag))).size(11.0).color(accent));
         }
 
         if resp.double_clicked() {
@@ -819,27 +833,27 @@ impl Dashboard {
         let mut action = None;
         ui.set_min_width(190.0);
 
-        if ui.button(RichText::new("▶  Connect\tEnter").strong()).clicked() {
+        if ui.button(RichText::new(format!("{}  Connect\tEnter", char::from(Icon::Play))).strong()).clicked() {
             action = Some(TileAction::Connect(idx, None));
             ui.close();
         }
-        if ui.button("👁  Connect (View only)").clicked() {
+        if ui.button(format!("{}  Connect (View only)", char::from(Icon::Eye))).clicked() {
             action = Some(TileAction::Connect(idx, Some(true)));
             ui.close();
         }
         ui.separator();
 
         let fav_label = if c.favorite {
-            "☆  Remove from Favorites"
+            format!("{}  Remove from Favorites", char::from(Icon::Star))
         } else {
-            "★  Add to Favorites"
+            format!("{}  Add to Favorites", char::from(Icon::Star))
         };
         if ui.button(fav_label).clicked() {
             action = Some(TileAction::ToggleFavorite(idx));
             ui.close();
         }
 
-        ui.menu_button("🏷  Labels", |ui| {
+        ui.menu_button(format!("{}  Labels", char::from(Icon::Tags)), |ui| {
             ui.set_min_width(160.0);
             for label in known_labels {
                 let mut checked = c.labels.iter().any(|l| l.eq_ignore_ascii_case(label));
@@ -853,7 +867,7 @@ impl Dashboard {
             ui.horizontal(|ui| {
                 let r = ui.add(egui::TextEdit::singleline(new_tag_inline).hint_text("New label…").desired_width(105.0));
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                if (ui.small_button("+").clicked() || enter) && !new_tag_inline.trim().is_empty() {
+                if (ui.small_button(char::from(Icon::Plus).to_string()).clicked() || enter) && !new_tag_inline.trim().is_empty() {
                     action = Some(TileAction::AddLabel(idx, new_tag_inline.trim().to_string()));
                     new_tag_inline.clear();
                     ui.close();
@@ -862,25 +876,28 @@ impl Dashboard {
         });
 
         ui.separator();
-        if ui.button("✏  Rename…\tF2").clicked() {
+        if ui.button(format!("{}  Rename…\tF2", char::from(Icon::Pencil))).clicked() {
             action = Some(TileAction::Rename(idx));
             ui.close();
         }
         let dup_shortcut = if cfg!(target_os = "macos") { "⌘D" } else { "Ctrl+D" };
-        if ui.button(format!("⧉  Duplicate\t{dup_shortcut}")).clicked() {
+        if ui.button(format!("{}  Duplicate\t{dup_shortcut}", char::from(Icon::Copy))).clicked() {
             action = Some(TileAction::Duplicate(idx));
             ui.close();
         }
-        if ui.add_enabled(has_preview, egui::Button::new("🖼  Clear desktop preview")).clicked() {
+        if ui
+            .add_enabled(has_preview, egui::Button::new(format!("{}  Clear desktop preview", char::from(Icon::ImageOff))))
+            .clicked()
+        {
             action = Some(TileAction::ClearPreview(idx));
             ui.close();
         }
-        if ui.button("🗑  Delete\t⌫").clicked() {
+        if ui.button(format!("{}  Delete\t⌫", char::from(Icon::Trash2))).clicked() {
             action = Some(TileAction::Delete(idx));
             ui.close();
         }
         ui.separator();
-        if ui.button("⚙  Properties…\tAlt+Enter").clicked() {
+        if ui.button(format!("{}  Properties…\tAlt+Enter", char::from(Icon::SlidersHorizontal))).clicked() {
             action = Some(TileAction::Properties(idx));
             ui.close();
         }
@@ -1025,8 +1042,16 @@ impl Dashboard {
                 let accent = ui.visuals().selection.bg_fill;
                 ui.set_min_width(400.0);
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.editor.tab, PropertiesTab::General, "⚙ General");
-                    ui.selectable_value(&mut self.editor.tab, PropertiesTab::Options, "🖥 Options & Display");
+                    ui.selectable_value(
+                        &mut self.editor.tab,
+                        PropertiesTab::General,
+                        format!("{} General", char::from(Icon::SlidersHorizontal)),
+                    );
+                    ui.selectable_value(
+                        &mut self.editor.tab,
+                        PropertiesTab::Options,
+                        format!("{} Options & Display", char::from(Icon::Monitor)),
+                    );
                 });
                 ui.separator();
                 ui.add_space(6.0);
@@ -1058,7 +1083,12 @@ impl Dashboard {
                                     .desired_width(pw_w)
                                     .margin(egui::vec2(8.0, 6.0)),
                             );
-                            if ui.selectable_label(self.editor.show_password, "👁").on_hover_text("Show / hide password").clicked() {
+                            let eye_icon = if self.editor.show_password { Icon::EyeOff } else { Icon::Eye };
+                            if ui
+                                .selectable_label(self.editor.show_password, char::from(eye_icon).to_string())
+                                .on_hover_text("Show / hide password")
+                                .clicked()
+                            {
                                 self.editor.show_password = !self.editor.show_password;
                             }
                             if (addr_resp.lost_focus() || pw_resp.lost_focus())
@@ -1087,7 +1117,7 @@ impl Dashboard {
                                 let current = saved::parse_labels(&self.editor.labels_input);
                                 for k in &known_labels {
                                     let active = current.iter().any(|l| l.eq_ignore_ascii_case(k));
-                                    if ui.selectable_label(active, format!("🏷 {k}")).clicked() {
+                                    if ui.selectable_label(active, format!("{} {k}", char::from(Icon::Tag))).clicked() {
                                         let mut next = current.clone();
                                         if let Some(p) = next.iter().position(|l| l.eq_ignore_ascii_case(k)) {
                                             next.remove(p);
@@ -1101,7 +1131,7 @@ impl Dashboard {
                             ui.add_space(4.0);
                         }
 
-                        ui.checkbox(&mut self.editor.favorite, "★ Pin to Favorites");
+                        ui.checkbox(&mut self.editor.favorite, format!("{} Pin to Favorites", char::from(Icon::Star)));
                     }
                     PropertiesTab::Options => {
                         ui.label(RichText::new("Picture & Scaling").strong());

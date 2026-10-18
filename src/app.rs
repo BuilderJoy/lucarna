@@ -204,6 +204,7 @@ impl eframe::App for App {
 }
 
 fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
+    use lucide_icons::Icon;
     ui.horizontal(|ui| {
         let dot = if live.has_frame {
             Color32::from_rgb(80, 200, 120)
@@ -215,17 +216,17 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         let (w, h) = live.screen.lock().unwrap().size();
         ui.label(RichText::new(format!("{w}×{h}")).weak());
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button("Disconnect").clicked() {
+            if ui.button(format!("{} Disconnect", char::from(Icon::LogOut))).clicked() {
                 live.outbound.close();
             }
             if ui
-                .selectable_label(live.files_view.open, "Files")
+                .selectable_label(live.files_view.open, format!("{} Files", char::from(Icon::Folder)))
                 .on_hover_text("Browse, download and upload files")
                 .clicked()
             {
                 live.files_view.open = !live.files_view.open;
             }
-            ui.menu_button("Keys", |ui| {
+            ui.menu_button(format!("{} Keys", char::from(Icon::Keyboard)), |ui| {
                 for (label, keys) in input::SHORTCUTS {
                     if ui.button(*label).clicked() {
                         let _ = input::combo(&live.outbound, keys);
@@ -235,31 +236,55 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
             })
             .response
             .on_hover_text("Send key combinations your own system would intercept");
-            if ui.button("Ctrl+Alt+Del").on_hover_text("Send Ctrl+Alt+Del to the remote machine").clicked() {
+            if ui
+                .button(format!("{} Ctrl+Alt+Del", char::from(Icon::ShieldAlert)))
+                .on_hover_text("Send Ctrl+Alt+Del to the remote machine")
+                .clicked()
+            {
                 let _ = input::ctrl_alt_del(&live.outbound);
             }
             ui.separator();
             let shortcut = if cfg!(target_os = "macos") { "⌘⇧F" } else { "Ctrl+Shift+F" };
-            if ui.selectable_label(fullscreen, "Full screen").on_hover_text(shortcut).clicked() {
+            let fs_icon = char::from(if fullscreen { Icon::Minimize } else { Icon::Maximize });
+            if ui.selectable_label(fullscreen, format!("{fs_icon} Full screen")).on_hover_text(shortcut).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
             }
             let (label, tip) = match live.scale {
                 Scale::Fit => ("Fit", "Fit to window. Click for actual size (1:1, scroll bars)"),
                 Scale::Actual => ("1:1", "Actual size. Click to fit the window"),
             };
-            if ui.button(label).on_hover_text(tip).clicked() {
+            if ui.button(format!("{} {label}", char::from(Icon::ZoomIn))).on_hover_text(tip).clicked() {
                 live.scale = if live.scale == Scale::Fit { Scale::Actual } else { Scale::Fit };
             }
-            ui.selectable_label(live.view_only, "View only")
+            if ui
+                .selectable_label(live.view_only, format!("{} View only", char::from(Icon::Eye)))
                 .on_hover_text("Don't send keyboard, mouse or clipboard to the server")
                 .clicked()
-                .then(|| live.view_only = !live.view_only);
+            {
+                live.view_only = !live.view_only;
+            }
         });
     });
 }
 
-/// Dark theme with the amber accent of the logo.
+/// Dark theme with the amber accent of the logo and the embedded Lucide icon font.
 pub fn apply_theme(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "lucide".into(),
+        Arc::new(egui::FontData::from_static(lucide_icons::LUCIDE_FONT_BYTES).tweak(egui::FontTweak {
+            y_offset_factor: 0.08,
+            ..Default::default()
+        })),
+    );
+    if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        prop.insert(1, "lucide".into());
+    }
+    if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        mono.push("lucide".into());
+    }
+    ctx.set_fonts(fonts);
+
     let accent = Color32::from_rgb(0xff, 0xbe, 0x3d);
     let mut v = egui::Visuals::dark();
     v.selection.bg_fill = accent;

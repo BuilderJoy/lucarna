@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Lucarna: cross-platform VNC viewer (Rust 2024, eframe/egui), targeting UltraVNC-compatible file transfer. Dependencies are deliberately minimal (`eframe` with `persistence`, `des` for VNC auth, `flate2` for zlib encodings, `keyring` for saved passwords); prefer std over new crates.
+Lucarna: cross-platform VNC viewer (Rust 2024, eframe/egui), targeting UltraVNC-compatible file transfer. Dependencies are deliberately minimal (`eframe` with `persistence`, `des` for VNC auth, `flate2` for zlib encodings, `keyring` for saved passwords, `lucide-icons` for embedded vector UI icons); prefer std over new crates.
 
 ## Commands
 

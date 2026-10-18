@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Layout, Rect, RichText};
+use lucide_icons::Icon;
 
 use super::protocol::{self, Entry};
 use super::transfer::{self, RemoteFiles, Update};
@@ -185,7 +186,7 @@ impl FilesView {
         } else if !self.status.is_empty() {
             ui.label(&self.status);
         } else {
-            ui.label(RichText::new("Drop files onto this window or click Upload → to send them to the active remote folder.").weak());
+            ui.label(RichText::new("Drop files onto this window or click Upload to send them to the active remote folder.").weak());
         }
     }
 
@@ -206,7 +207,11 @@ impl FilesView {
                     self.set_local_dir(home);
                 }
             }
-            if ui.small_button("↻").on_hover_text("Refresh local folder").clicked() {
+            if ui
+                .small_button(char::from(Icon::RefreshCw).to_string())
+                .on_hover_text("Refresh local folder")
+                .clicked()
+            {
                 self.refresh_local();
             }
         });
@@ -228,7 +233,7 @@ impl FilesView {
                     ui.end_row();
                     if let Some(parent) = self.local_dir.parent().filter(|p| *p != self.local_dir) {
                         if ui
-                            .add(egui::Label::new("📁 ..").sense(egui::Sense::click()))
+                            .add(egui::Label::new(format!("{} ..", char::from(Icon::Folder))).sense(egui::Sense::click()))
                             .on_hover_text("Double-click to go up")
                             .double_clicked()
                         {
@@ -241,7 +246,7 @@ impl FilesView {
                     for e in &self.local_entries {
                         if e.is_dir {
                             if ui
-                                .add(egui::Label::new(format!("📁 {}", e.name)).sense(egui::Sense::click()))
+                                .add(egui::Label::new(format!("{} {}", char::from(Icon::Folder), e.name)).sense(egui::Sense::click()))
                                 .on_hover_text("Double-click to open")
                                 .double_clicked()
                             {
@@ -250,9 +255,12 @@ impl FilesView {
                             ui.label("");
                             ui.label("");
                         } else {
-                            ui.label(format!("📄 {}", e.name));
+                            ui.label(format!("{} {}", char::from(Icon::File), e.name));
                             ui.label(human_size(e.size));
-                            if ui.add_enabled(can_upload, egui::Button::new("Upload →").small()).clicked() {
+                            if ui
+                                .add_enabled(can_upload, egui::Button::new(format!("{} Upload", char::from(Icon::Upload))).small())
+                                .clicked()
+                            {
                                 upload = Some(e.path.clone());
                             }
                         }
@@ -293,13 +301,16 @@ impl FilesView {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .add_enabled(!busy && has_dir, egui::Button::new("↻").small())
+                    .add_enabled(!busy && has_dir, egui::Button::new(char::from(Icon::RefreshCw).to_string()).small())
                     .on_hover_text("Refresh remote folder")
                     .clicked()
                 {
                     go = Some(self.path.clone());
                 }
-                if ui.add_enabled(!busy && has_dir, egui::Button::new("+ Folder").small()).clicked() {
+                if ui
+                    .add_enabled(!busy && has_dir, egui::Button::new(format!("{} Folder", char::from(Icon::FolderPlus))).small())
+                    .clicked()
+                {
                     self.prompt = Some(Prompt::NewFolder(String::new()));
                 }
             });
@@ -323,7 +334,7 @@ impl FilesView {
                     ui.end_row();
                     for e in &self.entries {
                         if e.is_dir {
-                            let label = format!("📁 {}", e.name);
+                            let label = format!("{} {}", char::from(Icon::Folder), e.name);
                             let text = if e.inaccessible {
                                 RichText::new(label).weak()
                             } else {
@@ -338,12 +349,16 @@ impl FilesView {
                             }
                             ui.label("");
                         } else {
-                            ui.label(format!("📄 {}", e.name));
+                            ui.label(format!("{} {}", char::from(Icon::File), e.name));
                             ui.label(human_size(e.size));
                         }
                         ui.label(filetime(e.modified));
                         ui.horizontal(|ui| {
-                            if !e.is_dir && ui.add_enabled(!busy, egui::Button::new("← Download").small()).clicked() {
+                            if !e.is_dir
+                                && ui
+                                    .add_enabled(!busy, egui::Button::new(format!("{} Download", char::from(Icon::Download))).small())
+                                    .clicked()
+                            {
                                 fetch = Some(format!("{}{}", self.path, e.name));
                             }
                             if e.name != ".." {
