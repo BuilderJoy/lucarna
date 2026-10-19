@@ -9,13 +9,16 @@ use eframe::egui::{
 use lucide_icons::Icon;
 
 use super::saved::{self, SavedConnection, SessionOptions};
-use super::{Credentials, ServerAddress};
+use super::{Credentials, ServerAddress, SshTarget};
 
 #[derive(Clone)]
 pub struct ConnectRequest {
     pub address: ServerAddress,
     /// UltraVNC repeater to dial first; `address` is then what the repeater should reach.
     pub repeater: Option<ServerAddress>,
+    /// `user@host[:port]` to tunnel through, as typed: `App::connect` validates it and refuses to fall back
+    /// to a direct connection when it is invalid.
+    pub ssh: String,
     pub creds: Credentials,
     pub options: SessionOptions,
 }
@@ -56,11 +59,24 @@ struct PropertiesEditor {
     address: String,
     user: String,
     repeater: String,
+    ssh: String,
+    ssh_password: String,
     password: String,
     show_password: bool,
     labels_input: String,
     favorite: bool,
     options: SessionOptions,
+}
+
+impl PropertiesEditor {
+    /// Why the SSH field can't be used as typed, if it can't.
+    fn ssh_problem(&self) -> Option<String> {
+        match SshTarget::parse(&self.ssh) {
+            Err(e) => Some(e),
+            Ok(Some(_)) if !self.repeater.trim().is_empty() => Some("SSH and a repeater can't be combined: clear one of them".into()),
+            Ok(_) => None,
+        }
+    }
 }
 
 impl Default for PropertiesEditor {
@@ -73,6 +89,8 @@ impl Default for PropertiesEditor {
             address: String::new(),
             user: String::new(),
             repeater: String::new(),
+            ssh: String::new(),
+            ssh_password: String::new(),
             password: String::new(),
             show_password: false,
             labels_input: String::new(),
@@ -935,6 +953,7 @@ impl Dashboard {
                 };
                 Some(ConnectRequest {
                     repeater: ServerAddress::parse(&c.repeater),
+                    ssh: c.ssh,
                     address: c.address,
                     creds,
                     options,
@@ -1085,6 +1104,22 @@ impl Dashboard {
                         field(ui, "Friendly Name", &mut self.editor.name, "optional, e.g. Office PC");
                         field(ui, "Username", &mut self.editor.user, "optional, for MS-Logon (Windows login)");
                         field(ui, "Repeater", &mut self.editor.repeater, "optional UltraVNC repeater, e.g. repeater.example.com:5901");
+                        field(ui, "SSH", &mut self.editor.ssh, "optional user@host[:port]: encrypts VNC and files through SSH");
+                        if !self.editor.ssh.trim().is_empty() {
+                            ui.label(RichText::new("SSH password").strong());
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.editor.ssh_password)
+                                    .password(true)
+                                    .hint_text("leave empty to use your SSH keys or agent")
+                                    .desired_width(f32::INFINITY)
+                                    .margin(egui::vec2(8.0, 6.0)),
+                            );
+                            ui.add_space(6.0);
+                        }
+                        if let Some(problem) = self.editor.ssh_problem() {
+                            ui.label(RichText::new(problem).color(ui.visuals().error_fg_color));
+                            ui.add_space(6.0);
+                        }
 
                         ui.label(RichText::new("Password").strong());
                         ui.horizontal(|ui| {
@@ -1106,6 +1141,7 @@ impl Dashboard {
                             }
                             if (addr_resp.lost_focus() || pw_resp.lost_focus())
                                 && ui.input(|i| i.key_pressed(Key::Enter))
+                                && self.editor.ssh_problem().is_none()
                                 && let Some(target) = ServerAddress::parse(&self.editor.address)
                             {
                                 let opts = self.editor.options.clone();
@@ -1116,6 +1152,7 @@ impl Dashboard {
                                 self.save_editor(target.clone());
                                 request = Some(ConnectRequest {
                                     repeater: ServerAddress::parse(&self.editor.repeater),
+                                    ssh: self.editor.ssh.trim().into(),
                                     address: target,
                                     creds,
                                     options: opts,
@@ -1177,7 +1214,8 @@ impl Dashboard {
                 ui.separator();
                 ui.add_space(4.0);
 
-                let target = ServerAddress::parse(&self.editor.address);
+                // An invalid SSH field blocks saving: it must never turn into a silent unencrypted connection.
+                let target = ServerAddress::parse(&self.editor.address).filter(|_| self.editor.ssh_problem().is_none());
                 let mut should_close = false;
                 ui.horizontal(|ui| {
                     let connect_btn = egui::Button::new(RichText::new("Save & Connect").strong().color(Color32::BLACK)).fill(accent);
@@ -1192,6 +1230,7 @@ impl Dashboard {
                         self.save_editor(t.clone());
                         request = Some(ConnectRequest {
                             repeater: ServerAddress::parse(&self.editor.repeater),
+                            ssh: self.editor.ssh.trim().into(),
                             address: t,
                             creds,
                             options: opts,
@@ -1469,6 +1508,8 @@ impl Dashboard {
             address: prefill_address.unwrap_or_default().to_string(),
             user: String::new(),
             repeater: String::new(),
+            ssh: String::new(),
+            ssh_password: String::new(),
             password: String::new(),
             show_password: false,
             labels_input: initial_label,
@@ -1487,6 +1528,8 @@ impl Dashboard {
             address: c.address.as_str().to_string(),
             user: c.user.clone(),
             repeater: c.repeater.clone(),
+            ssh: c.ssh.clone(),
+            ssh_password: SshTarget::parse(&c.ssh).ok().flatten().and_then(|t| saved::ssh_password(&t)).unwrap_or_default(),
             password: saved::password(&c.address).unwrap_or_default(),
             show_password: false,
             labels_input: c.labels.join(", "),
@@ -1506,6 +1549,8 @@ impl Dashboard {
         let labels = saved::parse_labels(&self.editor.labels_input);
         let user = self.editor.user.trim().to_string();
         let repeater = self.editor.repeater.trim().to_string();
+        let ssh = self.editor.ssh.trim().to_string();
+        let old_ssh = self.editor.editing.and_then(|i| self.saved.get(i)).map(|c| c.ssh.clone());
         let favorite = self.editor.favorite;
         let options = self.editor.options.clone();
 
@@ -1522,6 +1567,7 @@ impl Dashboard {
                 address: address.clone(),
                 user,
                 repeater,
+                ssh: ssh.clone(),
                 labels,
                 favorite,
                 options,
@@ -1534,6 +1580,7 @@ impl Dashboard {
                 address: address.clone(),
                 user,
                 repeater,
+                ssh: ssh.clone(),
                 labels,
                 favorite,
                 options,
@@ -1543,6 +1590,12 @@ impl Dashboard {
         }
 
         errors.extend(saved::set_password(&address, &self.editor.password).err());
+        if let Some(old) = old_ssh.filter(|old| *old != ssh) {
+            errors.extend(self.forget_ssh_password(&old));
+        }
+        if let Ok(Some(target)) = SshTarget::parse(&ssh) {
+            errors.extend(saved::set_ssh_password(&target, &self.editor.ssh_password).err());
+        }
         errors.extend(saved::store(&self.saved).err());
         self.status = errors.join("\n");
     }
@@ -1568,6 +1621,7 @@ impl Dashboard {
             saved::delete_preview(&old.address);
             self.previews.remove(old.address.as_str());
         }
+        errors.extend(self.forget_ssh_password(&old.ssh));
         errors.extend(saved::store(&self.saved).err());
         self.selected = None;
         self.status = errors.join("\n");
@@ -1610,10 +1664,18 @@ impl Dashboard {
         }
     }
 
+    /// Removes the keychain entry of an SSH target no saved connection uses any more.
+    fn forget_ssh_password(&self, ssh: &str) -> Option<String> {
+        let target = SshTarget::parse(ssh).ok().flatten()?;
+        let in_use = self.saved.iter().any(|c| SshTarget::parse(&c.ssh).ok().flatten().as_ref() == Some(&target));
+        if in_use { None } else { saved::set_ssh_password(&target, "").err() }
+    }
+
     fn quick_connect_request(&self, address: ServerAddress) -> ConnectRequest {
         if let Some(c) = self.saved.iter().find(|c| c.address == address) {
             ConnectRequest {
                 repeater: ServerAddress::parse(&c.repeater),
+                ssh: c.ssh.clone(),
                 address: c.address.clone(),
                 creds: Credentials {
                     user: c.user.clone(),
@@ -1624,6 +1686,7 @@ impl Dashboard {
         } else {
             ConnectRequest {
                 repeater: None,
+                ssh: String::new(),
                 creds: Credentials {
                     user: String::new(),
                     password: saved::password(&address).unwrap_or_default(),

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use crate::features::chat;
 use crate::features::clipboard::{self, RemoteClipboard};
-use crate::features::connection::{Credentials, ServerAddress, handshake};
+use crate::features::connection::{Credentials, ServerAddress, SshTarget, handshake};
+use crate::features::ssh::Tunnel;
 use crate::features::file_transfer::{self, RemoteFiles};
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::shared::wire::{invalid, read_u8};
@@ -44,9 +45,26 @@ impl Outbound {
 
 /// Connects and runs the session on the calling thread until it ends.
 /// With a `repeater`, we dial it instead and tell it to reach `address` (host:port or `ID:number`).
-pub fn run(address: &ServerAddress, repeater: Option<&ServerAddress>, creds: &Credentials, tx: Sender<Event>, notify: impl Fn() + Clone + Send + Sync + 'static) {
+/// With `ssh`, everything goes through an SSH tunnel that lives exactly as long as the session.
+pub fn run(
+    address: &ServerAddress,
+    repeater: Option<&ServerAddress>,
+    ssh: Option<&SshTarget>,
+    creds: &Credentials,
+    tx: Sender<Event>,
+    notify: impl Fn() + Clone + Send + Sync + 'static,
+) {
+    let mut tunnel: Option<Tunnel> = None;
     let result: io::Result<()> = (|| {
-        let mut s = connect(repeater.unwrap_or(address))?;
+        let mut s = match ssh {
+            Some(_) if repeater.is_some() => return Err(invalid("SSH and a repeater can't be combined")),
+            Some(target) => {
+                let (t, s) = Tunnel::open(target, address)?;
+                tunnel = Some(t);
+                s
+            }
+            None => connect(repeater.unwrap_or(address))?,
+        };
         s.set_nodelay(true)?;
         // A server that accepts but never speaks would otherwise hang the handshake forever.
         s.set_read_timeout(Some(TIMEOUT))?;
@@ -110,11 +128,15 @@ pub fn run(address: &ServerAddress, repeater: Option<&ServerAddress>, creds: &Cr
             }
         }
     })();
-    let _ = tx.send(Event::Closed(match result {
-        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => e.to_string(),
+    // When the tunnel broke (or could not reach the VNC server), ssh's message beats a bare "connection closed".
+    let tunnel_error = result.as_ref().err().and(tunnel.as_mut()).and_then(Tunnel::error);
+    let _ = tx.send(Event::Closed(match (result, tunnel_error) {
+        (_, Some(why)) => why,
+        (Err(e), None) if e.kind() != io::ErrorKind::UnexpectedEof => e.to_string(),
         _ => "connection closed".into(),
     }));
     notify();
+    drop(tunnel); // closes the SSH tunnel
 }
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -144,6 +166,7 @@ mod tests {
         run(
             &address,
             None,
+            None,
             &Credentials {
                 user: String::new(),
                 password: "wrong-pw".into(),
@@ -157,6 +180,7 @@ mod tests {
         std::thread::spawn(move || {
             run(
                 &address,
+                None,
                 None,
                 &Credentials {
                     user: String::new(),
@@ -293,7 +317,7 @@ mod tests {
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || run(&target, Some(&repeater), &Credentials { user: String::new(), password }, tx, || {}));
+        std::thread::spawn(move || run(&target, Some(&repeater), None, &Credentials { user: String::new(), password }, tx, || {}));
         let Event::Connected { outbound, .. } = rx.recv().unwrap() else { panic!("not connected through the repeater") };
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
@@ -339,5 +363,32 @@ mod tests {
         let jpeg = grab(&[7, -24]);
         let drift = raw.iter().zip(&jpeg).map(|(a, b)| u64::from(a.abs_diff(*b))).sum::<u64>() as f64 / raw.len() as f64;
         assert!(drift < 3.0, "Tight with JPEG drifts too far from Raw: {drift:.2} per channel");
+    }
+
+    /// VNC through an SSH tunnel to a server whose VNC port is not reachable from here, so the picture
+    /// can only arrive through the tunnel. Needs SSH_TEST_TARGET (e.g. lucarna@127.0.0.1:2222) with key auth.
+    #[test]
+    #[ignore = "needs a live SSH + VNC server"]
+    fn live_ssh_tunnel() {
+        let target = SshTarget::parse(&std::env::var("SSH_TEST_TARGET").unwrap()).unwrap().unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap();
+        // The VNC host is the SSH host, so the tunnel ends at the server's loopback.
+        let vnc = ServerAddress::parse(&target.host).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || run(&vnc, None, Some(&target), &Credentials { user: String::new(), password }, tx, || {}));
+        let event = rx.recv_timeout(Duration::from_secs(30)).expect("an event");
+        let Event::Connected { outbound, .. } = event else {
+            let Event::Closed(why) = event else { panic!("unexpected event") };
+            panic!("not connected through SSH: {why}")
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("a screen update") {
+                Event::ScreenUpdated => break,
+                Event::Closed(r) => panic!("closed: {r}"),
+                _ => {}
+            }
+        }
+        outbound.close();
     }
 }

@@ -28,6 +28,7 @@ flowchart TB
         clipboard["clipboard<br/>Latin-1 y Extended Clipboard UTF-8"]
         ft["file_transfer<br/>listados, descargas, subidas,<br/>comandos, panel de dos columnas"]
         chat["chat<br/>TextChat"]
+        ssh["ssh<br/>túnel SSH y modo askpass<br/>(cliente ssh del sistema)"]
     end
 
     session["session/mod.rs<br/>único lector del socket;<br/>despacha cada mensaje"]
@@ -35,7 +36,8 @@ flowchart TB
 
     app --> connection & screen & input & clipboard & ft & chat
     app -- "lanza un hilo por conexión" --> session
-    session --> connection & screen & clipboard & ft & chat
+    session --> connection & screen & clipboard & ft & chat & ssh
+    ssh -- "proceso ssh hijo (-L)" --> server
     F --> wire
     session --> wire
 
@@ -59,7 +61,8 @@ flowchart TB
 | `clipboard` | `mod.rs` | Portapapeles en ambos sentidos; negocia UTF-8 (Extended Clipboard) y cae a Latin-1 |
 | `file_transfer` | `protocol.rs`, `transfer.rs`, `view.rs` | Protocolo de archivos de UltraVNC (mensaje 7) y su panel |
 | `chat` | `protocol.rs`, `view.rs` | Chat de texto de UltraVNC (mensaje 11) |
-| `session` | `mod.rs` | Conecta, autentica, negocia y lee el socket en un bucle |
+| `ssh` | `mod.rs` | Lanza el `ssh` del sistema: túnel `-L` para VNC, mensajes de error con pista, y el modo askpass que responde la contraseña SSH desde el llavero |
+| `session` | `mod.rs` | Conecta (directo, por repetidor o por túnel SSH), autentica, negocia y lee el socket en un bucle |
 | `shared` | `wire.rs` | Primitivas de lectura compartidas |
 
 ## 2. Hilos, canales y estado compartido
@@ -105,6 +108,16 @@ Puntos clave:
 - **`Framebuffer`** guarda la imagen en BGRX y acumula una **región sucia**; `ScreenView` sube a la GPU solo ese rectángulo.
 - **Las descargas se escriben en el hilo lector** y **las subidas leen el disco en su propio hilo**: el disco nunca bloquea la interfaz.
 
+### Procesos hijos: el túnel SSH
+
+Con SSH configurado, `session::run` no abre el socket directamente, sino que llama a `ssh::Tunnel::open`:
+
+1. Toma un puerto libre de `127.0.0.1` y lanza `ssh -N -L 127.0.0.1:P:<destino> -- host` con opciones fijas (`StrictHostKeyChecking=accept-new`, sin reenvío de agente ni X11, sin `ControlMaster`). El destino es `localhost:<puerto VNC>` cuando el servidor VNC es el propio host SSH.
+2. Reintenta conectar a `127.0.0.1:P`. `ssh` solo escucha ahí después de autenticarse, así que **esa conexión ya es el socket VNC**: no hay conexión de prueba.
+3. El `Tunnel` vive lo que dura la sesión. Al soltarlo (`Drop`) se mata el proceso `ssh`. Si la sesión se corta, el motivo que ve el usuario es el de `ssh` (clave rechazada, túneles prohibidos, VNC inalcanzable…), no un "connection closed" sin más.
+
+**Contraseña SSH (modo askpass).** Si hay una contraseña SSH guardada, `ssh` arranca con `SSH_ASKPASS=<el propio ejecutable de Lucarna>`, `SSH_ASKPASS_REQUIRE=force` y `LUCARNA_ASKPASS=<user@host:port>`, que no es secreto. Cuando `ssh` necesita la contraseña, ejecuta Lucarna con el texto del prompt. La primera línea de `main()` lo detecta (`ssh::askpass()`): imprime la contraseña de la cuenta `ssh:…` del llavero, solo si el prompt pide una *password* (nunca una passphrase, un código ni un sí/no), y sale sin abrir ventana. Sin contraseña guardada, `ssh` usa `BatchMode=yes`: solo llaves y agente, y falla rápido si no alcanzan. Ningún secreto pasa por argumentos ni variables de entorno.
+
 ## 3. Ciclo de vida de una conexión
 
 ```mermaid
@@ -119,9 +132,17 @@ sequenceDiagram
 
     U->>D: Connect (o doble clic en una tarjeta)
     D->>D: contraseña desde el llavero (saved::password)
-    D-->>A: ConnectRequest { address, repeater, creds, options }
-    A->>S: thread::spawn(run(address, repeater, creds, tx, notify))
-    S->>S: connect(): todas las IP resueltas, timeout 10 s
+    D-->>A: ConnectRequest { address, repeater, ssh, creds, options }
+    A->>A: valida el campo SSH (si es inválido, error: nunca conecta sin cifrar)
+    A->>S: thread::spawn(run(address, repeater, ssh, creds, tx, notify))
+
+    alt con SSH
+        S->>S: ssh::Tunnel::open: lanza ssh -N -L 127.0.0.1:P
+        Note over S,V: ssh se autentica (llaves, agente o contraseña vía askpass)<br/>y reenvía 127.0.0.1:P al VNC del otro lado
+        S->>S: la conexión a 127.0.0.1:P es el socket VNC
+    else directo
+        S->>S: connect(): todas las IP resueltas, timeout 10 s
+    end
 
     alt con repetidor
         S->>R: TCP al repetidor
@@ -237,8 +258,8 @@ sequenceDiagram
 
 | Dato | Dónde | Formato |
 |---|---|---|
-| Conexiones (nombre, dirección, usuario, etiquetas, opciones, última conexión, repetidor) | `eframe::storage_dir("Lucarna")/connections.txt` (en macOS, `~/Library/Application Support/Lucarna/`) | Una conexión por línea, columnas separadas por tabulador. Las columnas nuevas son opcionales, así que los archivos viejos siguen cargando |
-| Contraseñas | Llavero del SO (Keychain, Credential Manager o Secret Service), servicio `Lucarna`, cuenta = dirección normalizada | **Nunca** se escriben a disco |
+| Conexiones (nombre, dirección, usuario, etiquetas, opciones, última conexión, repetidor, destino SSH) | `eframe::storage_dir("Lucarna")/connections.txt` (en macOS, `~/Library/Application Support/Lucarna/`) | Una conexión por línea, columnas separadas por tabulador. Las columnas nuevas son opcionales, así que los archivos viejos siguen cargando |
+| Contraseñas | Llavero del SO (Keychain, Credential Manager o Secret Service), servicio `Lucarna`. VNC: cuenta = dirección normalizada; SSH: cuenta = `ssh:user@host[:port]` | **Nunca** se escriben a disco |
 | Vistas previas del escritorio | `…/Lucarna/previews/*.lcpv` | Miniatura de 320×200 como máximo, cada 5 s mientras la sesión está abierta |
 | Tamaño de la ventana | eframe (`persistence`) | Automático |
 
