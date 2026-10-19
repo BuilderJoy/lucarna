@@ -20,9 +20,9 @@ cargo run --release
 
 ## Install
 
-Download the file for your system from the [Releases page](https://github.com/BuilderJoy/lucarna/releases). Lucarna is in early development (0.x): expect rough edges.
+Download the file for your system from the [latest release](https://github.com/BuilderJoy/lucarna/releases/latest), which also has step-by-step install instructions in Spanish. Lucarna is in early development (0.x): expect rough edges.
 
-- **macOS 11+** (Apple Silicon and Intel): open `Lucarna-<version>-macos-universal.dmg` and drag Lucarna to Applications. The app is not notarized by Apple yet, so the first time **right-click Lucarna → Open → Open** (or run `xattr -dr com.apple.quarantine /Applications/Lucarna.app`).
+- **macOS 11+** (Apple Silicon and Intel): open `Lucarna-<version>-macos-universal.dmg` and drag Lucarna to Applications. The app is not notarized by Apple yet, so macOS blocks the first launch: on macOS 15 or later go to **System Settings → Privacy & Security → Open Anyway**; on macOS 14 or earlier **right-click Lucarna → Open → Open**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Lucarna.app`.
 - **Windows 10/11 (64-bit):** run `Lucarna-<version>-windows-x64-setup.exe`. The installer is not code-signed yet, so SmartScreen may warn: **More info → Run anyway**. It can install for your user only, without admin rights.
 - **Linux (x86_64):** on Debian/Ubuntu, `sudo apt install ./lucarna_<version>_amd64.deb`. Elsewhere, extract `lucarna-<version>-linux-x86_64.tar.gz` and run `./lucarna`. Saving passwords needs a Secret Service keyring (GNOME Keyring or KWallet).
 

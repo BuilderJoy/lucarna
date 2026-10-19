@@ -46,7 +46,7 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for
 
 ## Packaging and releases
 
-`packaging/` holds the per-platform recipes (`macos/bundle.sh`, `windows/lucarna.iss`, `linux/lucarna.desktop`, cargo-deb metadata in `Cargo.toml`); `.github/workflows/packages.yml` builds all three on every PR. To release: bump `version` in `Cargo.toml` on a branch, merge into `develop`, PR `develop` → `main`, then tag `main` with `vX.Y.Z` and push the tag; the workflow publishes a GitHub pre-release with the installers. Stay on 0.x until the app is tested against real UltraVNC servers.
+`packaging/` holds the per-platform recipes (`macos/bundle.sh`, `windows/lucarna.iss`, `linux/lucarna.desktop`, cargo-deb metadata in `Cargo.toml`); `.github/workflows/packages.yml` builds all three on every PR. To release: bump `version` in `Cargo.toml` on a branch, merge into `develop`, PR `develop` → `main`, then tag `main` with `vX.Y.Z` and push the tag; the workflow publishes the latest GitHub release with the installers, opening with `packaging/release-notes.md` (download links and install steps, `{VERSION}` is replaced) followed by the generated changelog. Stay on 0.x until the app is tested against real UltraVNC servers.
 
 ## Git workflow
 
