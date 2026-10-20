@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="118%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="badge-shadow" x="-12%" y="-12%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#1a3a6b"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd36b" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#ffd36b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset="1" stop-color="#ffbe3d"/>
+    </linearGradient>
+
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1e293b"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1600" height="920" fill="#f1f3f6"/>
+
+  <!-- Header Banner -->
+  <rect x="30" y="22" width="1540" height="74" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+  <g transform="translate(50, 31) scale(0.11)">
+    <rect width="512" height="512" rx="112" fill="url(#night)"/>
+    <polygon points="160,196 352,196 440,460 72,460" fill="url(#beam)"/>
+    <polygon points="196,92 316,92 352,196 160,196" fill="url(#glass)"/>
+    <g fill="none" stroke="#f5f7fb" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="196,92 316,92 352,196 160,196"/>
+      <line x1="256" y1="92" x2="256" y2="196"/>
+      <line x1="178" y1="144" x2="334" y2="144"/>
+    </g>
+    <path transform="translate(226 270) scale(1.15)" d="M0 0 L0 120 L32 92 L54 140 L76 130 L54 84 L96 84 Z" fill="#f5f7fb" stroke="#0b1d3a" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+  <text x="122" y="55" font-size="22" font-weight="800" fill="#0f172a">LUCARNA — Funcionamiento Paso a Paso con Tailscale y Cloudflare Tunnel (Fase 11)</text>
+  <text x="122" y="79" font-size="14" font-weight="500" fill="#475569">Desde el auto-descubrimiento en el Address Book hasta la sesión remota con doble capa de seguridad (Zero-Trust + SSH E2E)</text>
+
+  <!-- ==================== FLOW 1: FLUJO CON TAILSCALE ==================== -->
+  <rect x="30" y="116" width="1540" height="252" rx="14" fill="#ffffff" stroke="#60a5fa" stroke-width="2.2" filter="url(#shadow)"/>
+  <rect x="30" y="116" width="1540" height="38" rx="14" fill="#dbeafe"/>
+  <text x="54" y="141" font-size="15" font-weight="800" fill="#1e3a8a">FLUJO 1: Auto-Descubrimiento y Conexión Directa con Tailscale (Mesh VPN Basada en WireGuard)</text>
+
+  <!-- Step T1 -->
+  <g transform="translate(155, 232)">
+    <circle cx="0" cy="0" r="40" fill="#1e293b" filter="url(#badge-shadow)"/>
+    <circle cx="-11" cy="-11" r="4" fill="#94a3b8"/>
+    <circle cx="0" cy="-11" r="4" fill="#ffffff"/>
+    <circle cx="11" cy="-11" r="4" fill="#94a3b8"/>
+    <circle cx="-11" cy="0" r="4" fill="#ffffff"/>
+    <circle cx="0" cy="0" r="4" fill="#ffffff"/>
+    <circle cx="11" cy="0" r="4" fill="#ffffff"/>
+    <circle cx="-11" cy="11" r="4" fill="#94a3b8"/>
+    <circle cx="0" cy="11" r="4" fill="#ffffff"/>
+    <circle cx="11" cy="11" r="4" fill="#38bdf8"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">1. tailscale status --json</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Lucarna consulta los nodos</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#2563eb" font-weight="600">activos de tu Tailnet local</text>
+  </g>
+
+  <!-- Step T2 -->
+  <g transform="translate(475, 232)">
+    <circle cx="0" cy="0" r="40" fill="#7c3aed" filter="url(#badge-shadow)"/>
+    <rect x="-18" y="-14" width="36" height="28" rx="4" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <circle cx="-7" cy="2" r="4" fill="#ffffff"/>
+    <line x1="2" y1="2" x2="12" y2="2" stroke="#ffffff" stroke-width="2.3"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">2. Tarjetas «Tailnet» en UI</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Muestra estado Online/Offline</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#6d28d9" font-weight="600">y nombre MagicDNS (.ts.net)</text>
+  </g>
+
+  <!-- Step T3 -->
+  <g transform="translate(815, 232)">
+    <circle cx="0" cy="0" r="40" fill="#2563eb" filter="url(#badge-shadow)"/>
+    <path d="M0 -18 L15 -10 L15 3 C15 13 0 20 0 20 C0 20 -15 13 -15 3 L-15 -10 Z" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">3. Enlace WireGuard P2P</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Atraviesa routers domésticos</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#1d4ed8" font-weight="600">y móviles (100.x.y.z directo)</text>
+  </g>
+
+  <!-- Step T4 -->
+  <g transform="translate(1135, 232)">
+    <circle cx="0" cy="0" r="40" fill="#15803d" filter="url(#badge-shadow)"/>
+    <rect x="-13" y="-2" width="26" height="18" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M-8 -2 L-8 -9 C-8 -15 8 -15 8 -9 L8 -2" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">4. SSH Tunnel + SFTP (Opcional)</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">VNC viaja por SSH o directo</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#15803d" font-weight="600">sobre la interfaz tailscale0</text>
+  </g>
+
+  <!-- Step T5 -->
+  <g transform="translate(1430, 232)">
+    <circle cx="0" cy="0" r="40" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <rect x="-16" y="-14" width="32" height="22" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="-8" y1="14" x2="8" y2="14" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">5. Escritorio &amp; Archivos</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Firewall bloquea 5900 en LAN;</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#b91c1c" font-weight="700">solo acepta Tailnet / 127.0.0.1</text>
+  </g>
+
+  <!-- Flow 1 Arrows -->
+  <line x1="202" y1="232" x2="428" y2="232" stroke="#2563eb" stroke-width="2.8" marker-end="url(#arrow-blue)"/>
+  <line x1="522" y1="232" x2="768" y2="232" stroke="#2563eb" stroke-width="2.8" marker-end="url(#arrow-blue)"/>
+  <line x1="862" y1="232" x2="1088" y2="232" stroke="#15803d" stroke-width="2.8" marker-end="url(#arrow-green)"/>
+  <line x1="1182" y1="232" x2="1382" y2="232" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+
+  <!-- ==================== FLOW 2: FLUJO CON CLOUDFLARE TUNNEL + ACCESS ==================== -->
+  <rect x="30" y="390" width="1540" height="252" rx="14" fill="#ffffff" stroke="#fb923c" stroke-width="2.2" filter="url(#shadow)"/>
+  <rect x="30" y="390" width="1540" height="38" rx="14" fill="#ffedd5"/>
+  <text x="54" y="415" font-size="15" font-weight="800" fill="#9a3412">FLUJO 2: Conexión Corporativa con Cloudflare Tunnel (cloudflared) + Políticas Zero-Trust Access</text>
+
+  <!-- Step C1 -->
+  <g transform="translate(155, 506)">
+    <circle cx="0" cy="0" r="40" fill="#ea580c" filter="url(#badge-shadow)"/>
+    <path d="M-16 8 L16 8 C20 8 22 3 18 0 C18 -6 12 -9 7 -7 C4 -13 -6 -13 -9 -6 C-14 -6 -19 -1 -16 8 Z" fill="#ffffff"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">1. Subproceso cloudflared</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Lucarna ejecuta access tcp</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#ea580c" font-weight="600">--hostname vnc.empresa.com</text>
+  </g>
+
+  <!-- Step C2 -->
+  <g transform="translate(475, 506)">
+    <circle cx="0" cy="0" r="40" fill="#6d28d9" filter="url(#badge-shadow)"/>
+    <path d="M-12 0 L-3 9 L14 -8" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">2. Login SSO / MFA en Edge</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Valida identidad corporativa y</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#6d28d9" font-weight="600">abre puerto local 127.0.0.1:P1</text>
+  </g>
+
+  <!-- Step C3 -->
+  <g transform="translate(815, 506)">
+    <circle cx="0" cy="0" r="40" fill="#15803d" filter="url(#badge-shadow)"/>
+    <rect x="-13" y="-2" width="26" height="18" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M-8 -2 L-8 -9 C-8 -15 8 -15 8 -9 L8 -2" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">3. Cifrado E2E (SSH dentro)</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Ni siquiera Cloudflare puede</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#15803d" font-weight="700">ver los píxeles ni las teclas</text>
+  </g>
+
+  <!-- Step C4 -->
+  <g transform="translate(1135, 506)">
+    <circle cx="0" cy="0" r="40" fill="#d97706" filter="url(#badge-shadow)"/>
+    <path d="M-14 0 L14 0 M5 -8 L14 0 L5 8" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">4. Túnel Saliente Remoto</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">cloudflared en el servidor</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#b45309" font-weight="600">entrega tráfico a localhost</text>
+  </g>
+
+  <!-- Step C5 -->
+  <g transform="translate(1430, 506)">
+    <circle cx="0" cy="0" r="40" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <rect x="-16" y="-14" width="32" height="22" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="-8" y1="14" x2="8" y2="14" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">5. Servidor VNC en 127.0.0.1</text>
+    <text x="0" y="75" text-anchor="middle" font-size="11.5" fill="#475569">Sesión completa + auditoría</text>
+    <text x="0" y="90" text-anchor="middle" font-size="11.5" fill="#15803d" font-weight="700">Cero puertos abiertos en router</text>
+  </g>
+
+  <!-- Flow 2 Arrows -->
+  <line x1="202" y1="506" x2="428" y2="506" stroke="#ea580c" stroke-width="2.8" marker-end="url(#arrow-orange)"/>
+  <line x1="522" y1="506" x2="768" y2="506" stroke="#15803d" stroke-width="2.8" marker-end="url(#arrow-green)"/>
+  <line x1="862" y1="506" x2="1088" y2="506" stroke="#ea580c" stroke-width="2.8" marker-end="url(#arrow-orange)"/>
+  <line x1="1182" y1="506" x2="1382" y2="506" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+
+  <!-- ==================== BOTTOM PANEL: COMPARATIVA DE SEGURIDAD Y CUÁNDO USAR CADA UNO ==================== -->
+  <rect x="30" y="664" width="1540" height="232" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="30" y="664" width="1540" height="38" rx="14" fill="#f8fafc"/>
+  <text x="54" y="689" font-size="15" font-weight="800" fill="#0f172a">MATRIZ DE DECISIÓN PARA EL EQUIPO: ¿Cuándo usar SSH Directo, Tailscale o Cloudflare Tunnel con Lucarna?</text>
+
+  <!-- Box 1: SSH Directo -->
+  <g transform="translate(55, 718)">
+    <rect width="475" height="158" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="1.8"/>
+    <text x="20" y="28" font-size="14.5" font-weight="800" fill="#14532d">1. Túnel SSH Nativo (Ya integrado en Fase 8.1)</text>
+    <text x="20" y="52" font-size="12" fill="#334155">• Ideal para: Servidores con IP alcanzable, LAN o VPN existente.</text>
+    <text x="20" y="72" font-size="12" fill="#334155">• Requisitos: Solo OpenSSH (viene de serie en macOS/Linux/Win10+).</text>
+    <text x="20" y="92" font-size="12" fill="#334155">• Puertos: Solo puerto 22 (el puerto 5900 VNC queda en 127.0.0.1).</text>
+    <text x="20" y="114" font-size="12" font-weight="700" fill="#15803d">• Ventaja clave: Cero software de terceros; habilita SFTP v3 inmediato.</text>
+    <text x="20" y="136" font-size="11.5" fill="#475569">• Soporta salto intermedio (ProxyJump: ssh -J bastion usuario@destino).</text>
+  </g>
+
+  <!-- Box 2: Tailscale -->
+  <g transform="translate(562, 718)">
+    <rect width="475" height="158" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.8"/>
+    <text x="20" y="28" font-size="14.5" font-weight="800" fill="#1e3a8a">2. Tailscale / WireGuard (Fase 11.3)</text>
+    <text x="20" y="52" font-size="12" fill="#334155">• Ideal para: Equipos detrás de NAT/CGNAT sin IP pública fija.</text>
+    <text x="20" y="72" font-size="12" fill="#334155">• Requisitos: Cliente Tailscale en ambos extremos (misma tailnet/compartido).</text>
+    <text x="20" y="92" font-size="12" fill="#334155">• Puertos: CERO puertos abiertos en el router (UDP Hole Punching).</text>
+    <text x="20" y="114" font-size="12" font-weight="700" fill="#2563eb">• Ventaja clave: Conexión P2P directa de baja latencia + Auto-discovery.</text>
+    <text x="20" y="136" font-size="11.5" fill="#475569">• Cifrado extremo a extremo WireGuard (el proveedor nunca ve el tráfico).</text>
+  </g>
+
+  <!-- Box 3: Cloudflare Tunnel -->
+  <g transform="translate(1070, 718)">
+    <rect width="475" height="158" rx="12" fill="#fff7ed" stroke="#fdba74" stroke-width="1.8"/>
+    <text x="20" y="28" font-size="14.5" font-weight="800" fill="#9a3412">3. Cloudflare Tunnel + Access (Fase 11.4)</text>
+    <text x="20" y="52" font-size="12" fill="#334155">• Ideal para: Entornos corporativos con SSO (Okta/Google/Entra) y MFA.</text>
+    <text x="20" y="72" font-size="12" fill="#334155">• Requisitos: Conector cloudflared saliente en el servidor y en el cliente.</text>
+    <text x="20" y="92" font-size="12" fill="#334155">• Puertos: CERO puertos abiertos en el firewall (100% saliente por 443).</text>
+    <text x="20" y="114" font-size="12" font-weight="700" fill="#ea580c">• Ventaja clave: Auditoría centralizada de accesos por usuario e identidad.</text>
+    <text x="20" y="136" font-size="11.5" fill="#15803d" font-weight="700">• Con SSH de Lucarna encima: cifrado E2E opaco incluso para Cloudflare.</text>
+  </g>
+</svg>

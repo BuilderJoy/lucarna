@@ -1,0 +1,341 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <!-- Drop shadows -->
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="118%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="badge-shadow" x="-12%" y="-12%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+
+    <!-- Lucarna Logo Gradients -->
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#1a3a6b"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd36b" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#ffd36b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset="1" stop-color="#ffbe3d"/>
+    </linearGradient>
+
+    <!-- Arrowhead Markers -->
+    <marker id="arrow-dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1e293b"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#6d28d9"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background (AWS style light gray) -->
+  <rect width="1600" height="920" fill="#f1f3f6"/>
+
+  <!-- Header Banner -->
+  <rect x="30" y="22" width="1540" height="74" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+  <!-- Embedded Lucarna Logo -->
+  <g transform="translate(50, 31) scale(0.11)">
+    <rect width="512" height="512" rx="112" fill="url(#night)"/>
+    <polygon points="160,196 352,196 440,460 72,460" fill="url(#beam)"/>
+    <polygon points="196,92 316,92 352,196 160,196" fill="url(#glass)"/>
+    <g fill="none" stroke="#f5f7fb" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="196,92 316,92 352,196 160,196"/>
+      <line x1="256" y1="92" x2="256" y2="196"/>
+      <line x1="178" y1="144" x2="334" y2="144"/>
+    </g>
+    <path transform="translate(226 270) scale(1.15)" d="M0 0 L0 120 L32 92 L54 140 L76 130 L54 84 L96 84 Z" fill="#f5f7fb" stroke="#0b1d3a" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+  <text x="122" y="55" font-size="22" font-weight="800" fill="#0f172a">LUCARNA — Arquitectura General del Sistema y Rebanadas Verticales (Vertical Slices)</text>
+  <text x="122" y="79" font-size="14" font-weight="500" fill="#475569">Cliente VNC / SFTP / RMM multiplataforma en Rust (eframe/egui) con aislamiento de seguridad, túnel SSH nativo y soporte UltraVNC</text>
+
+  <!-- ==================== COLUMN 1: USUARIO Y ENTORNO LOCAL ==================== -->
+  <text x="165" y="135" text-anchor="middle" font-size="15" font-weight="700" fill="#334155" letter-spacing="0.5">ENTORNO LOCAL (SO)</text>
+
+  <!-- Node: Llavero del SO (Keychain) -->
+  <g transform="translate(165, 220)">
+    <circle cx="0" cy="0" r="46" fill="#6d28d9" filter="url(#badge-shadow)"/>
+    <!-- Shield + Keyhole icon -->
+    <path d="M0 -24 L20 -15 L20 2 C20 16 0 25 0 25 C0 25 -20 16 -20 2 L-20 -15 Z" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linejoin="round"/>
+    <circle cx="0" cy="-3" r="5" fill="#ffffff"/>
+    <path d="M-2.5 2 L2.5 2 L4 12 L-4 12 Z" fill="#ffffff"/>
+    <text x="0" y="68" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Llavero del SO</text>
+    <text x="0" y="86" text-anchor="middle" font-size="12" fill="#475569">Keychain / Cred Manager</text>
+    <text x="0" y="102" text-anchor="middle" font-size="11" font-weight="600" fill="#6d28d9">Cero secretos en disco</text>
+  </g>
+
+  <!-- Node: Usuario / Técnico IT -->
+  <g transform="translate(165, 435)">
+    <circle cx="0" cy="0" r="46" fill="#3b82f6" filter="url(#badge-shadow)"/>
+    <!-- Users icon -->
+    <circle cx="-10" cy="-8" r="9" fill="#ffffff"/>
+    <path d="M-26 18 C-26 6 -18 2 -10 2 C-2 2 6 6 6 18 Z" fill="#ffffff"/>
+    <circle cx="12" cy="-6" r="7.5" fill="#dbeafe"/>
+    <path d="M2 18 C3 8 8 4 14 4 C21 4 27 8 27 18 Z" fill="#dbeafe"/>
+    <text x="0" y="68" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Técnico / Usuario</text>
+    <text x="0" y="86" text-anchor="middle" font-size="12" fill="#475569">Teclado, Ratón, Archivos</text>
+    <text x="0" y="102" text-anchor="middle" font-size="11" font-weight="600" fill="#2563eb">macOS · Windows · Linux</text>
+  </g>
+
+  <!-- Node: Disco Local Seguro -->
+  <g transform="translate(165, 650)">
+    <circle cx="0" cy="0" r="46" fill="#475569" filter="url(#badge-shadow)"/>
+    <!-- Database / Folder bucket icon -->
+    <ellipse cx="0" cy="-14" rx="20" ry="7" fill="none" stroke="#ffffff" stroke-width="2.6"/>
+    <path d="M-20 -14 L-16 14 C-16 19 16 19 16 14 L20 -14" fill="none" stroke="#ffffff" stroke-width="2.6"/>
+    <path d="M-18 0 C-18 5 18 5 18 0" fill="none" stroke="#ffffff" stroke-width="2.2"/>
+    <text x="0" y="68" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Almacenamiento Local</text>
+    <text x="0" y="86" text-anchor="middle" font-size="12" fill="#475569">connections.txt · previews/</text>
+    <text x="0" y="102" text-anchor="middle" font-size="11" font-weight="600" fill="#0f172a">Descargas (.lucarna-part)</text>
+  </g>
+
+  <!-- ==================== CENTRAL GREEN BOX: PROCESO LUCARNA ==================== -->
+  <rect x="330" y="118" width="840" height="765" rx="16" fill="#dcfce7" stroke="#15803d" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="355" y="148" font-size="16" font-weight="800" fill="#14532d">PROCESO LUCARNA (Binario Único en Rust 2024 · Memoria Segura · Sin Dependencias Pesadas)</text>
+
+  <!-- Sub-box 1: Hilo de Interfaz (UI Thread) -->
+  <rect x="352" y="166" width="245" height="692" rx="12" fill="#ffffff" stroke="#86efac" stroke-width="2"/>
+  <text x="474" y="194" text-anchor="middle" font-size="15" font-weight="800" fill="#0f172a">Hilo de Interfaz (egui 60 FPS)</text>
+  <text x="474" y="212" text-anchor="middle" font-size="12" fill="#64748b">src/app.rs · Render GPU</text>
+
+  <!-- UI Node 1: Address Book -->
+  <g transform="translate(474, 285)">
+    <circle cx="0" cy="0" r="38" fill="#7c3aed" filter="url(#badge-shadow)"/>
+    <rect x="-16" y="-14" width="32" height="28" rx="4" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="-16" y1="-4" x2="16" y2="-4" stroke="#ffffff" stroke-width="2.2"/>
+    <circle cx="-6" cy="5" r="3" fill="#ffffff"/>
+    <line x1="1" y1="5" x2="10" y2="5" stroke="#ffffff" stroke-width="2.2"/>
+    <text x="0" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Address Book &amp; NOC</text>
+    <text x="0" y="73" text-anchor="middle" font-size="11.5" fill="#475569">Miniaturas .lcpv, Etiquetas,</text>
+    <text x="0" y="88" text-anchor="middle" font-size="11.5" fill="#475569">Pestañas, Mosaico y WoL</text>
+  </g>
+
+  <!-- UI Node 2: Viewport & Local Cursor -->
+  <g transform="translate(474, 465)">
+    <circle cx="0" cy="0" r="38" fill="#d97706" filter="url(#badge-shadow)"/>
+    <rect x="-18" y="-14" width="36" height="24" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="-8" y1="15" x2="8" y2="15" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="0" y1="10" x2="0" y2="15" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M-4 -6 L-4 5 L0 2 L3 7 L5 6 L2 1 L6 1 Z" fill="#ffffff"/>
+    <text x="0" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">ScreenView &amp; Cursor</text>
+    <text x="0" y="73" text-anchor="middle" font-size="11.5" fill="#475569">Subida parcial GPU (dirty rect)</text>
+    <text x="0" y="88" text-anchor="middle" font-size="11.5" fill="#475569">Escalado Fit/1:1, Multimonitor</text>
+  </g>
+
+  <!-- UI Node 3: Session Bar & Panels -->
+  <g transform="translate(474, 645)">
+    <circle cx="0" cy="0" r="38" fill="#0284c7" filter="url(#badge-shadow)"/>
+    <rect x="-18" y="-13" width="15" height="26" rx="2" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <rect x="3" y="-13" width="15" height="26" rx="2" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <path d="M-3 -3 L3 -3 M0 -6 L3 -3 L0 0" fill="none" stroke="#ffffff" stroke-width="2"/>
+    <text x="0" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">FilesView · Chat · Barra</text>
+    <text x="0" y="73" text-anchor="middle" font-size="11.5" fill="#475569">Navegador 2 paneles (FT/SFTP),</text>
+    <text x="0" y="88" text-anchor="middle" font-size="11.5" fill="#475569">Candado SSH, Grabación, Macros</text>
+  </g>
+
+  <!-- Sub-box 2: Rebanadas Verticales (Features) -->
+  <rect x="618" y="166" width="285" height="692" rx="12" fill="#ffffff" stroke="#86efac" stroke-width="2"/>
+  <text x="760" y="194" text-anchor="middle" font-size="15" font-weight="800" fill="#0f172a">Rebanadas Verticales (Features)</text>
+  <text x="760" y="212" text-anchor="middle" font-size="12" fill="#64748b">src/features/* (protocol.rs + view.rs)</text>
+
+  <!-- Feature Chips inside Sub-box 2 -->
+  <!-- Feature 1: connection -->
+  <g transform="translate(636, 232)">
+    <rect width="248" height="74" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="34" cy="37" r="22" fill="#b45309"/>
+    <path d="M25 37 L43 37 M37 31 L43 37 L37 43" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="68" y="30" font-size="13.5" font-weight="700" fill="#0f172a">connection</text>
+    <text x="68" y="47" font-size="11.5" fill="#475569">Handshake RFB, VNC Auth,</text>
+    <text x="68" y="62" font-size="11.5" fill="#475569">MS-Logon II/III (X25519), Repetidor</text>
+  </g>
+
+  <!-- Feature 2: remote_screen -->
+  <g transform="translate(636, 318)">
+    <rect width="248" height="74" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="34" cy="37" r="22" fill="#d97706"/>
+    <rect x="23" y="27" width="22" height="20" rx="2" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <line x1="23" y1="34" x2="45" y2="34" stroke="#ffffff" stroke-width="2"/>
+    <text x="68" y="30" font-size="13.5" font-weight="700" fill="#0f172a">remote_screen</text>
+    <text x="68" y="47" font-size="11.5" fill="#475569">Tight (JPEG), ZRLE, Zlib, Hextile,</text>
+    <text x="68" y="62" font-size="11.5" fill="#475569">CopyRect, Framebuffer BGRX</text>
+  </g>
+
+  <!-- Feature 3: file_transfer + SFTP -->
+  <g transform="translate(636, 404)">
+    <rect width="248" height="74" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="34" cy="37" r="22" fill="#15803d"/>
+    <path d="M23 30 L31 30 L34 34 L45 34 L45 46 L23 46 Z" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linejoin="round"/>
+    <text x="68" y="30" font-size="13.5" font-weight="700" fill="#0f172a">file_transfer &amp; SFTP</text>
+    <text x="68" y="47" font-size="11.5" fill="#475569">UltraVNC FT (msg 7) + SFTP v3</text>
+    <text x="68" y="62" font-size="11.5" fill="#475569">Colas, Drag&amp;Drop, Zlib, Sandbox</text>
+  </g>
+
+  <!-- Feature 4: input & clipboard -->
+  <g transform="translate(636, 490)">
+    <rect width="248" height="74" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="34" cy="37" r="22" fill="#9333ea"/>
+    <rect x="24" y="27" width="20" height="22" rx="3" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <line x1="28" y1="34" x2="40" y2="34" stroke="#ffffff" stroke-width="2"/>
+    <line x1="28" y1="40" x2="37" y2="40" stroke="#ffffff" stroke-width="2"/>
+    <text x="68" y="30" font-size="13.5" font-weight="700" fill="#0f172a">input &amp; clipboard</text>
+    <text x="68" y="47" font-size="11.5" fill="#475569">Keysyms, AltGr ES, Type Text,</text>
+    <text x="68" y="62" font-size="11.5" fill="#475569">Extended Clipboard UTF-8 / DIB</text>
+  </g>
+
+  <!-- Feature 5: chat & telemetry -->
+  <g transform="translate(636, 576)">
+    <rect width="248" height="74" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="34" cy="37" r="22" fill="#db2777"/>
+    <path d="M24 29 L44 29 L44 42 L33 42 L27 47 L27 42 L24 42 Z" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linejoin="round"/>
+    <text x="68" y="30" font-size="13.5" font-weight="700" fill="#0f172a">chat &amp; acciones rápidas</text>
+    <text x="68" y="47" font-size="11.5" fill="#475569">TextChat (msg 11), Campana,</text>
+    <text x="68" y="62" font-size="11.5" fill="#475569">Telemetría SSH y Grabación .fbs</text>
+  </g>
+
+  <!-- Feature 6: ssh -->
+  <g transform="translate(636, 662)">
+    <rect width="248" height="84" rx="10" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.8"/>
+    <circle cx="34" cy="42" r="22" fill="#dc2626"/>
+    <rect x="25" y="40" width="18" height="13" rx="2" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <path d="M29 40 L29 35 C29 31 39 31 39 35 L39 40" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <text x="68" y="29" font-size="13.5" font-weight="700" fill="#991b1b">ssh (Túnel &amp; Askpass)</text>
+    <text x="68" y="46" font-size="11.5" fill="#7f1d1d">Cliente OpenSSH nativo (-L / sftp)</text>
+    <text x="68" y="61" font-size="11.5" fill="#7f1d1d">Fail-closed, Host Pinning, ProxyJump</text>
+  </g>
+
+  <!-- Sub-box 3: Motor de Sesión y Seguridad (Session Core) -->
+  <rect x="922" y="166" width="226" height="692" rx="12" fill="#ffffff" stroke="#86efac" stroke-width="2"/>
+  <text x="1035" y="194" text-anchor="middle" font-size="15" font-weight="800" fill="#0f172a">Núcleo de Sesión</text>
+  <text x="1035" y="212" text-anchor="middle" font-size="12" fill="#64748b">src/session/mod.rs</text>
+
+  <!-- Node: Firewall / Validador Hostil -->
+  <g transform="translate(1035, 300)">
+    <circle cx="0" cy="0" r="42" fill="#dc2626" filter="url(#badge-shadow)"/>
+    <!-- AWS WAF style shield/flame icon -->
+    <circle cx="0" cy="0" r="28" fill="none" stroke="#ffffff" stroke-width="2" stroke-dasharray="5,3"/>
+    <path d="M0 -18 L15 -10 L15 3 C15 13 0 20 0 20 C0 20 -15 13 -15 3 L-15 -10 Z" fill="none" stroke="#ffffff" stroke-width="2.6"/>
+    <path d="M0 -8 L0 4 M0 9 L0 11" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <text x="0" y="60" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">Validador Anti-Hostil</text>
+    <text x="0" y="77" text-anchor="middle" font-size="11.5" fill="#475569">Único lector del socket</text>
+    <text x="0" y="92" text-anchor="middle" font-size="11.5" fill="#475569">Topes MAX_DIM, Zlib y Rutas</text>
+  </g>
+
+  <!-- Node: Despachador de Mensajes (session::run) -->
+  <g transform="translate(1035, 495)">
+    <circle cx="0" cy="0" r="42" fill="#16a34a" filter="url(#badge-shadow)"/>
+    <!-- Router / Switch arrows icon -->
+    <circle cx="-12" cy="0" r="5" fill="#ffffff"/>
+    <path d="M-7 0 L8 -12 M-7 0 L12 0 M-7 0 L8 12" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="11" cy="-14" r="4" fill="#ffffff"/>
+    <circle cx="15" cy="0" r="4" fill="#ffffff"/>
+    <circle cx="11" cy="14" r="4" fill="#ffffff"/>
+    <text x="0" y="60" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">session::run &amp; Outbound</text>
+    <text x="0" y="77" text-anchor="middle" font-size="11.5" fill="#475569">BufReader 64 KiB + Mutex TX</text>
+    <text x="0" y="92" text-anchor="middle" font-size="11.5" fill="#475569">Hilo por sesión + Hilo Upload</text>
+  </g>
+
+  <!-- Node: Subproceso SSH Hijo -->
+  <g transform="translate(1035, 690)">
+    <circle cx="0" cy="0" r="42" fill="#0f172a" filter="url(#badge-shadow)"/>
+    <!-- Terminal / Tunnel icon -->
+    <rect x="-20" y="-14" width="40" height="28" rx="4" fill="none" stroke="#38bdf8" stroke-width="2.5"/>
+    <path d="M-12 -5 L-5 1 L-12 7" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="-2" y1="7" x2="10" y2="7" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="0" y="60" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Túnel SSH / SFTP</text>
+    <text x="0" y="77" text-anchor="middle" font-size="11.5" fill="#475569">ssh -N -L 127.0.0.1:P:destino</text>
+    <text x="0" y="92" text-anchor="middle" font-size="11.5" fill="#15803d" font-weight="600">Muere al cerrar sesión (Drop)</text>
+  </g>
+
+  <!-- ==================== COLUMN 3: DESTINOS Y SERVICIOS REMOTOS ==================== -->
+  <text x="1395" y="135" text-anchor="middle" font-size="15" font-weight="700" fill="#334155" letter-spacing="0.5">DESTINOS Y ECOSISTEMA REMOTO</text>
+
+  <!-- Remote 1: Windows + UltraVNC -->
+  <g transform="translate(1395, 235)">
+    <circle cx="-110" cy="0" r="38" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <!-- Windows / Desktop Server icon -->
+    <rect x="-126" y="-16" width="14" height="14" fill="#ffffff"/>
+    <rect x="-108" y="-16" width="14" height="14" fill="#ffffff"/>
+    <rect x="-126" y="2" width="14" height="14" fill="#ffffff"/>
+    <rect x="-108" y="2" width="14" height="14" fill="#ffffff"/>
+    <text x="-55" y="-10" font-size="15" font-weight="700" fill="#0f172a">UltraVNC Server (Windows)</text>
+    <text x="-55" y="10" font-size="12" fill="#475569">MS-Logon III, Archivos FT, Chat,</text>
+    <text x="-55" y="27" font-size="12" fill="#15803d" font-weight="600">Solo en loopback 127.0.0.1:5900</text>
+  </g>
+
+  <!-- Remote 2: Linux / macOS VNC + SFTP -->
+  <g transform="translate(1395, 405)">
+    <circle cx="-110" cy="0" r="38" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <!-- Server rack icon -->
+    <rect x="-128" y="-16" width="36" height="13" rx="2" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <rect x="-128" y="3" width="36" height="13" rx="2" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <circle cx="-121" cy="-9.5" r="2" fill="#ffffff"/>
+    <circle cx="-121" cy="9.5" r="2" fill="#ffffff"/>
+    <text x="-55" y="-10" font-size="15" font-weight="700" fill="#0f172a">Linux / macOS + OpenSSH</text>
+    <text x="-55" y="10" font-size="12" fill="#475569">x11vnc, TigerVNC, Screen Sharing</text>
+    <text x="-55" y="27" font-size="12" fill="#475569">+ Archivos por SFTP v3 y Telemetría</text>
+  </g>
+
+  <!-- Remote 3: Zero-Trust / Repetidor / QuickSupport -->
+  <g transform="translate(1395, 575)">
+    <circle cx="-110" cy="0" r="38" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <!-- Cloud / Mesh network icon -->
+    <circle cx="-110" cy="-12" r="5" fill="#ffffff"/>
+    <circle cx="-124" cy="10" r="5" fill="#ffffff"/>
+    <circle cx="-96" cy="10" r="5" fill="#ffffff"/>
+    <path d="M-110 -7 L-121 6 M-110 -7 L-99 6 M-119 10 L-101 10" stroke="#ffffff" stroke-width="2.4"/>
+    <text x="-55" y="-10" font-size="15" font-weight="700" fill="#0f172a">NAT Traversal &amp; Asistencia</text>
+    <text x="-55" y="10" font-size="12" fill="#475569">Tailscale, Cloudflare Tunnel,</text>
+    <text x="-55" y="27" font-size="12" fill="#475569">Repetidor ID:1234 y Reverse SSH</text>
+  </g>
+
+  <!-- Remote 4: Extensión Multiprotocolo -->
+  <g transform="translate(1395, 745)">
+    <circle cx="-110" cy="0" r="38" fill="#c026d3" filter="url(#badge-shadow)"/>
+    <!-- CPU / Virtualization icon -->
+    <rect x="-123" y="-13" width="26" height="26" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <rect x="-116" y="-6" width="12" height="12" fill="#ffffff"/>
+    <path d="M-116 -19 L-116 -13 M-104 -19 L-104 -13 M-116 13 L-116 19 M-104 13 L-104 19 M-129 -6 L-123 -6 M-129 6 L-123 6 M-97 -6 L-91 -6 M-97 6 L-91 6" stroke="#ffffff" stroke-width="2.2"/>
+    <text x="-55" y="-10" font-size="15" font-weight="700" fill="#0f172a">Expansión Multiprotocolo</text>
+    <text x="-55" y="10" font-size="12" fill="#475569">Modo Solo SFTP/SSH (Headless),</text>
+    <text x="-55" y="27" font-size="12" fill="#475569">SPICE (Proxmox/QEMU) y RDP</text>
+  </g>
+
+  <!-- ==================== CONNECTING ARROWS ==================== -->
+  <!-- Keychain <-> Address Book & SSH Askpass -->
+  <line x1="215" y1="220" x2="428" y2="275" stroke="#6d28d9" stroke-width="2.6" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
+  <!-- User <-> UI Thread -->
+  <line x1="215" y1="435" x2="428" y2="460" stroke="#1e293b" stroke-width="2.6" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+  <!-- Local Disk <-> Address Book & File Transfer -->
+  <line x1="215" y1="650" x2="428" y2="645" stroke="#1e293b" stroke-width="2.6" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+
+  <!-- UI Thread <-> Features -->
+  <line x1="597" y1="300" x2="634" y2="270" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+  <line x1="597" y1="465" x2="634" y2="355" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+  <line x1="597" y1="645" x2="634" y2="440" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+  <line x1="597" y1="660" x2="634" y2="610" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+
+  <!-- Features <-> Session Core -->
+  <line x1="886" y1="270" x2="988" y2="300" stroke="#dc2626" stroke-width="2.4" marker-start="url(#arrow-red)" marker-end="url(#arrow-red)"/>
+  <line x1="886" y1="355" x2="988" y2="310" stroke="#dc2626" stroke-width="2.4" marker-start="url(#arrow-red)" marker-end="url(#arrow-red)"/>
+  <line x1="886" y1="440" x2="988" y2="485" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+  <line x1="886" y1="527" x2="988" y2="500" stroke="#15803d" stroke-width="2.4" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+  <line x1="886" y1="704" x2="988" y2="690" stroke="#1e293b" stroke-width="2.4" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+
+  <!-- Validator <-> Dispatcher <-> SSH Tunnel -->
+  <line x1="1035" y1="402" x2="1035" y2="446" stroke="#dc2626" stroke-width="2.6" marker-end="url(#arrow-red)"/>
+  <line x1="1035" y1="598" x2="1035" y2="640" stroke="#1e293b" stroke-width="2.6" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+
+  <!-- Session / SSH Tunnel <-> Remote Ecosystem -->
+  <line x1="1170" y1="235" x2="1238" y2="235" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+  <line x1="1170" y1="405" x2="1238" y2="405" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+  <line x1="1170" y1="575" x2="1238" y2="575" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+  <line x1="1170" y1="745" x2="1238" y2="745" stroke="#1e293b" stroke-width="2.8" marker-start="url(#arrow-dark)" marker-end="url(#arrow-dark)"/>
+</svg>

@@ -7,7 +7,7 @@ mod mslogon;
 mod saved;
 mod view;
 
-pub use address::ServerAddress;
+pub use address::{ServerAddress, SshTarget};
 pub use auth::Credentials;
-pub use saved::SessionOptions;
+pub use saved::{SessionOptions, ssh_password};
 pub use view::{ConnectRequest, Dashboard};

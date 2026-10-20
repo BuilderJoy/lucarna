@@ -6,3 +6,4 @@ pub mod connection;
 pub mod file_transfer;
 pub mod input;
 pub mod remote_screen;
+pub mod ssh;

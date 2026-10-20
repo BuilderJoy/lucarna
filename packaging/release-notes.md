@@ -13,16 +13,22 @@ Visor VNC para macOS, Windows y Linux, compatible con la transferencia de archiv
 
 ## Instalación
 
-### macOS
-1. Abre el `.dmg` y arrastra **Lucarna** a la carpeta **Aplicaciones**.
-2. Abre Lucarna desde Aplicaciones. Como la app todavía no está notarizada por Apple, la primera vez macOS la bloquea:
-   - **macOS 15 (Sequoia) o superior:** abre **Ajustes del Sistema → Privacidad y seguridad**, baja hasta el aviso sobre Lucarna y pulsa **Abrir igualmente**.
-   - **macOS 14 o anterior:** haz **clic derecho sobre Lucarna → Abrir → Abrir**.
+### macOS (Importante: requiere compilar con Rust por ahora)
+> **Nota importante sobre macOS:** Actualmente **no se puede instalar directamente el paquete en Mac** a menos que se ejecute o compile utilizando **Rust**, ya que el proyecto todavía no cuenta con la aprobación y notarización oficial de Apple Developer (Gatekeeper bloquea los binarios sin firma de Apple).
 
-   Solo hace falta la primera vez. Si macOS dice que la app "está dañada", ejecuta en Terminal:
+1. **Forma recomendada en macOS (con Rust):**
+   Instala Rust desde [rustup.rs](https://rustup.rs) y ejecuta desde la carpeta del proyecto:
    ```bash
-   xattr -dr com.apple.quarantine /Applications/Lucarna.app
+   git clone https://github.com/BuilderJoy/lucarna.git
+   cd lucarna
+   cargo run --release
    ```
+   Si deseas generar e instalar `Lucarna.app` en tu carpeta `Aplicaciones` compilándola localmente:
+   ```bash
+   ./packaging/macos/bundle.sh {VERSION} $(uname -m)
+   cp -R target/release/bundle/Lucarna.app /Applications/
+   ```
+2. **Si descargas el `.dmg` precompilado:** macOS lo bloqueará por falta de notarización de Apple. Para saltar el bloqueo manualmente hace falta quitar la cuarentena en Terminal (`xattr -dr com.apple.quarantine /Applications/Lucarna.app`) y autorizar la app en **Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente**.
 3. Desinstalar: arrastra Lucarna de Aplicaciones a la Papelera.
 
 ### Windows
@@ -50,5 +56,6 @@ Para guardar contraseñas hace falta un llavero compatible con Secret Service (G
 VNC no cifra la sesión. Usa siempre un túnel (SSH, VPN o Cloudflare Tunnel) y nunca abras el puerto 5900 a internet. Cómo hacerlo: [Using Lucarna over the internet](https://github.com/BuilderJoy/lucarna#using-lucarna-over-the-internet-always-through-a-tunnel).
 
 ## Limitaciones conocidas
+- **macOS:** como todavía no se cuenta con la aprobación/notarización de Apple Developer, en Mac no se puede instalar de forma convencional desde el `.dmg` salvo que se compile/ejecute utilizando **Rust** (`cargo run --release`) o se retire manualmente el atributo de cuarentena.
 - Todavía no se ha probado contra UltraVNC Server en Windows: MS-Logon, chat y descarga de carpetas en zip pueden fallar.
-- Las apps no están firmadas por Apple ni por Microsoft, de ahí los avisos al instalar.
+- En Windows el instalador aún no cuenta con certificado de firma comercial, por lo que SmartScreen muestra el aviso inicial.

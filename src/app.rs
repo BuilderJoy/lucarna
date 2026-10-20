@@ -7,7 +7,7 @@ use eframe::egui::{self, Align, Color32, Layout, RichText};
 
 use crate::features::chat::{ChatView, Msg};
 use crate::features::clipboard::RemoteClipboard;
-use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions};
+use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions, SshTarget};
 use crate::features::file_transfer::{FilesView, RemoteFiles};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
@@ -51,12 +51,20 @@ pub struct App {
 
 impl App {
     fn connect(&mut self, ctx: &egui::Context, req: ConnectRequest) {
+        // A bad SSH field is an error, never a silent fallback to an unencrypted connection.
+        let ssh = match SshTarget::parse(&req.ssh) {
+            Ok(ssh) => ssh,
+            Err(e) => {
+                self.dashboard.status = e;
+                return;
+            }
+        };
         self.dashboard.last_request = Some(req.clone());
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let (address, repeater, creds) = (req.address.clone(), req.repeater, req.creds);
         self.pending = Some((req.address, req.options));
-        std::thread::spawn(move || session::run(&address, repeater.as_ref(), &creds, tx, move || ctx.request_repaint()));
+        std::thread::spawn(move || session::run(&address, repeater.as_ref(), ssh.as_ref(), &creds, tx, move || ctx.request_repaint()));
         self.events = Some(rx);
         self.dashboard.status.clear();
     }
