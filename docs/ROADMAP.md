@@ -321,6 +321,33 @@ Plan original, para referencia:
 
 ---
 
+## Fase 8: SSH integrado (en curso)
+
+Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protocolo cifrado y nube para atravesar NAT): SSH da el mismo cifrado y la transferencia de archivos sin construir ni mantener nada de eso. Se usa el **cliente `ssh` del sistema**, sin crates nuevos.
+
+### 8.1 Túnel SSH ✅ (2026-10-19)
+
+- **Campo "SSH" en las propiedades de la conexión** (`user@host[:port]`) y "SSH password" opcional, en el llavero bajo la cuenta `ssh:…`. Se guarda como 8.ª columna de `connections.txt`; los archivos viejos siguen cargando.
+- **`features/ssh`:** lanza `ssh -N -L` con opciones fijas y conecta VNC por el túnel. Si el VNC está en el propio host SSH, el túnel termina en su loopback, así que UltraVNC puede aceptar solo loopback.
+- **Falla cerrado:** un destino SSH inválido, o SSH junto con un repetidor, es un error, nunca una conexión sin cifrar. El destino se valida contra la inyección de opciones (`-oProxyCommand=…`) y el host siempre va después de `--`.
+- **Contraseña:** modo askpass del propio ejecutable; sin contraseña guardada, `BatchMode=yes` (solo llaves y agente).
+- **Errores claros:** usuario o contraseña rechazados, clave del host cambiada (`ssh-keygen -R`), servidor que prohíbe túneles (`AllowTcpForwarding`), VNC inalcanzable, `ssh` no instalado, OpenSSH anterior a 8.4 con contraseña.
+- **Probado en vivo** contra un sshd con x11vnc cuyo puerto 5900 no está expuesto (`live_ssh_tunnel`): la imagen solo puede llegar por el túnel. También se provocaron y comprobaron los errores de túnel prohibido y de usuario rechazado.
+- **Hallazgo:** el sshd de Alpine trae `AllowTcpForwarding no`; ahora el error lo dice.
+- **Pendiente (manual):**
+  - Contraseña SSH guardada de punta a punta en macOS: no se puede automatizar, porque leer del llavero una entrada creada por otro programa abre un diálogo de macOS. En uso normal la guarda y la lee el mismo ejecutable.
+  - Contraseña desde un cliente **Windows 10/11**: su OpenSSH puede ser anterior a 8.4.
+
+### 8.2 Archivos por SFTP (siguiente)
+Códec SFTP v3 sobre `ssh -s … sftp`, integrado en el panel de archivos actual (`FilesView`), reutilizando la misma interfaz de dos columnas local | remoto para cualquier servidor con SSH (incluso cuando el servidor VNC no es UltraVNC, como `x11vnc`, `TigerVNC` o macOS Screen Sharing).
+
+![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
+
+### 8.3 Pruebas en vivo y guía de Windows (siguiente)
+Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar OpenSSH Server en Windows y dejar UltraVNC escuchando solo en loopback (`127.0.0.1`).
+
+---
+
 ## Fase 9: seguridad y endurecimiento transversal (prioridad máxima)
 
 La seguridad no es una función aislada sino una invariante de todo lo que se agregue de aquí en adelante. En un cliente de control remoto existen **dos amenazas reales**: un atacante en la red (MITM / sniffing) y **un servidor remoto hostil o comprometido** que intente atacar el equipo del técnico a través del visor.
