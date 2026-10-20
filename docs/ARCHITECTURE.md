@@ -13,6 +13,8 @@ Lecturas complementarias:
 
 El código está organizado en **rebanadas verticales por funcionalidad** (`src/features/*`), nombradas con el vocabulario de RFB. Cada rebanada es dueña de sus tipos, de sus mensajes de red (`protocol.rs`) y de su interfaz (`view.rs`). Solo lo que reexporta su `mod.rs` es público.
 
+![Arquitectura General de Lucarna](diagrams/01-arquitectura-modulos.png)
+
 ```mermaid
 flowchart TB
     main["main.rs<br/>ventana, ícono, tema"] --> app
@@ -105,7 +107,17 @@ Puntos clave:
 - **`Framebuffer`** guarda la imagen en BGRX y acumula una **región sucia**; `ScreenView` sube a la GPU solo ese rectángulo.
 - **Las descargas se escriben en el hilo lector** y **las subidas leen el disco en su propio hilo**: el disco nunca bloquea la interfaz.
 
+### Conectividad Zero-Trust: Tailscale y Cloudflare Tunnel
+
+Además del túnel SSH directo, Lucarna se integra con redes en malla **Tailscale (WireGuard)** y túneles corporativos **Cloudflare Tunnel (`cloudflared access tcp`)**, manteniendo siempre el puerto `5900` cerrado a internet (escuchando solo en `127.0.0.1`).
+
+![Arquitectura Zero-Trust con Tailscale y Cloudflare Tunnel](diagrams/04-arquitectura-tailscale-cloudflare.png)
+
+![Flujo Paso a Paso con Tailscale y Cloudflare Tunnel](diagrams/05-flujo-integracion-tailscale-cloudflare.png)
+
 ## 3. Ciclo de vida de una conexión
+
+![Flujo de Funcionamiento y Conectividad Segura](diagrams/02-flujo-funcionamiento-red.png)
 
 ```mermaid
 sequenceDiagram
@@ -168,6 +180,8 @@ flowchart LR
 ```
 
 ## 5. Tubería de la pantalla
+
+![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
 
 ```mermaid
 flowchart LR
@@ -242,7 +256,9 @@ sequenceDiagram
 | Vistas previas del escritorio | `…/Lucarna/previews/*.lcpv` | Miniatura de 320×200 como máximo, cada 5 s mientras la sesión está abierta |
 | Tamaño de la ventana | eframe (`persistence`) | Automático |
 
-## 8. Reglas que no hay que romper
+## 8. Reglas que no hay que romper (Defensa en Profundidad)
+
+![Arquitectura de Seguridad y Defensa en Profundidad](diagrams/03-seguridad-defensa.png)
 
 1. **El servidor es hostil hasta que se demuestre lo contrario.** Todo tamaño, longitud, rectángulo e índice se valida antes de reservar memoria o indexar: `MAX_DIM`, `Framebuffer::contains`, topes de zlib, longitudes de chat, archivos y portapapeles, nombres de archivo saneados.
 2. **`session/mod.rs` es el único lector del socket.** Un mensaje nuevo del servidor se añade como un brazo del `match` que delega en su rebanada.
