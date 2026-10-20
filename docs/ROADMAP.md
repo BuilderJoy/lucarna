@@ -281,7 +281,7 @@ Sirve para conectar a máquinas detrás de NAT sin abrir puertos.
 
 **Hecho:** `.github/workflows/packages.yml` construye los instaladores en cada PR y, con un tag `v*`, los publica como release (el último, *Latest*) en GitHub. La página del release empieza con `packaging/release-notes.md`: enlaces de descarga e instrucciones de instalación por sistema.
 
-- **macOS:** `.dmg` con `Lucarna.app` universal (arm64 + x86_64 con `lipo`), ícono `.icns` y firma ad-hoc, **sin notarizar**: Gatekeeper pide "Abrir" la primera vez. Probado en local: la app arranca desde el bundle.
+- **macOS:** `.dmg` con `Lucarna.app` universal (arm64 + x86_64 con `lipo`), ícono `.icns` y firma ad-hoc. **Aclaración importante:** como todavía no se cuenta con la aprobación y notarización de Apple Developer, en macOS Gatekeeper bloquea la instalación directa del `.dmg` descargado, por lo que **actualmente en Mac se debe ejecutar o instalar utilizando Rust** (`cargo run --release` o generando el bundle local con `./packaging/macos/bundle.sh`). Probado en local: la app arranca desde el bundle compilado en la máquina.
 - **Windows:** instalador de Inno Setup (`.exe`), en español e inglés, instalable sin permisos de administrador, sin consola (`windows_subsystem`). Sin firma de código: SmartScreen avisa.
 - **Linux:** `.deb` (cargo-deb, con `.desktop` e ícono) y `.tar.gz` portable, compilados en Ubuntu 22.04 para que funcionen en glibc más viejas.
 - **Versión:** `0.1.0` (SemVer 0.x: aún en desarrollo, puede cambiar sin aviso). Se publicó primero como *pre-release*, pero GitHub no la mostraba en la portada del repo, así que se pasó a release normal; el `0.x` ya avisa del estado. El 1.0.0 queda para cuando esté probado contra UltraVNC real y estable.
@@ -340,17 +340,171 @@ Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protoco
   - Contraseña desde un cliente **Windows 10/11**: su OpenSSH puede ser anterior a 8.4.
 
 ### 8.2 Archivos por SFTP (siguiente)
-Códec SFTP v3 sobre `ssh -s … sftp`, integrado en el panel de archivos actual. Ver el plan en el PR.
+Códec SFTP v3 sobre `ssh -s … sftp`, integrado en el panel de archivos actual (`FilesView`), reutilizando la misma interfaz de dos columnas local | remoto para cualquier servidor con SSH (incluso cuando el servidor VNC no es UltraVNC, como `x11vnc`, `TigerVNC` o macOS Screen Sharing).
+
+![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
 
 ### 8.3 Pruebas en vivo y guía de Windows (siguiente)
-Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar OpenSSH Server en Windows y dejar UltraVNC solo en loopback.
+Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar OpenSSH Server en Windows y dejar UltraVNC escuchando solo en loopback (`127.0.0.1`).
+
+---
+
+## Fase 9: seguridad y endurecimiento transversal (prioridad máxima)
+
+La seguridad no es una función aislada sino una invariante de todo lo que se agregue de aquí en adelante. En un cliente de control remoto existen **dos amenazas reales**: un atacante en la red (MITM / sniffing) y **un servidor remoto hostil o comprometido** que intente atacar el equipo del técnico a través del visor.
+
+![Arquitectura de Seguridad y Defensa en Profundidad](diagrams/03-seguridad-defensa.png)
+
+```mermaid
+flowchart LR
+    subgraph B1["Barrera 1: Secretos Locales e Higiene en RAM"]
+        KC["Llavero del SO<br/>(Keychain / Cred Manager)<br/>Cero secretos en disco"]
+        AP["Modo SSH_ASKPASS<br/>Sin secretos en argv/env<br/>+ Zeroize en RAM"]
+        CAT["Catálogo Seguro<br/>connections.txt sin<br/>ProxyCommand ni scripts"]
+    end
+
+    subgraph B2["Barrera 2: Transporte Cifrado y Fail-Closed"]
+        FC["Política Fail-Closed<br/>Nunca cae a texto plano<br/>Modo «Exigir Túnel SSH»"]
+        HK["Host Key Pinning<br/>Huella SHA-256 en UI<br/>Sin ForwardAgent ni X11"]
+        CB["Portapapeles Direccional<br/>Off / Solo Enviar /<br/>Solo Recibir / Ambos"]
+    end
+
+    subgraph B3["Barrera 3: Escudo Contra Servidor Hostil"]
+        VAL["Validador de Rectángulos<br/>MAX_DIM, Framebuffer::contains<br/>Topes Zlib / JPEG anti-OOM"]
+        SBX["Sandbox de Archivos (FT/SFTP)<br/>Rechazo de '..', UNC, symlinks<br/>Escritura vía .lucarna-part"]
+        CUT["Corte Inmediato<br/>Bytes sobrantes o tipo<br/>desconocido cierran sesión"]
+    end
+
+    B1 --> B2 --> B3
+```
+
+| # | Tarea | Detalle | Tamaño |
+|---|---|---|---|
+| 9.1 | **Indicador visual de seguridad y modo «Solo cifrado»** | Candado en la barra de sesión y en las tarjetas del Address Book: `Cifrado (SSH)` vs `Sin cifrar (texto plano)`. Opción por conexión y global para **prohibir conexiones sin túnel SSH** fuera de `127.0.0.1`, evitando conectar por accidente en claro a través de internet o redes Wi-Fi públicas. | S |
+| 9.2 | **Verificación y huella de clave SSH (Host Key Pinning)** | Mostrar la huella SHA-256 del servidor SSH al confiar por primera vez y guardar o verificar contra `known_hosts`. Si la clave del servidor cambia, bloquear la conexión de forma cerrada con alerta clara de posible ataque MITM. | S |
+| 9.3 | **Dirección del portapapeles (`Off` / `Solo enviar` / `Solo recibir` / `Bidireccional`)** | Un servidor comprometido o compartido puede leer automáticamente lo que el técnico copia en su equipo local (p. ej. contraseñas de su gestor). Reemplazar el booleano `Share clipboard` por control direccional: por defecto permitir **solo local → remoto** al pegar explícitamente, o desactivarlo del todo. | XS |
+| 9.4 | **Borrado seguro de secretos en memoria (`Zeroize`)** | Sobrescribir con ceros las contraseñas VNC y SSH en memoria (`Credentials`) apenas termina el handshake o el modo `askpass`, para que no sobrevivan en el heap ni en volcados de memoria (crash dumps). | XS |
+| 9.5 | **Aislamiento de SFTP y archivos frente a servidores maliciosos** | Mismas garantías que en UltraVNC FT: rechazar nombres con `..`, separadores de ruta, nombres reservados de Windows (`CON`, `NUL`, `COM1`…), rutas UNC y enlaces simbólicos que apunten fuera de la carpeta de descarga; límites estrictos de tamaño de paquete y escritura atómica vía `.lucarna-part`. | S |
+| 9.6 | **Importación segura de catálogos (`connections.txt`)** | Validar que al importar una libreta de direcciones compartida nunca se puedan inyectar opciones de `ssh` (`-oProxyCommand=…`), rutas de ejecutables ni scripts locales. | XS |
+
+---
+
+## Fase 10: diferenciadores VNC Pro (experiencia superior a visores clásicos)
+
+Funciones que diferencian a Lucarna de RealVNC Viewer, TigerVNC, Remmina y el visor nativo de macOS, manteniendo el binario ligero y sin dependencias pesadas.
+
+| # | Tarea | Detalle | Tamaño |
+|---|---|---|---|
+| 10.1 | **Selección de monitor en servidores multipantalla** | Conmutador en la barra de sesión (`Monitor 1`, `Monitor 2`, `Todos`) usando los mensajes de monitor de UltraVNC y/o `ExtendedDesktopSize` (RFC 6143 / TigerVNC), más opción de abrir monitores en ventanas separadas. | M |
+| 10.2 | **Capturas de pantalla y grabación ligera de sesión** | Botón de captura instantánea a PNG desde el `Framebuffer` actual. Grabación de sesión guardando el flujo RFB con marcas de tiempo (formato tipo `fbs`, reproducible y auditable con pocos megabytes por hora) para soporte técnico, cumplimiento y evidencia de auditoría. | M |
+| 10.3 | **Sesiones en pestañas y vista mosaico (NOC / Wall View)** | Permitir varias sesiones activas en pestañas dentro de `app.rs` y un modo mosaico en vivo de bajo consumo (refresco cada 1–2 s en modo solo ver) para vigilar múltiples máquinas a la vez desde una sala de control y entrar con un clic. | M-L |
+| 10.4 | **Portapapeles rico (`CLIP_DIB` y pegado rápido de archivos)** | Extender `Extended Clipboard` para copiar y pegar capturas de pantalla entre local y remoto (validando dimensiones máximas `MAX_DIM` y tamaño descomprimido antes de asignar memoria) y disparar subida de archivos al pegar un archivo en la ventana. | M |
+| 10.5 | **Inyección de texto («Type Clipboard»)** | Enviar texto como secuencia de pulsaciones `KeyEvent` cuando el portapapeles remoto no está disponible (pantalla de login de Windows antes de iniciar sesión o servidores sin integración de portapapeles). | XS |
+
+---
+
+## Fase 11: superpoderes sobre SSH y conectividad (RMM sin agente)
+
+Aprovechando que `features/ssh` ya gestiona el cliente `ssh` del sistema, Lucarna puede ofrecer herramientas de administración remota (RMM) sin instalar agentes propietarios en el servidor.
+
+| # | Tarea | Detalle | Tamaño |
+|---|---|---|---|
+| 11.1 | **Modo «Solo Archivos (SFTP / FT)» desde el Address Book** | Acción en el menú contextual de cada tarjeta para abrir directamente el navegador de archivos de dos columnas (vía SFTP o UltraVNC FT) sin abrir la pantalla remota. Permite usar Lucarna también con servidores Linux sin entorno gráfico. | S |
+| 11.2 | **Estado en vivo (Online / Offline) y Wake-on-LAN (WoL)** | Indicador discreto de alcanzabilidad TCP/SSH bajo demanda y envío de paquete mágico UDP (Wake-on-LAN) local o a través del host bastión SSH para encender máquinas apagadas desde la tarjeta. | S |
+| 11.3 | **Descubrimiento automático (Tailscale / mDNS)** | Detectar máquinas de la tailnet local (`tailscale status --json` si Tailscale está instalado) y servicios `_rfb._tcp.local` en LAN para mostrarlos listos para conectar sin escribir IPs a mano. | M |
+| 11.4 | **Saltos SSH (`ProxyJump`), Cloudflare Tunnel y puertos extra** | Soporte para host bastión (`ssh -J bastion usuario@destino`), integración con `cloudflared access tcp` y reenvío opcional de puertos adicionales (p. ej. abrir el puerto web de administración de un servicio interno de la red remota mientras dura la sesión). | S-M |
+| 11.5 | **Telemetría ligera (Health Overlay) y acciones rápidas por SSH** | Si la sesión va por SSH, opción de consultar carga de CPU, RAM, `uptime` y disco con comandos estándar de solo lectura, y ejecutar acciones predefinidas con confirmación explícita (p. ej. reiniciar el servicio VNC remoto si se congela). | M |
+| 11.6 | **Sincronización segura de catálogos para equipos (Team Address Book)** | Importar/exportar o sincronizar `connections.txt` mediante un repositorio Git o carpeta compartida entre técnicos de soporte, manteniendo todas las contraseñas aisladas en el llavero local de cada miembro. | S |
+
+### Arquitectura y funcionamiento con Tailscale y Cloudflare Tunnel
+
+![Arquitectura Zero-Trust con Tailscale y Cloudflare Tunnel](diagrams/04-arquitectura-tailscale-cloudflare.png)
+
+![Flujo Paso a Paso con Tailscale y Cloudflare Tunnel](diagrams/05-flujo-integracion-tailscale-cloudflare.png)
+
+```mermaid
+flowchart LR
+    subgraph CLIENTE["Equipo del Técnico (Lucarna)"]
+        LUC["Lucarna Viewer<br/>Address Book + Keychain SO"]
+        TS_C["Cliente Tailscale Local<br/>100.x.y.z · MagicDNS<br/>tailscale status --json"]
+        CF_C["cloudflared access tcp<br/>Escucha en 127.0.0.1:P1<br/>Token SSO / MFA"]
+        SSH_C["Túnel SSH Opcional<br/>features/ssh (-L + SFTP v3)"]
+    end
+
+    subgraph RUTA_TS["Opción A: Malla Tailscale / WireGuard"]
+        TS_ACL["Plano de Control & ACLs<br/>Solo claves públicas<br/>Nunca ve tus datos"]
+        WG_P2P["Túnel P2P WireGuard<br/>ChaCha20-Poly1305<br/>NAT Hole Punching (STUN/DERP)"]
+    end
+
+    subgraph RUTA_CF["Opción B: Cloudflare Tunnel + Access"]
+        CF_SSO["Cloudflare Access<br/>SSO (Google/Okta/GitHub) + MFA"]
+        CF_EDGE["Red Edge Anycast (TLS)<br/>Conector saliente QUIC/HTTP2"]
+    end
+
+    subgraph REMOTO["Servidor Remoto (0 Puertos Abiertos en Router)"]
+        AG["tailscaled / cloudflared<br/>+ OpenSSH Server"]
+        VNC["Servidor VNC<br/>Escuchando SOLO en 127.0.0.1:5900<br/>+ Archivos SFTP v3"]
+    end
+
+    LUC --> TS_C & CF_C & SSH_C
+    TS_C -.-> TS_ACL
+    TS_C <==> WG_P2P <==> AG
+    CF_C --> CF_SSO --> CF_EDGE <==> AG
+    SSH_C -. "Cifrado E2E sobre A o B" .-> AG
+    AG <==> VNC
+```
+
+---
+
+## Fase 12: ¿Cómo competir con AnyDesk / TeamViewer de forma prudente y segura?
+
+![Flujo de Funcionamiento y Alternativa Zero-Trust a AnyDesk/TeamViewer](diagrams/02-flujo-funcionamiento-red.png)
+
+```mermaid
+flowchart TB
+    subgraph M1["Modo 1: Acceso Directo Cifrado (SSH + Loopback)"]
+        U1["Técnico + Llavero SO"] -->|"SSH_ASKPASS"| L1["Lucarna (127.0.0.1:P)"]
+        L1 ==>|"Túnel SSHv2 Cifrado (Puerto 22)<br/>RFB + UltraVNC FT + SFTP v3"| S1["OpenSSH Server Remoto"]
+        S1 -->|"Loopback local"| V1["Servidor VNC (127.0.0.1:5900)<br/>Puerto 5900 cerrado al exterior"]
+    end
+
+    subgraph M2["Modo 2: Acceso Desatendido Detrás de NAT (Sin Nube Propia)"]
+        U2["Auto-Descubrimiento<br/>(Tailscale / mDNS + WoL)"] --> ZT["Red Zero-Trust / Bastión<br/>(WireGuard P2P · cloudflared · ssh -J)"]
+        ZT <==> NOC["Vista Mosaico NOC / Pestañas<br/>+ Selector Multimonitor"]
+        NOC <==> FL["Flota de Servidores y PCs<br/>Sin agentes con permisos SYSTEM"]
+    end
+
+    subgraph M3["Modo 3: Asistencia Bajo Demanda («QuickSupport Inverso»)"]
+        T3["1. Técnico activa<br/>«Esperar Asistencia»"] -->|"Token efímero (1 uso)"| R3["2. Punto de Encuentro Cifrado<br/>(ssh -R inverso o Repetidor Modo II bajo SSH)"]
+        C3["3. Cliente Acepta e Inicia<br/>(Conexión saliente, sin abrir router)"] --> R3
+        R3 --> A3["4. Sesión + Grabación .fbs<br/>Token revocado al cerrar"]
+    end
+```
+
+### Por qué NO construir una nube centralizada ni un agente propio con permisos SYSTEM
+Herramientas como AnyDesk y TeamViewer funcionan con tres piezas propias: un agente residente con privilegios máximos (`SYSTEM` / `root`), un protocolo propietario y una red mundial de servidores de señalización y relé. **Replicar ese modelo en Lucarna no es prudente** por tres razones:
+1. **Riesgo crítico de seguridad:** una infraestructura central de coordinación o un agente propio corriendo como `SYSTEM` convierte a Lucarna en un objetivo de cadena de suministro (como ya les ocurrió a grandes actores del sector).
+2. **Coste y mantenimiento 24/7:** operar relés de tráfico de escritorio remoto para terceros exige servidores globales, ancho de banda continuo y moderación contra abuso/malware.
+3. **Duplicar lo que ya está auditado:** OpenSSH, WireGuard/Tailscale y Cloudflare Tunnel ya resuelven la criptografía y el paso de NAT con equipos de seguridad dedicados a tiempo completo.
+
+### El camino de Lucarna: experiencia tipo AnyDesk con arquitectura «Zero-Trust sin nube propia»
+
+En lugar de servidores centrales de Lucarna, ofrecemos la misma facilidad de uso apoyándonos en bloques estándar y auditables:
+
+| Caso de uso (estilo AnyDesk/TeamViewer) | Cómo lo resuelve Lucarna de forma segura | Tamaño |
+|---|---|---|
+| **1. Acceso desatendido sin abrir puertos en el router** | **Integración nativa con SSH + Tailscale / Cloudflare Tunnel:** el servidor VNC escucha solo en `127.0.0.1` y Lucarna conecta por nombre de máquina o túnel SSH con un clic. Cero puertos expuestos a internet y cero servidores intermedios de Lucarna. | S-M |
+| **2. Asistencia bajo demanda («QuickSupport» con código/invitación)** | **Modo Escucha Inverso sobre SSH (`Reverse Assist`) o Repetidor cifrado:** el técnico pulsa «Esperar asistencia» en Lucarna (que prepara un túnel inverso efímero en su propio servidor SSH o repetidor privado) y le pasa al cliente un comando o asistente de un clic con un token de un solo uso. Cuando el cliente acepta, la sesión entra cifrada de extremo a extremo y la credencial muere al cerrar. | M-L |
+| **3. Evolución a suite multiprotocolo (más allá de VNC)** | Gracias al diseño por rebanadas verticales, el mismo Address Book, llavero de contraseñas, túneles SSH y panel SFTP pueden servir como frontal unificado para conexiones **Solo SFTP/SSH**, **SPICE** (máquinas virtuales Proxmox/QEMU) o **RDP** (vía crate puro Rust a futuro). | L |
+
+---
 
 ## Fuera de alcance por ahora
 
+- Infraestructura en la nube propia de relé/señalización (por seguridad y coste; se usa SSH, Tailscale, Cloudflare Tunnel o repetidor propio bajo túnel).
 - Codificación "Ultra" y "Ultra2" (propietarias, con compresión LZO); ZRLE y Tight las reemplazan.
 - ZYWRLE (con pérdida, poco usada).
-- Selección de monitor en servidores multipantalla (UltraVNC tiene mensajes propios); se reevalúa después de la v0.1.
-- Grabación de sesión, audio e impresión remota.
+- Audio e impresión remota.
 
 ## Infraestructura de pruebas necesaria
 
@@ -366,12 +520,17 @@ Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar 
 |---|---|---|
 | 1 | Fase 0: rendimiento y robustez ✅ | 1 día |
 | 2 | Fase 1.2–1.4: ZRLE, Zlib, Hextile ✅ | 3–4 días |
-| 3 | Fase 2: transferencia de archivos | 2–3 semanas con el spike |
-| 4 | Fase 6: empaquetado → **release v0.1** | 2–3 días |
-| 5 | Fase 3: ergonomía | 1 semana |
-| 6 | Fase 4: MS-Logon | 2–3 días |
-| 7 | Fase 1.5: Tight | 3–4 días |
-| 8 | Fase 5: chat y repetidor | 3–4 días |
-| 9 | Fase 7: cifrado | Según demanda |
+| 3 | Fase 2: transferencia de archivos ✅ | 2–3 semanas con el spike |
+| 4 | Fase 6: empaquetado → **release v0.1** ✅ | 2–3 días |
+| 5 | Fase 3: ergonomía ✅ | 1 semana |
+| 6 | Fase 4: MS-Logon ✅ | 2–3 días |
+| 7 | Fase 1.5: Tight ✅ | 3–4 días |
+| 8 | Fase 5: chat y repetidor ✅ | 3–4 días |
+| 9 | Fase 7: cifrado (documentación de túneles) ✅ | 1 día |
+| 10 | Fase 8: túnel SSH integrado ✅ (8.1) + SFTP (8.2–8.3) | 1–2 semanas |
+| 11 | Fase 9: seguridad y endurecimiento transversal | 3–5 días |
+| 12 | Fase 10: diferenciadores VNC Pro (multimonitor, pestañas, grabación) | 2–3 semanas |
+| 13 | Fase 11: superpoderes sobre SSH y conectividad (SFTP directo, WoL, Tailscale) | 1–2 semanas |
+| 14 | Fase 12: asistencia inversa («QuickSupport» sobre SSH) y evolución multiprotocolo | Progresivo |
 
 Las estimaciones son orientativas, para una persona a ritmo sostenido. El mayor riesgo de calendario es la Fase 2, por el protocolo sin documentar y las diferencias entre versiones.
