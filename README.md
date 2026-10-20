@@ -22,11 +22,23 @@ cargo run --release
 
 Download the file for your system from the [latest release](https://github.com/BuilderJoy/lucarna/releases/latest), which also has step-by-step install instructions in Spanish. Lucarna is in early development (0.x): expect rough edges.
 
-- **macOS 11+** (Apple Silicon and Intel): open `Lucarna-<version>-macos-universal.dmg` and drag Lucarna to Applications. The app is not notarized by Apple yet, so macOS blocks the first launch: on macOS 15 or later go to **System Settings → Privacy & Security → Open Anyway**; on macOS 14 or earlier **right-click Lucarna → Open → Open**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Lucarna.app`.
+> **Important note for macOS (Apple Silicon & Intel):** Because Lucarna does not yet have Apple Developer notarization/code-signing approval, macOS Gatekeeper blocks installing the prebuilt `.dmg` directly. **On macOS, you must currently run or install Lucarna using Rust from source:**
+> ```bash
+> git clone https://github.com/BuilderJoy/lucarna.git
+> cd lucarna
+> cargo run --release
+> ```
+> *(Optional)* To generate and install `Lucarna.app` locally on your Mac with Rust:
+> ```bash
+> ./packaging/macos/bundle.sh 0.1.0 $(uname -m)
+> cp -R target/release/bundle/Lucarna.app /Applications/
+> ```
+> *(If you still download the `.dmg` from Releases, macOS will reject it unless you remove the quarantine attribute in Terminal: `xattr -dr com.apple.quarantine /Applications/Lucarna.app` and allow it in **System Settings → Privacy & Security → Open Anyway**).*
+
 - **Windows 10/11 (64-bit):** run `Lucarna-<version>-windows-x64-setup.exe`. The installer is not code-signed yet, so SmartScreen may warn: **More info → Run anyway**. It can install for your user only, without admin rights.
 - **Linux (x86_64):** on Debian/Ubuntu, `sudo apt install ./lucarna_<version>_amd64.deb`. Elsewhere, extract `lucarna-<version>-linux-x86_64.tar.gz` and run `./lucarna`. Saving passwords needs a Secret Service keyring (GNOME Keyring or KWallet).
 
-To build from source instead: `cargo run --release`.
+To build from source on any platform: `cargo run --release`.
 
 ## Using Lucarna over the internet: always through a tunnel
 
@@ -71,9 +83,15 @@ Then connect Lucarna to `localhost:5901`.
 
 UltraVNC's DSM encryption plugins (SecureVNC, MSRC4) are not supported, and VeNCrypt (TLS) is not implemented yet: a tunnel covers both cases with tools that are better audited.
 
+![Zero-Trust Connectivity: Tailscale and Cloudflare Tunnel](docs/diagrams/04-arquitectura-tailscale-cloudflare.png)
+
 ## Architecture
 
 Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+![Lucarna System Architecture](docs/diagrams/01-arquitectura-modulos.png)
+
+![Defense in Depth and Security Model](docs/diagrams/03-seguridad-defensa.png)
 
 Vertical slices, one per feature, named in the domain's language (RFB, RFC 6143):
 
