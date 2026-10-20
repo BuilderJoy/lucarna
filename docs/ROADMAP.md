@@ -350,7 +350,7 @@ Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar 
 
 ## Fase 9: seguridad y endurecimiento transversal (prioridad máxima)
 
-La seguridad no es una función aislada sino una invariante de todo lo que se agregue de aquí en adelante. En un cliente de control remoto existen **dos amenazas reales**: un atacante en la red (MITM / sniffing) y **un servidor remoto hostil o comprometido** que intente atacar el equipo del técnico a través del visor.
+La seguridad no es una función aislada sino una invariante de todo lo que se agregue de aquí en adelante. En un cliente de control remoto existen **dos amenazas reales**: un atacante en la red (MITM / sniffing) y **un servidor remoto hostil o comprometido** que intente atacar el equipo del técnico a través del visor. El modelo de amenazas completo, vectores de ataque y garantías técnicas se detallan en [docs/SECURITY.md](SECURITY.md).
 
 ![Arquitectura de Seguridad y Defensa en Profundidad](diagrams/03-seguridad-defensa.png)
 
