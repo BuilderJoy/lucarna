@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
 
 use crate::features::chat;
-use crate::features::clipboard::{self, RemoteClipboard};
+use crate::features::clipboard::RemoteClipboard;
 use crate::features::connection::{Credentials, ServerAddress, SshTarget, handshake};
 use crate::features::file_transfer::{self, DualFiles, FileOps, RemoteFiles};
 use crate::features::remote_screen::{self, Framebuffer};
@@ -80,13 +80,7 @@ pub fn run(
             init.width.into(),
             init.height.into(),
         )?));
-        remote_screen::negotiate(
-            &mut s,
-            &[
-                file_transfer::ENC_PROTOCOL_VERSION,
-                clipboard::ENC_EXTENDED_CLIPBOARD,
-            ],
-        )?;
+        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
         let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
         remote_screen::request_update(&outbound, false, &screen)?;
         let (tx_files, notify_files) = (tx.clone(), notify.clone());

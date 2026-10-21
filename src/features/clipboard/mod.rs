@@ -13,7 +13,10 @@ use flate2::write::ZlibEncoder;
 use crate::session::Outbound;
 use crate::shared::wire::{invalid, read_bytes, read_u32};
 
-/// Pseudo-encoding advertised in `SetEncodings` to negotiate Extended Clipboard.
+/// Pseudo-encoding that would negotiate Extended Clipboard (UTF-8). Not advertised: libvncserver
+/// 0.9.14 (x11vnc 0.9.16) closes the connection on our UTF-8 Provide. Text stays Latin-1.
+/// ponytail: re-advertise once a server that handles UTF-8 Provide is verified (UltraVNC).
+#[allow(dead_code)]
 pub const ENC_EXTENDED_CLIPBOARD: i32 = 0xC0A1_E5CE_u32 as i32;
 
 const MAX_TEXT: usize = 16 << 20;
