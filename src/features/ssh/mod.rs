@@ -18,7 +18,8 @@ const ASKPASS_ENV: &str = "LUCARNA_ASKPASS";
 /// Long enough for a slow login, short enough that an ssh stuck on a prompt nobody can answer is noticed.
 const LOGIN_DEADLINE: Duration = Duration::from_secs(20);
 const STDERR_KEPT: usize = 4096;
-const MISSING: &str = "OpenSSH client not found. On Windows: Settings → System → Optional features → OpenSSH Client";
+const MISSING: &str =
+    "OpenSSH client not found. On Windows: Settings → System → Optional features → OpenSSH Client";
 
 /// The ssh binary. On Windows the inbox one, so Git's or MSYS's ssh earlier in PATH is not picked up.
 fn program() -> PathBuf {
@@ -57,7 +58,8 @@ fn command(target: &SshTarget) -> Command {
         if let Ok(exe) = env::current_exe() {
             c.env("SSH_ASKPASS", exe);
         }
-        c.env("SSH_ASKPASS_REQUIRE", "force").env(ASKPASS_ENV, target.as_str());
+        c.env("SSH_ASKPASS_REQUIRE", "force")
+            .env(ASKPASS_ENV, target.as_str());
         // OpenSSH before 8.4 ignores SSH_ASKPASS_REQUIRE and only uses askpass when DISPLAY is set.
         if env::var_os("DISPLAY").is_none() {
             c.env("DISPLAY", ":0");
@@ -80,6 +82,18 @@ fn command(target: &SshTarget) -> Command {
     c
 }
 
+/// Builds an SSH command targeting the remote SFTP subsystem: `ssh [opts] -s -- <host> sftp`
+pub fn command_sftp(target: &SshTarget) -> Command {
+    let mut c = command(target);
+    c.args(["-s", "--", &target.host, "sftp"]);
+    c
+}
+
+/// Friendly description of an SSH error from its stderr output.
+pub fn friendly_error(stderr: &str) -> String {
+    friendly(stderr)
+}
+
 /// A running ssh, killed when dropped. Keeps the tail of its stderr for error messages.
 pub struct Process {
     child: Child,
@@ -90,7 +104,13 @@ pub struct Process {
 impl Process {
     fn spawn(mut c: Command) -> io::Result<Self> {
         c.stderr(Stdio::piped());
-        let mut child = c.spawn().map_err(|e| if e.kind() == io::ErrorKind::NotFound { io::Error::new(e.kind(), MISSING) } else { e })?;
+        let mut child = c.spawn().map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                io::Error::new(e.kind(), MISSING)
+            } else {
+                e
+            }
+        })?;
         let stderr = Arc::new(Mutex::new(String::new()));
         let (mut pipe, log) = (child.stderr.take().expect("piped stderr"), stderr.clone());
         let reader = thread::spawn(move || {
@@ -107,7 +127,11 @@ impl Process {
                 }
             }
         });
-        Ok(Self { child, stderr, reader: Some(reader) })
+        Ok(Self {
+            child,
+            stderr,
+            reader: Some(reader),
+        })
     }
 
     fn exited(&mut self) -> bool {
@@ -140,11 +164,22 @@ impl Tunnel {
     /// check: ssh only listens on the local port once it has logged in, so no throwaway probe ever reaches
     /// the VNC server.
     pub fn open(target: &SshTarget, vnc: &ServerAddress) -> io::Result<(Self, TcpStream)> {
-        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?.local_addr()?.port();
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?
+            .local_addr()?
+            .port();
         // ponytail: another program could take the port before ssh does; ExitOnForwardFailure then reports it.
         let forward = format!("127.0.0.1:{port}:{}", forward_target(target, vnc)?);
         let mut c = command(target);
-        c.args(["-N", "-n", "-o", "ExitOnForwardFailure=yes", "-L", &forward, "--", &target.host]);
+        c.args([
+            "-N",
+            "-n",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-L",
+            &forward,
+            "--",
+            &target.host,
+        ]);
         c.stdin(Stdio::null()).stdout(Stdio::null());
         let mut ssh = Process::spawn(c)?;
 
@@ -152,7 +187,9 @@ impl Tunnel {
         let deadline = Instant::now() + LOGIN_DEADLINE;
         loop {
             if ssh.exited() {
-                let why = ssh.complaint().unwrap_or_else(|| "SSH: the connection closed while logging in".into());
+                let why = ssh
+                    .complaint()
+                    .unwrap_or_else(|| "SSH: the connection closed while logging in".into());
                 return Err(io::Error::other(with_version_hint(target, why)));
             }
             if let Ok(stream) = TcpStream::connect_timeout(&local, Duration::from_secs(1)) {
@@ -177,11 +214,22 @@ impl Tunnel {
 /// Where the tunnel leads, seen from the SSH host. When the VNC server runs on the SSH host itself we
 /// forward to its loopback, so UltraVNC can be set to accept loopback connections only.
 fn forward_target(target: &SshTarget, vnc: &ServerAddress) -> io::Result<String> {
-    let (host, port) = vnc
-        .host_port()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("can't tunnel to {}", vnc.as_str())))?;
-    let host = if host.eq_ignore_ascii_case(&target.host) { "localhost" } else { host };
-    Ok(if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") })
+    let (host, port) = vnc.host_port().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("can't tunnel to {}", vnc.as_str()),
+        )
+    })?;
+    let host = if host.eq_ignore_ascii_case(&target.host) {
+        "localhost"
+    } else {
+        host
+    };
+    Ok(if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    })
 }
 
 /// Lines ssh writes when something actually failed, as opposed to banners and warnings.
@@ -200,19 +248,27 @@ const FAILURES: &[&str] = &[
 ];
 
 fn failure_line(stderr: &str) -> Option<&str> {
-    stderr.lines().rev().map(str::trim).find(|l| FAILURES.iter().any(|f| l.contains(f)))
+    stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| FAILURES.iter().any(|f| l.contains(f)))
 }
 
 /// ssh's most relevant complaint plus a hint about what usually causes it.
 fn friendly(stderr: &str) -> String {
-    let line = failure_line(stderr).or_else(|| stderr.lines().rev().map(str::trim).find(|l| !l.is_empty())).unwrap_or("SSH failed");
+    let line = failure_line(stderr)
+        .or_else(|| stderr.lines().rev().map(str::trim).find(|l| !l.is_empty()))
+        .unwrap_or("SSH failed");
     let hint = if stderr.contains("administratively prohibited") {
         " (the SSH server forbids tunnels: set AllowTcpForwarding yes in its sshd_config)"
     } else if stderr.contains("open failed") {
         " (is the VNC server running and reachable from the SSH host?)"
     } else if stderr.contains("Permission denied") {
         " (check the SSH user and password, or add your key to ssh-agent)"
-    } else if stderr.contains("IDENTIFICATION HAS CHANGED") || stderr.contains("Host key verification failed") {
+    } else if stderr.contains("IDENTIFICATION HAS CHANGED")
+        || stderr.contains("Host key verification failed")
+    {
         " (the server's SSH host key changed; if that was expected, run: ssh-keygen -R <host>)"
     } else if stderr.contains("Connection refused") {
         " (is the SSH server running?)"
@@ -225,13 +281,27 @@ fn friendly(stderr: &str) -> String {
 /// Before 8.4 OpenSSH can't be told to always ask Lucarna for the password (common on Windows 10).
 fn with_version_hint(target: &SshTarget, why: String) -> String {
     let old = connection::ssh_password(target).is_some()
-        && Command::new(program()).arg("-V").output().ok().and_then(|o| version(&String::from_utf8_lossy(&o.stderr))).is_some_and(|v| v < (8, 4));
-    if old { format!("{why}. This OpenSSH is older than 8.4 and can't take the password from Lucarna: use an SSH key instead") } else { why }
+        && Command::new(program())
+            .arg("-V")
+            .output()
+            .ok()
+            .and_then(|o| version(&String::from_utf8_lossy(&o.stderr)))
+            .is_some_and(|v| v < (8, 4));
+    if old {
+        format!(
+            "{why}. This OpenSSH is older than 8.4 and can't take the password from Lucarna: use an SSH key instead"
+        )
+    } else {
+        why
+    }
 }
 
 /// `OpenSSH_10.3p1, LibreSSL…` or `OpenSSH_for_Windows_8.1p1, …` → (major, minor).
 fn version(banner: &str) -> Option<(u32, u32)> {
-    let digits = banner.split("OpenSSH_").nth(1)?.trim_start_matches("for_Windows_");
+    let digits = banner
+        .split("OpenSSH_")
+        .nth(1)?
+        .trim_start_matches("for_Windows_");
     let (major, rest) = digits.split_once('.')?;
     let minor: String = rest.chars().take_while(char::is_ascii_digit).collect();
     Some((major.parse().ok()?, minor.parse().ok()?))
@@ -243,7 +313,11 @@ fn version(banner: &str) -> Option<(u32, u32)> {
 pub fn askpass() -> Option<i32> {
     let target = env::var(ASKPASS_ENV).ok()?;
     let prompt = env::args().nth(1).unwrap_or_default();
-    let password = SshTarget::parse(&target).ok().flatten().filter(|_| answers(&prompt)).and_then(|t| connection::ssh_password(&t));
+    let password = SshTarget::parse(&target)
+        .ok()
+        .flatten()
+        .filter(|_| answers(&prompt))
+        .and_then(|t| connection::ssh_password(&t));
     Some(match password {
         // Write errors (no stdout) count as "no answer" instead of panicking like println! would.
         Some(p) if writeln!(io::stdout(), "{p}").is_ok() => 0,
@@ -268,44 +342,82 @@ mod tests {
     fn askpass_only_answers_password_prompts() {
         assert!(answers("ana@office's password: "));
         assert!(answers("(ana@office) Password:"));
-        assert!(!answers("Enter passphrase for key '/Users/ana/.ssh/id_ed25519': "));
-        assert!(!answers("Are you sure you want to continue connecting (yes/no/[fingerprint])?"));
+        assert!(!answers(
+            "Enter passphrase for key '/Users/ana/.ssh/id_ed25519': "
+        ));
+        assert!(!answers(
+            "Are you sure you want to continue connecting (yes/no/[fingerprint])?"
+        ));
         assert!(!answers("Verification code: "));
     }
 
     #[test]
     fn openssh_versions() {
         assert_eq!(version("OpenSSH_10.3p1, LibreSSL 3.3.6"), Some((10, 3)));
-        assert_eq!(version("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2"), Some((8, 1)));
+        assert_eq!(
+            version("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2"),
+            Some((8, 1))
+        );
         assert_eq!(version("garbage"), None);
     }
 
     #[test]
     fn forwards_to_loopback_when_vnc_runs_on_the_ssh_host() {
         let vnc = |s| ServerAddress::parse(s).unwrap();
-        assert_eq!(forward_target(&target("ana@Office"), &vnc("office")).unwrap(), "localhost:5900");
-        assert_eq!(forward_target(&target("ana@office"), &vnc("localhost:1")).unwrap(), "localhost:5901");
-        assert_eq!(forward_target(&target("ana@gateway"), &vnc("10.0.0.7")).unwrap(), "10.0.0.7:5900", "SSH host as gateway");
+        assert_eq!(
+            forward_target(&target("ana@Office"), &vnc("office")).unwrap(),
+            "localhost:5900"
+        );
+        assert_eq!(
+            forward_target(&target("ana@office"), &vnc("localhost:1")).unwrap(),
+            "localhost:5901"
+        );
+        assert_eq!(
+            forward_target(&target("ana@gateway"), &vnc("10.0.0.7")).unwrap(),
+            "10.0.0.7:5900",
+            "SSH host as gateway"
+        );
     }
 
     #[test]
     fn friendly_errors() {
         assert!(friendly("ana@pc: Permission denied (publickey,password).").contains("ssh-agent"));
-        assert!(friendly("channel 2: open failed: connect failed: Connection refused").contains("VNC server"));
-        assert!(friendly("ssh: connect to host pc port 22: Connection refused").contains("SSH server"));
+        assert!(
+            friendly("channel 2: open failed: connect failed: Connection refused")
+                .contains("VNC server")
+        );
+        assert!(
+            friendly("ssh: connect to host pc port 22: Connection refused").contains("SSH server")
+        );
         assert!(friendly("Host key verification failed.").contains("ssh-keygen -R"));
-        assert!(friendly("channel 2: open failed: administratively prohibited: open failed").contains("AllowTcpForwarding"));
+        assert!(
+            friendly("channel 2: open failed: administratively prohibited: open failed")
+                .contains("AllowTcpForwarding")
+        );
         // A server banner after the real failure must not hide it.
-        let with_banner = "channel 2: open failed: connect failed: Connection refused\nWelcome to Office PC";
+        let with_banner =
+            "channel 2: open failed: connect failed: Connection refused\nWelcome to Office PC";
         assert!(friendly(with_banner).contains("open failed"));
-        assert_eq!(failure_line("Warning: Permanently added '[pc]:22' to the list of known hosts."), None);
+        assert_eq!(
+            failure_line("Warning: Permanently added '[pc]:22' to the list of known hosts."),
+            None
+        );
     }
 
     #[test]
     fn host_always_follows_the_options() {
         let c = command(&target("ana@office:2222"));
-        let args: Vec<_> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert!(args.windows(2).any(|w| w == ["-l", "ana"]) && args.windows(2).any(|w| w == ["-p", "2222"]));
-        assert!(!args.iter().any(|a| a == "office"), "the host is added by callers after `--`");
+        let args: Vec<_> = c
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.windows(2).any(|w| w == ["-l", "ana"])
+                && args.windows(2).any(|w| w == ["-p", "2222"])
+        );
+        assert!(
+            !args.iter().any(|a| a == "office"),
+            "the host is added by callers after `--`"
+        );
     }
 }

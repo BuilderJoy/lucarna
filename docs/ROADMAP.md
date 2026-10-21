@@ -22,6 +22,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
 | Fase 7: túnel documentado como forma oficial de uso por internet (sin VeNCrypt ni DSM) | ✅ |
 | Fase 8.1: túnel SSH integrado (cliente `ssh` del sistema, llaves o contraseña en el llavero) | ✅ (contraseña SSH desde Windows pendiente de prueba manual) |
+| Fase 8.2: archivos por SFTP v3 nativo (motor dual de archivos, independiente de la política VNC) | ✅ |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -339,8 +340,9 @@ Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protoco
   - Contraseña SSH guardada de punta a punta en macOS: no se puede automatizar, porque leer del llavero una entrada creada por otro programa abre un diálogo de macOS. En uso normal la guarda y la lee el mismo ejecutable.
   - Contraseña desde un cliente **Windows 10/11**: su OpenSSH puede ser anterior a 8.4.
 
-### 8.2 Archivos por SFTP (siguiente)
-Códec SFTP v3 sobre `ssh -s … sftp`, integrado en el panel de archivos actual (`FilesView`), reutilizando la misma interfaz de dos columnas local | remoto para cualquier servidor con SSH (incluso cuando el servidor VNC no es UltraVNC, como `x11vnc`, `TigerVNC` o macOS Screen Sharing).
+### 8.2 Archivos por SFTP ✅ (2026-10-21)
+
+Códec SFTP v3 (`features/sftp`) sobre `ssh -s <target> sftp` sin crates externos, integrado con `FilesView` a través de la abstracción unificada `DualFiles` (`FileOps`). Permite explorar, descargar, subir con drag & drop, crear carpetas, renombrar y borrar archivos en cualquier servidor con SSH incluso cuando el servidor VNC no implementa UltraVNC FT o tiene desactivada la política de transferencia de archivos (`EnableFileTransfer = 0`). Cuenta con conmutación automática por fallback de VNC FT a SFTP y soporte para rutas POSIX y Windows.
 
 ![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
 

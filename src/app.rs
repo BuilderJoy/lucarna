@@ -7,8 +7,10 @@ use eframe::egui::{self, Align, Color32, Layout, RichText};
 
 use crate::features::chat::{ChatView, Msg};
 use crate::features::clipboard::RemoteClipboard;
-use crate::features::connection::{ConnectRequest, Dashboard, ServerAddress, SessionOptions, SshTarget};
-use crate::features::file_transfer::{FilesView, RemoteFiles};
+use crate::features::connection::{
+    ConnectRequest, Dashboard, ServerAddress, SessionOptions, SshTarget,
+};
+use crate::features::file_transfer::{DualFiles, FilesView};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
 use crate::session::{self, Event, Outbound};
@@ -23,7 +25,7 @@ struct LiveSession {
     screen: Arc<Mutex<Framebuffer>>,
     view: ScreenView,
     input: InputForwarder,
-    files: Arc<RemoteFiles>,
+    files: Arc<DualFiles>,
     files_view: FilesView,
     chat: ChatView,
     clipboard: Arc<RemoteClipboard>,
@@ -64,7 +66,16 @@ impl App {
         let ctx = ctx.clone();
         let (address, repeater, creds) = (req.address.clone(), req.repeater, req.creds);
         self.pending = Some((req.address, req.options));
-        std::thread::spawn(move || session::run(&address, repeater.as_ref(), ssh.as_ref(), &creds, tx, move || ctx.request_repaint()));
+        std::thread::spawn(move || {
+            session::run(
+                &address,
+                repeater.as_ref(),
+                ssh.as_ref(),
+                &creds,
+                tx,
+                move || ctx.request_repaint(),
+            )
+        });
         self.events = Some(rx);
         self.dashboard.status.clear();
     }
@@ -82,15 +93,21 @@ impl App {
                     clipboard,
                 } => {
                     self.dashboard.status.clear();
-                    let (address, opts) = self
-                        .pending
-                        .take()
-                        .unwrap_or_else(|| (ServerAddress::parse("127.0.0.1").unwrap(), SessionOptions::default()));
+                    let (address, opts) = self.pending.take().unwrap_or_else(|| {
+                        (
+                            ServerAddress::parse("127.0.0.1").unwrap(),
+                            SessionOptions::default(),
+                        )
+                    });
                     self.dashboard.mark_connected(&address);
                     if opts.fullscreen {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
                     }
-                    let scale = if opts.scale_1_1 { Scale::Actual } else { Scale::Fit };
+                    let scale = if opts.scale_1_1 {
+                        Scale::Actual
+                    } else {
+                        Scale::Fit
+                    };
                     let live = LiveSession {
                         address,
                         name,
@@ -118,12 +135,16 @@ impl App {
                     if let Some(l) = &mut self.live {
                         l.bell_until = Some(Instant::now() + BELL_FLASH);
                     }
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                        egui::UserAttentionType::Informational,
+                    ));
                     ctx.request_repaint_after(BELL_FLASH);
                 }
                 Event::Chat(msg) => {
                     if matches!(msg, Msg::Text(_)) {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                            egui::UserAttentionType::Informational,
+                        ));
                     }
                     if let Some(l) = &mut self.live {
                         l.chat.apply(msg);
@@ -131,13 +152,25 @@ impl App {
                 }
                 Event::Files(update) => {
                     if let Some(l) = &mut self.live {
-                        l.files_view.apply(update, &l.files);
+                        if matches!(
+                            update,
+                            crate::features::file_transfer::Update::Access(false)
+                        ) && l.files.has_sftp()
+                            && !l.files.is_sftp_active()
+                        {
+                            l.files.switch_to_sftp();
+                        } else {
+                            l.files_view.apply(update, &*l.files);
+                        }
                     }
                 }
                 Event::ScreenUpdated => {
                     if let Some(l) = &mut self.live {
                         l.has_frame = true;
-                        if l.save_preview && l.last_preview.is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL) {
+                        if l.save_preview
+                            && l.last_preview
+                                .is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL)
+                        {
                             let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
                             self.dashboard.update_preview(ctx, &l.address, w, h, &rgba);
                             l.last_preview = Some(Instant::now());
@@ -145,7 +178,11 @@ impl App {
                     }
                 }
                 Event::ServerClipboard(text) => {
-                    if self.live.as_ref().is_some_and(|l| l.share_clipboard && !l.view_only) {
+                    if self
+                        .live
+                        .as_ref()
+                        .is_some_and(|l| l.share_clipboard && !l.view_only)
+                    {
                         ctx.copy_text(text);
                     }
                 }
@@ -189,14 +226,22 @@ impl eframe::App for App {
         };
         // Our own shortcut: consumed before input forwarding so the remote machine never sees it.
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let toggle = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::F));
+        let toggle = ctx.input_mut(|i| {
+            i.consume_key(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::F,
+            )
+        });
         if toggle {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
         }
-        let bar = egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 6));
+        let bar =
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 6));
         if !fullscreen {
             live.bar_rect = None;
-            egui::Panel::top("bar").frame(bar).show(ui, |ui| bar_contents(ui, live, fullscreen));
+            egui::Panel::top("bar")
+                .frame(bar)
+                .show(ui, |ui| bar_contents(ui, live, fullscreen));
         } else {
             // In full screen the bar floats over the screen and only appears when the pointer reaches the top.
             let near_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 48.0));
@@ -216,31 +261,33 @@ impl eframe::App for App {
                     .rect
             });
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ui, |ui| {
-            if !live.has_frame {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 40.0);
-                    ui.add(egui::Spinner::new().size(32.0));
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("Waiting for the remote screen…").weak());
-                });
-                return;
-            }
-            let viewport = live.view.show(ui, &live.screen, live.scale);
-            // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
-            let over_ui = [live.files_view.rect, live.chat.rect, live.bar_rect]
-                .into_iter()
-                .flatten()
-                .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
-            live.view.draw_cursor(ui, &viewport, !over_ui);
-            if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
-                if live.share_clipboard {
-                    live.clipboard.forward_paste(ui);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(Color32::BLACK))
+            .show(ui, |ui| {
+                if !live.has_frame {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 2.0 - 40.0);
+                        ui.add(egui::Spinner::new().size(32.0));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Waiting for the remote screen…").weak());
+                    });
+                    return;
                 }
-                live.input.forward(ui, &viewport, &live.outbound);
-            }
-        });
-        live.files_view.show(&ctx, &live.files);
+                let viewport = live.view.show(ui, &live.screen, live.scale);
+                // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
+                let over_ui = [live.files_view.rect, live.chat.rect, live.bar_rect]
+                    .into_iter()
+                    .flatten()
+                    .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+                live.view.draw_cursor(ui, &viewport, !over_ui);
+                if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
+                    if live.share_clipboard {
+                        live.clipboard.forward_paste(ui);
+                    }
+                    live.input.forward(ui, &viewport, &live.outbound);
+                }
+            });
+        live.files_view.show(&ctx, &*live.files);
         live.chat.show(&ctx, &live.outbound);
     }
 }
@@ -259,22 +306,37 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         ui.label(RichText::new(format!("{w}×{h}")).weak());
         if live.bell_until.is_some_and(|t| Instant::now() < t) {
             let accent = ui.visuals().selection.bg_fill;
-            ui.label(RichText::new(format!("{} Bell", char::from(Icon::Bell))).color(accent).strong());
+            ui.label(
+                RichText::new(format!("{} Bell", char::from(Icon::Bell)))
+                    .color(accent)
+                    .strong(),
+            );
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(format!("{} Disconnect", char::from(Icon::LogOut))).clicked() {
+            if ui
+                .button(format!("{} Disconnect", char::from(Icon::LogOut)))
+                .clicked()
+            {
                 live.user_disconnected = true;
                 live.outbound.close();
             }
+            let files_label = if live.files.is_sftp_active() {
+                format!("{} Files (SFTP)", char::from(Icon::Folder))
+            } else {
+                format!("{} Files", char::from(Icon::Folder))
+            };
             if ui
-                .selectable_label(live.files_view.open, format!("{} Files", char::from(Icon::Folder)))
+                .selectable_label(live.files_view.open, files_label)
                 .on_hover_text("Browse, download and upload files")
                 .clicked()
             {
                 live.files_view.open = !live.files_view.open;
             }
             if ui
-                .selectable_label(live.chat.open, format!("{} Chat", char::from(Icon::MessageCircle)))
+                .selectable_label(
+                    live.chat.open,
+                    format!("{} Chat", char::from(Icon::MessageCircle)),
+                )
                 .on_hover_text("Chat with the person at the remote machine")
                 .clicked()
             {
@@ -294,7 +356,10 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                     ui.horizontal(|ui| {
                         for &ch in row {
                             if ui
-                                .add(egui::Button::new(RichText::new(ch.to_string()).monospace()).min_size(egui::vec2(28.0, 24.0)))
+                                .add(
+                                    egui::Button::new(RichText::new(ch.to_string()).monospace())
+                                        .min_size(egui::vec2(28.0, 24.0)),
+                                )
                                 .on_hover_text(format!("Send '{ch}' to remote computer"))
                                 .clicked()
                             {
@@ -315,20 +380,47 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 let _ = input::ctrl_alt_del(&live.outbound);
             }
             ui.separator();
-            let shortcut = if cfg!(target_os = "macos") { "⌘⇧F" } else { "Ctrl+Shift+F" };
-            let fs_icon = char::from(if fullscreen { Icon::Minimize } else { Icon::Maximize });
-            if ui.selectable_label(fullscreen, format!("{fs_icon} Full screen")).on_hover_text(shortcut).clicked() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+            let shortcut = if cfg!(target_os = "macos") {
+                "⌘⇧F"
+            } else {
+                "Ctrl+Shift+F"
+            };
+            let fs_icon = char::from(if fullscreen {
+                Icon::Minimize
+            } else {
+                Icon::Maximize
+            });
+            if ui
+                .selectable_label(fullscreen, format!("{fs_icon} Full screen"))
+                .on_hover_text(shortcut)
+                .clicked()
+            {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
             }
             let (label, tip) = match live.scale {
-                Scale::Fit => ("Fit", "Fit to window. Click for actual size (1:1, scroll bars)"),
+                Scale::Fit => (
+                    "Fit",
+                    "Fit to window. Click for actual size (1:1, scroll bars)",
+                ),
                 Scale::Actual => ("1:1", "Actual size. Click to fit the window"),
             };
-            if ui.button(format!("{} {label}", char::from(Icon::ZoomIn))).on_hover_text(tip).clicked() {
-                live.scale = if live.scale == Scale::Fit { Scale::Actual } else { Scale::Fit };
+            if ui
+                .button(format!("{} {label}", char::from(Icon::ZoomIn)))
+                .on_hover_text(tip)
+                .clicked()
+            {
+                live.scale = if live.scale == Scale::Fit {
+                    Scale::Actual
+                } else {
+                    Scale::Fit
+                };
             }
             if ui
-                .selectable_label(live.view_only, format!("{} View only", char::from(Icon::Eye)))
+                .selectable_label(
+                    live.view_only,
+                    format!("{} View only", char::from(Icon::Eye)),
+                )
                 .on_hover_text("Don't send keyboard, mouse or clipboard to the server")
                 .clicked()
             {
@@ -343,10 +435,12 @@ pub fn apply_theme(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "lucide".into(),
-        Arc::new(egui::FontData::from_static(lucide_icons::LUCIDE_FONT_BYTES).tweak(egui::FontTweak {
-            y_offset_factor: 0.08,
-            ..Default::default()
-        })),
+        Arc::new(
+            egui::FontData::from_static(lucide_icons::LUCIDE_FONT_BYTES).tweak(egui::FontTweak {
+                y_offset_factor: 0.08,
+                ..Default::default()
+            }),
+        ),
     );
     if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
         prop.insert(1, "lucide".into());
