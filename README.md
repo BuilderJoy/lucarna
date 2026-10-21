@@ -20,9 +20,24 @@ cargo run --release
 
 ## Install
 
-Download the file for your system from the [Releases page](https://github.com/BuilderJoy/lucarna/releases). Lucarna is in early development (0.x): expect rough edges.
+Download the file for your system from the [latest release](https://github.com/BuilderJoy/lucarna/releases/latest), which also has step-by-step install instructions in Spanish. Lucarna is in early development (0.x): expect rough edges.
 
-- **macOS 11+** (Apple Silicon and Intel): open `Lucarna-<version>-macos-universal.dmg` and drag Lucarna to Applications. The app is not notarized by Apple yet, so the first time **right-click Lucarna → Open → Open** (or run `xattr -dr com.apple.quarantine /Applications/Lucarna.app`).
+> **Important note for macOS (Apple Silicon & Intel):** Because Lucarna does not yet have paid Apple Developer notarization/code-signing approval, macOS Gatekeeper blocks running the prebuilt `.dmg` directly. **On macOS, you can seamlessly run or integrate Lucarna using Rust from source (zero Gatekeeper warnings):**
+> 
+> ```bash
+> git clone https://github.com/BuilderJoy/lucarna.git
+> cd lucarna
+> 
+> # Option A: Install as native Lucarna.app in /Applications (Spotlight & Dock ready)
+> ./packaging/macos/install-local.sh
+> 
+> # Option B: Run directly from terminal
+> cargo run --release
+> ```
+> Complete macOS step-by-step setup guide (in Spanish): [docs/guia-macos-rust.md](docs/guia-macos-rust.md).
+> 
+> *(If you still download the prebuilt `.dmg` from Releases, remove the quarantine attribute in Terminal: `xattr -dr com.apple.quarantine /Applications/Lucarna.app` or allow it in **System Settings → Privacy & Security → Open Anyway**).*
+
 - **Windows 10/11 (64-bit):** run `Lucarna-<version>-windows-x64-setup.exe`. The installer is not code-signed yet, so SmartScreen may warn: **More info → Run anyway**. It can install for your user only, without admin rights.
 - **Linux (x86_64):** on Debian/Ubuntu, `sudo apt install ./lucarna_<version>_amd64.deb`. Elsewhere, extract `lucarna-<version>-linux-x86_64.tar.gz` and run `./lucarna`. Saving passwords needs a Secret Service keyring (GNOME Keyring or KWallet).
 
