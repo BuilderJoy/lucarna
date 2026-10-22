@@ -66,6 +66,8 @@ struct PropertiesEditor {
     labels_input: String,
     favorite: bool,
     options: SessionOptions,
+    test_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    test_result: Option<Result<String, String>>,
 }
 
 impl PropertiesEditor {
@@ -96,6 +98,8 @@ impl Default for PropertiesEditor {
             labels_input: String::new(),
             favorite: false,
             options: SessionOptions::default(),
+            test_rx: None,
+            test_result: None,
         }
     }
 }
@@ -1217,6 +1221,33 @@ impl Dashboard {
                 // An invalid SSH field blocks saving: it must never turn into a silent unencrypted connection.
                 let target = ServerAddress::parse(&self.editor.address).filter(|_| self.editor.ssh_problem().is_none());
                 let mut should_close = false;
+
+                if let Some(rx) = &self.editor.test_rx
+                    && let Ok(res) = rx.try_recv()
+                {
+                    self.editor.test_result = Some(res);
+                    self.editor.test_rx = None;
+                }
+
+                if self.editor.test_rx.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Testing connection…").italics());
+                    });
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    ui.add_space(4.0);
+                } else if let Some(res) = &self.editor.test_result {
+                    match res {
+                        Ok(msg) => {
+                            ui.label(RichText::new(format!("✔ {msg}")).color(Color32::from_rgb(80, 200, 120)));
+                        }
+                        Err(err) => {
+                            ui.label(RichText::new(format!("✖ {err}")).color(Color32::from_rgb(255, 100, 100)));
+                        }
+                    }
+                    ui.add_space(4.0);
+                }
+
                 ui.horizontal(|ui| {
                     let connect_btn = egui::Button::new(RichText::new("Save & Connect").strong().color(Color32::BLACK)).fill(accent);
                     if ui.add_enabled(target.is_some(), connect_btn).clicked()
@@ -1242,6 +1273,13 @@ impl Dashboard {
                     {
                         self.save_editor(t);
                         should_close = true;
+                    }
+                    let testing = self.editor.test_rx.is_some();
+                    let test_btn = egui::Button::new("Test Connection");
+                    if ui.add_enabled(target.is_some() && !testing, test_btn).clicked()
+                        && let Some(t) = target.clone()
+                    {
+                        self.test_connection(t);
                     }
                     if let Some(idx) = self.editor.editing
                         && ui.button("Delete").clicked()
@@ -1515,6 +1553,8 @@ impl Dashboard {
             labels_input: initial_label,
             favorite: self.filter == Filter::Favorites,
             options: SessionOptions::default(),
+            test_rx: None,
+            test_result: None,
         };
     }
 
@@ -1535,6 +1575,8 @@ impl Dashboard {
             labels_input: c.labels.join(", "),
             favorite: c.favorite,
             options: c.options.clone(),
+            test_rx: None,
+            test_result: None,
         };
     }
 
@@ -1598,6 +1640,37 @@ impl Dashboard {
         }
         errors.extend(saved::store(&self.saved).err());
         self.status = errors.join("\n");
+    }
+
+    fn test_connection(&mut self, address: ServerAddress) {
+        let repeater = ServerAddress::parse(&self.editor.repeater);
+        let ssh = SshTarget::parse(&self.editor.ssh).ok().flatten();
+        let password = if self.editor.password.is_empty() {
+            saved::password(&address).unwrap_or_default()
+        } else {
+            self.editor.password.clone()
+        };
+        let creds = Credentials {
+            user: self.editor.user.trim().into(),
+            password,
+        };
+        if let Some(target) = &ssh {
+            let ssh_pw = if self.editor.ssh_password.is_empty() {
+                saved::ssh_password(target).unwrap_or_default()
+            } else {
+                self.editor.ssh_password.clone()
+            };
+            if !ssh_pw.is_empty() {
+                let _ = saved::set_ssh_password(target, &ssh_pw);
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.editor.test_rx = Some(rx);
+        self.editor.test_result = None;
+        std::thread::spawn(move || {
+            let res = crate::session::test(&address, repeater.as_ref(), ssh.as_ref(), &creds);
+            let _ = tx.send(res);
+        });
     }
 
     fn duplicate_connection(&mut self, idx: usize) {

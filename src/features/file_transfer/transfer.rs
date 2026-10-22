@@ -183,10 +183,11 @@ pub struct DualFiles {
 
 impl DualFiles {
     pub fn new(vnc: Arc<RemoteFiles>, sftp: Option<Arc<dyn FileOps>>) -> Self {
+        let initial = if sftp.is_some() { BACKEND_SFTP } else { BACKEND_VNC };
         Self {
             vnc,
             sftp,
-            active: Arc::new(AtomicU8::new(BACKEND_VNC)),
+            active: Arc::new(AtomicU8::new(initial)),
         }
     }
 

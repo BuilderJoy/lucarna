@@ -175,6 +175,46 @@ fn connect(address: &ServerAddress) -> io::Result<TcpStream> {
         .ok_or(last)
 }
 
+/// Tests reaching a target and authenticating without starting a full session.
+pub fn test(
+    address: &ServerAddress,
+    repeater: Option<&ServerAddress>,
+    ssh: Option<&SshTarget>,
+    creds: &Credentials,
+) -> Result<String, String> {
+    let mut _tunnel: Option<Tunnel> = None;
+    let mut s = match ssh {
+        Some(_) if repeater.is_some() => {
+            return Err("SSH and a repeater can't be combined".into());
+        }
+        Some(target) => {
+            let (t, s) = Tunnel::open(target, address).map_err(|e| e.to_string())?;
+            _tunnel = Some(t);
+            s
+        }
+        None => connect(repeater.unwrap_or(address)).map_err(|e| e.to_string())?,
+    };
+    s.set_nodelay(true).map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(Duration::from_secs(6))).map_err(|e| e.to_string())?;
+    if repeater.is_some() {
+        handshake::via_repeater(&mut s, address).map_err(|e| format!("Repeater error: {e}"))?;
+    }
+    match handshake::perform(&mut s, creds) {
+        Ok(init) => {
+            let ssh_tag = if ssh.is_some() { " (via SSH)" } else { "" };
+            Ok(format!("Connected to \"{}\" [{}×{}]{}", init.name, init.width, init.height, ssh_tag))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("authentication failed") && creds.password.is_empty() {
+                Ok("Server reached, password required".into())
+            } else {
+                Err(msg)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
