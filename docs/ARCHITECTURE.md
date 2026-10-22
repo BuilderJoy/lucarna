@@ -61,7 +61,8 @@ flowchart TB
 | `remote_screen` | `protocol.rs`, `framebuffer.rs`, `view.rs`, `tight.rs`, `zrle.rs`, `hextile.rs` | Formato de píxel, lista de encodings, `FramebufferUpdate`, imagen en memoria, textura y cursor local |
 | `input` | `view.rs`, `protocol.rs`, `keysym.rs` | Traduce eventos de egui a `KeyEvent`/`PointerEvent`; Cmd→Ctrl en macOS; menú de teclas y AltGr |
 | `clipboard` | `mod.rs` | Portapapeles en ambos sentidos; negocia UTF-8 (Extended Clipboard) y cae a Latin-1 |
-| `file_transfer` | `protocol.rs`, `transfer.rs`, `view.rs` | Protocolo de archivos de UltraVNC (mensaje 7) y su panel |
+| `file_transfer` | `protocol.rs`, `transfer.rs`, `view.rs` | Protocolo de archivos de UltraVNC (mensaje 7), gestor `DualFiles` (`FileOps`) y panel de 2 columnas |
+| `sftp` | `protocol.rs`, `client.rs` | Cliente nativo SFTP v3 sobre `ssh -s target sftp` (Motor B de archivos) |
 | `chat` | `protocol.rs`, `view.rs` | Chat de texto de UltraVNC (mensaje 11) |
 | `ssh` | `mod.rs` | Lanza el `ssh` del sistema: túnel `-L` para VNC, mensajes de error con pista, y el modo askpass que responde la contraseña SSH desde el llavero |
 | `session` | `mod.rs` | Conecta (directo, por repetidor o por túnel SSH), autentica, negocia y lee el socket en un bucle |
@@ -267,6 +268,15 @@ sequenceDiagram
 - `contentParam` viaja en **little-endian**; el resto del protocolo, en big-endian. Ver `ultravnc-ft.md`.
 - Una carpeta se pide como `ruta\[ nombre ]`: el servidor la comprime y llega como `nombre.zip`, que se guarda sin descomprimir.
 - Si la transferencia está desactivada en el servidor, **no responde nada**: el panel muestra el aviso tras 10 s.
+
+### Motor Dual de Archivos: UltraVNC FT y SFTP v3 (`features/sftp`)
+
+`DualFiles` implementa la abstracción común `FileOps` y gestiona dos motores en segundo plano:
+
+1. **Motor A (UltraVNC FT):** Usa el mensaje RFB 7 sobre el socket VNC.
+2. **Motor B (SFTP v3 nativo):** Invoca `ssh -s <target> sftp` usando el cliente `ssh` del sistema operativo (sin crates pesados externos), comunicando paquetes binarios de SFTP v3 por `stdin`/`stdout` en un hilo de streaming independiente.
+3. **Conmutación automática (Fallback):** Si el servidor VNC rechaza la transferencia (`Update::Access(false)` o timeout) y la conexión tiene destino SSH configurado, `DualFiles` conmuta automáticamente a SFTP v3 y llama a `open()`, permitiendo explorar y transferir archivos en cualquier servidor (incluyendo Linux, macOS y Windows 10/11 con OpenSSH) sin depender de las políticas de VNC.
+4. **Seguridad compartida:** Tanto UltraVNC FT como SFTP pasan por el mismo saneamiento estricto de nombres (`local_name`: bloqueo de `..`, `/`, `\`, rutas UNC y nombres reservados `CON`/`NUL`) y escriben atómicamente en `.archivo.lucarna-part` antes de renombrar al final.
 
 ## 7. Qué se guarda y dónde
 

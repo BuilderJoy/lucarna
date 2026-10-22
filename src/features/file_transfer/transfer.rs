@@ -3,7 +3,7 @@
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -12,8 +12,8 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 
 use super::protocol::{
-    self, A_DIR_CREATE, A_DIR_INACCESSIBLE, A_DIRECTORY, A_FILE, A_FILE_DELETE, A_FILE_RENAME, DEFAULT_BLOCK, Entry, MAX_BLOCK, Msg,
-    UNICODE,
+    self, A_DIR_CREATE, A_DIR_INACCESSIBLE, A_DIRECTORY, A_FILE, A_FILE_DELETE, A_FILE_RENAME,
+    DEFAULT_BLOCK, Entry, MAX_BLOCK, Msg, UNICODE,
 };
 use crate::session::Outbound;
 use crate::shared::wire::invalid;
@@ -64,7 +64,9 @@ impl RemoteFiles {
 
     // Send errors surface through the session reader as a Closed event, so they are ignored here.
     pub fn open(&self) {
-        let _ = self.out.send(&[protocol::permission_request(), protocol::drives_request()].concat());
+        let _ = self
+            .out
+            .send(&[protocol::permission_request(), protocol::drives_request()].concat());
     }
 
     pub fn list(&self, path: &str) {
@@ -79,21 +81,32 @@ impl RemoteFiles {
 
     /// Offers `local` to the server under `remote_dir` (which must end in `\`).
     pub fn upload(&self, local: &Path, remote_dir: &str) {
-        let name = local.file_name().and_then(|n| n.to_str()).map(local_name).unwrap_or_else(|| "upload".into());
+        let name = local
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(local_name)
+            .unwrap_or_else(|| "upload".into());
         let (file, meta) = match File::open(local).and_then(|f| f.metadata().map(|m| (f, m))) {
             Ok((f, m)) if m.is_file() => (f, m),
             Ok(_) => return (self.emit)(Update::Failed(format!("{name} is not a regular file"))),
             Err(e) => return (self.emit)(Update::Failed(format!("{name}: {e}"))),
         };
         let total = meta.len();
-        let spec = format!("{remote_dir}{name}{}", offer_timestamp(meta.modified().ok()));
+        let spec = format!(
+            "{remote_dir}{name}{}",
+            offer_timestamp(meta.modified().ok())
+        );
         self.cancelled.store(false, Ordering::SeqCst);
         *self.offered.lock().unwrap() = Some(Upload {
             file,
             name: name.clone(),
             total,
         });
-        (self.emit)(Update::Progress { name, done: 0, total });
+        (self.emit)(Update::Progress {
+            name,
+            done: 0,
+            total,
+        });
         let _ = self.out.send(&protocol::upload_offer(&spec, total));
     }
 
@@ -115,6 +128,173 @@ impl RemoteFiles {
             (self.emit)(Update::Failed(format!("{} was aborted", u.name)));
         }
         let _ = self.out.send(&protocol::abort());
+    }
+}
+
+/// Operations supported by a file transfer engine (UltraVNC FT or SFTP v3).
+pub trait FileOps: Send + Sync {
+    fn open(&self);
+    fn list(&self, path: &str);
+    fn download(&self, path: &str, dir: &Path);
+    fn upload(&self, local: &Path, remote_dir: &str);
+    fn create_dir(&self, path: &str);
+    fn delete(&self, path: &str);
+    fn rename(&self, old: &str, new: &str);
+    fn cancel(&self);
+}
+
+impl FileOps for RemoteFiles {
+    fn open(&self) {
+        self.open();
+    }
+    fn list(&self, path: &str) {
+        self.list(path);
+    }
+    fn download(&self, path: &str, dir: &Path) {
+        self.download(path, dir);
+    }
+    fn upload(&self, local: &Path, remote_dir: &str) {
+        self.upload(local, remote_dir);
+    }
+    fn create_dir(&self, path: &str) {
+        self.create_dir(path);
+    }
+    fn delete(&self, path: &str) {
+        self.delete(path);
+    }
+    fn rename(&self, old: &str, new: &str) {
+        self.rename(old, new);
+    }
+    fn cancel(&self) {
+        self.cancel();
+    }
+}
+
+pub const BACKEND_VNC: u8 = 0;
+#[allow(dead_code)]
+pub const BACKEND_SFTP: u8 = 1;
+
+/// Dual engine manager: combines UltraVNC FT (Motor A) and native SFTP over SSH (Motor B).
+pub struct DualFiles {
+    vnc: Arc<RemoteFiles>,
+    sftp: Option<Arc<dyn FileOps>>,
+    active: Arc<AtomicU8>,
+}
+
+impl DualFiles {
+    pub fn new(vnc: Arc<RemoteFiles>, sftp: Option<Arc<dyn FileOps>>) -> Self {
+        let initial = if sftp.is_some() { BACKEND_SFTP } else { BACKEND_VNC };
+        Self {
+            vnc,
+            sftp,
+            active: Arc::new(AtomicU8::new(initial)),
+        }
+    }
+
+    pub fn is_sftp_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst) == BACKEND_SFTP
+    }
+
+    pub fn has_sftp(&self) -> bool {
+        self.sftp.is_some()
+    }
+
+    pub fn switch_to_sftp(&self) -> bool {
+        if let Some(sftp) = &self.sftp {
+            self.active.store(BACKEND_SFTP, Ordering::SeqCst);
+            sftp.open();
+            true
+        } else {
+            false
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn switch_to_vnc(&self) {
+        self.active.store(BACKEND_VNC, Ordering::SeqCst);
+        self.vnc.open();
+    }
+}
+
+impl FileOps for DualFiles {
+    fn open(&self) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.open();
+            return;
+        }
+        self.vnc.open();
+    }
+
+    fn list(&self, path: &str) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.list(path);
+            return;
+        }
+        self.vnc.list(path);
+    }
+
+    fn download(&self, path: &str, dir: &Path) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.download(path, dir);
+            return;
+        }
+        self.vnc.download(path, dir);
+    }
+
+    fn upload(&self, local: &Path, remote_dir: &str) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.upload(local, remote_dir);
+            return;
+        }
+        self.vnc.upload(local, remote_dir);
+    }
+
+    fn create_dir(&self, path: &str) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.create_dir(path);
+            return;
+        }
+        self.vnc.create_dir(path);
+    }
+
+    fn delete(&self, path: &str) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.delete(path);
+            return;
+        }
+        self.vnc.delete(path);
+    }
+
+    fn rename(&self, old: &str, new: &str) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.rename(old, new);
+            return;
+        }
+        self.vnc.rename(old, new);
+    }
+
+    fn cancel(&self) {
+        if self.is_sftp_active()
+            && let Some(s) = &self.sftp
+        {
+            s.cancel();
+            return;
+        }
+        self.vnc.cancel();
     }
 }
 
@@ -145,9 +325,14 @@ pub struct Receiver {
 impl Receiver {
     pub fn handle(&mut self, msg: Msg, files: &RemoteFiles) -> io::Result<Option<Update>> {
         Ok(match msg {
-            Msg::ProtocolVersion { version, block_size } => {
+            Msg::ProtocolVersion {
+                version,
+                block_size,
+            } => {
                 if version >= 3 && (4096..=MAX_BLOCK as u32).contains(&block_size) {
-                    files.block_size.store(block_size as usize, Ordering::Relaxed);
+                    files
+                        .block_size
+                        .store(block_size as usize, Ordering::Relaxed);
                 }
                 None
             }
@@ -160,7 +345,9 @@ impl Receiver {
                     return Ok(None);
                 };
                 let Some(total) = size else {
-                    return Ok(Some(Update::Failed(format!("the server could not open {path}"))));
+                    return Ok(Some(Update::Failed(format!(
+                        "the server could not open {path}"
+                    ))));
                 };
                 match start(&path, total, &dir) {
                     Ok(d) => {
@@ -187,18 +374,26 @@ impl Receiver {
                     return Ok(None);
                 };
                 if !accepted {
-                    return Ok(Some(Update::Failed(format!("the server refused {}", upload.name))));
+                    return Ok(Some(Update::Failed(format!(
+                        "the server refused {}",
+                        upload.name
+                    ))));
                 }
                 let out = files.out.clone();
                 let emit = files.emit.clone();
                 let cancelled = files.cancelled.clone();
                 let block_size = files.block_size.load(Ordering::Relaxed);
-                std::thread::spawn(move || emit(stream_upload(upload, block_size, &out, &cancelled, &*emit)));
+                std::thread::spawn(move || {
+                    emit(stream_upload(upload, block_size, &out, &cancelled, &*emit))
+                });
                 None
             }
             Msg::FilePacket { compressed, data } => {
                 if files.cancelled.load(Ordering::Relaxed) {
-                    return Ok(self.download.take().map(|d| Update::Failed(format!("{} was aborted", d.name))));
+                    return Ok(self
+                        .download
+                        .take()
+                        .map(|d| Update::Failed(format!("{} was aborted", d.name))));
                 }
                 let Some(d) = &mut self.download else {
                     return Ok(None);
@@ -226,11 +421,16 @@ impl Receiver {
             }),
             Msg::Abort => {
                 files.cancelled.store(true, Ordering::Relaxed);
-                self.download.take().map(|d| Update::Failed(format!("{} was aborted", d.name)))
+                self.download
+                    .take()
+                    .map(|d| Update::Failed(format!("{} was aborted", d.name)))
             }
             Msg::CommandReturn { param, ok } => {
                 let (done, err) = match param {
-                    A_DIR_CREATE => ("Folder created.", "The server could not create that folder."),
+                    A_DIR_CREATE => (
+                        "Folder created.",
+                        "The server could not create that folder.",
+                    ),
                     A_FILE_DELETE => ("Deleted.", "The server could not delete that item."),
                     A_FILE_RENAME => ("Renamed.", "The server could not rename that item."),
                     _ => ("Done.", "Command failed on the server."),
@@ -269,12 +469,21 @@ impl Receiver {
                 }
                 None
             }
-            _ => self.listing.take().map(|(path, entries)| Update::Listing { path, entries }),
+            _ => self
+                .listing
+                .take()
+                .map(|(path, entries)| Update::Listing { path, entries }),
         })
     }
 }
 
-fn stream_upload(upload: Upload, block_size: usize, out: &Outbound, cancelled: &AtomicBool, progress: &dyn Fn(Update)) -> Update {
+fn stream_upload(
+    upload: Upload,
+    block_size: usize,
+    out: &Outbound,
+    cancelled: &AtomicBool,
+    progress: &dyn Fn(Update),
+) -> Update {
     let name = upload.name;
     let total = upload.total;
     let mut reader = upload.file.take(total);
@@ -327,7 +536,10 @@ fn encode_packet(raw: &[u8]) -> Vec<u8> {
 }
 
 fn offer_timestamp(modified: Option<SystemTime>) -> String {
-    let Some(secs) = modified.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64) else {
+    let Some(secs) = modified
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+    else {
         return String::new();
     };
     let (y, m, d, hh, mm) = protocol::utc_parts(secs);
@@ -338,7 +550,9 @@ impl Download {
     fn write(&mut self, compressed: bool, data: &[u8]) -> io::Result<()> {
         let block = if compressed {
             let mut out = Vec::with_capacity(32 << 10);
-            ZlibDecoder::new(data).take(MAX_BLOCK as u64 + 1).read_to_end(&mut out)?;
+            ZlibDecoder::new(data)
+                .take(MAX_BLOCK as u64 + 1)
+                .read_to_end(&mut out)?;
             if out.len() > MAX_BLOCK {
                 return Err(invalid("file block too large"));
             }
@@ -389,13 +603,29 @@ fn start(remote: &str, total: u64, dir: &Path) -> io::Result<Download> {
 /// Last component of a remote Windows path, made safe as a local file name.
 /// A folder is requested as `[ name ]` and arrives as a zip the server made of it, so it is saved as `name.zip`.
 // ponytail: the zip is kept as is (Finder and Explorer unzip it); unzip in-app if users ask for it.
-fn local_name(remote: &str) -> String {
+pub fn local_name(remote: &str) -> String {
     let base = remote.rsplit(['\\', '/']).next().unwrap_or_default();
-    let folder = base.strip_prefix("[ ").and_then(|b| b.strip_suffix(" ]")).map(|dir| format!("{dir}.zip"));
+    let folder = base
+        .strip_prefix("[ ")
+        .and_then(|b| b.strip_suffix(" ]"))
+        .map(|dir| format!("{dir}.zip"));
     let base = folder.as_deref().unwrap_or(base);
-    let clean: String = base.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).collect();
+    let clean: String = base
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
     let clean = clean.trim_matches([' ', '.']);
-    if clean.is_empty() { "download".into() } else { clean.into() }
+    if clean.is_empty() {
+        "download".into()
+    } else {
+        clean.into()
+    }
 }
 
 /// `name`, or `stem (n).ext` if it already exists in `dir`.
@@ -405,7 +635,13 @@ fn unique(dir: &Path, name: &str) -> PathBuf {
         _ => (name, String::new()),
     };
     (0..)
-        .map(|n| dir.join(if n == 0 { name.to_string() } else { format!("{stem} ({n}){ext}") }))
+        .map(|n| {
+            dir.join(if n == 0 {
+                name.to_string()
+            } else {
+                format!("{stem} ({n}){ext}")
+            })
+        })
         .find(|p| !p.exists())
         .unwrap()
 }
@@ -421,8 +657,15 @@ mod tests {
         assert_eq!(local_name("C:\\x\\a:b|c"), "a_b_c");
         assert_eq!(local_name("../../etc/passwd"), "passwd");
         assert_eq!(local_name(""), "download");
-        assert_eq!(local_name("C:\\Users\\ana\\[ Fotos 2026 ]"), "Fotos 2026.zip");
-        assert_eq!(local_name("C:\\x\\[ a:b ]"), "a_b.zip", "folder names are sanitized too");
+        assert_eq!(
+            local_name("C:\\Users\\ana\\[ Fotos 2026 ]"),
+            "Fotos 2026.zip"
+        );
+        assert_eq!(
+            local_name("C:\\x\\[ a:b ]"),
+            "a_b.zip",
+            "folder names are sanitized too"
+        );
     }
 
     #[test]
@@ -459,7 +702,10 @@ mod tests {
         d.write(true, &z.finish().unwrap()).unwrap();
         let dest = d.finish().unwrap();
         assert_eq!(
-            (dest.file_name().unwrap().to_str().unwrap(), fs::read_to_string(&dest).unwrap().as_str()),
+            (
+                dest.file_name().unwrap().to_str().unwrap(),
+                fs::read_to_string(&dest).unwrap().as_str()
+            ),
             ("a (1).txt", "hello!")
         );
         assert!(!dir.join(".a.txt.lucarna-part").exists());
@@ -467,7 +713,10 @@ mod tests {
         let mut d = start("C:\\b.bin", 1, &dir).unwrap();
         assert!(d.write(false, b"xy").is_err(), "more than announced");
         drop(d);
-        assert!(!dir.join(".b.bin.lucarna-part").exists(), "partial file removed");
+        assert!(
+            !dir.join(".b.bin.lucarna-part").exists(),
+            "partial file removed"
+        );
 
         let mut r = Receiver::default();
         let mut entry = vec![0; 44];

@@ -16,18 +16,19 @@ Visor VNC para macOS, Windows y Linux, compatible con la transferencia de archiv
 ### macOS (Importante: requiere compilar con Rust por ahora)
 > **Nota importante sobre macOS:** Actualmente **no se puede instalar directamente el paquete en Mac** a menos que se ejecute o compile utilizando **Rust**, ya que el proyecto todavía no cuenta con la aprobación y notarización oficial de Apple Developer (Gatekeeper bloquea los binarios sin firma de Apple).
 
-1. **Forma recomendada en macOS (con Rust):**
-   Instala Rust desde [rustup.rs](https://rustup.rs) y ejecuta desde la carpeta del proyecto:
+1. **Forma recomendada en macOS (con Rust, sin bloqueos de Gatekeeper):**
+   Instala Rust desde [rustup.rs](https://rustup.rs) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`) y luego:
    ```bash
    git clone https://github.com/BuilderJoy/lucarna.git
    cd lucarna
+
+   # Opción A: Instalar directamente en /Applications (integrado con Spotlight y Launchpad)
+   ./packaging/macos/install-local.sh
+
+   # Opción B: Ejecutar directamente en la terminal sin instalar
    cargo run --release
    ```
-   Si deseas generar e instalar `Lucarna.app` en tu carpeta `Aplicaciones` compilándola localmente:
-   ```bash
-   ./packaging/macos/bundle.sh {VERSION} $(uname -m)
-   cp -R target/release/bundle/Lucarna.app /Applications/
-   ```
+   *Guía completa y detallada de integración:* [docs/guia-macos-rust.md](docs/guia-macos-rust.md).
 2. **Si descargas el `.dmg` precompilado:** macOS lo bloqueará por falta de notarización de Apple. Para saltar el bloqueo manualmente hace falta quitar la cuarentena en Terminal (`xattr -dr com.apple.quarantine /Applications/Lucarna.app`) y autorizar la app en **Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente**.
 3. Desinstalar: arrastra Lucarna de Aplicaciones a la Papelera.
 

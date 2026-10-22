@@ -4,6 +4,6 @@ mod protocol;
 mod transfer;
 mod view;
 
-pub use protocol::{read, ENC_PROTOCOL_VERSION};
-pub use transfer::{Receiver, RemoteFiles, Update};
+pub use protocol::{ENC_PROTOCOL_VERSION, Entry, read};
+pub use transfer::{DualFiles, FileOps, Receiver, RemoteFiles, Update, local_name};
 pub use view::FilesView;
