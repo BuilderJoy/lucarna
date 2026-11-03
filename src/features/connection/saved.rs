@@ -50,6 +50,8 @@ pub struct SavedConnection {
     /// User-defined organization labels/groups (e.g. "Cambridge", "London").
     pub labels: Vec<String>,
     pub favorite: bool,
+    /// Hidden from the Address Book views except the "Hidden" filter.
+    pub hidden: bool,
     pub options: SessionOptions,
     /// Unix epoch seconds of the last successful connection (0 = never).
     pub last_connected: u64,
@@ -66,6 +68,7 @@ impl SavedConnection {
             ssh: String::new(),
             labels: Vec::new(),
             favorite: false,
+            hidden: false,
             options: SessionOptions::default(),
             last_connected: 0,
         }
@@ -129,7 +132,7 @@ fn parse(text: &str) -> Vec<SavedConnection> {
             let address = ServerAddress::parse(address)?;
             let user = cols.next().unwrap_or_default().into();
             let labels = parse_labels(cols.next().unwrap_or_default());
-            let (favorite, options) = parse_flags(cols.next().unwrap_or_default());
+            let (favorite, hidden, options) = parse_flags(cols.next().unwrap_or_default());
             let last_connected = cols.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
             let repeater = cols.next().unwrap_or_default().trim().into();
             let ssh = cols.next().unwrap_or_default().trim().into();
@@ -141,6 +144,7 @@ fn parse(text: &str) -> Vec<SavedConnection> {
                 ssh,
                 labels,
                 favorite,
+                hidden,
                 options,
                 last_connected,
             })
@@ -153,7 +157,7 @@ fn render(list: &[SavedConnection]) -> String {
     list.iter()
         .map(|c| {
             let labels = c.labels.iter().map(|l| clean(l).replace(',', " ")).collect::<Vec<_>>().join(",");
-            let flags = render_flags(c.favorite, &c.options);
+            let flags = render_flags(c.favorite, c.hidden, &c.options);
             if labels.is_empty() && flags.is_empty() && c.last_connected == 0 && c.repeater.is_empty() && c.ssh.is_empty() {
                 format!("{}\t{}\t{}\n", clean(&c.name), c.address.as_str(), clean(&c.user))
             } else {
@@ -184,12 +188,14 @@ pub fn parse_labels(raw: &str) -> Vec<String> {
     out
 }
 
-fn parse_flags(raw: &str) -> (bool, SessionOptions) {
+fn parse_flags(raw: &str) -> (bool, bool, SessionOptions) {
     let mut favorite = false;
+    let mut hidden = false;
     let mut opt = SessionOptions::default();
     for f in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         match f {
             "fav" => favorite = true,
+            "hidden" => hidden = true,
             "view_only" => opt.view_only = true,
             "scale_1_1" => opt.scale_1_1 = true,
             "fullscreen" => opt.fullscreen = true,
@@ -198,13 +204,16 @@ fn parse_flags(raw: &str) -> (bool, SessionOptions) {
             _ => {}
         }
     }
-    (favorite, opt)
+    (favorite, hidden, opt)
 }
 
-fn render_flags(favorite: bool, opt: &SessionOptions) -> String {
+fn render_flags(favorite: bool, hidden: bool, opt: &SessionOptions) -> String {
     let mut flags = Vec::new();
     if favorite {
         flags.push("fav");
+    }
+    if hidden {
+        flags.push("hidden");
     }
     if opt.view_only {
         flags.push("view_only");

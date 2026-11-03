@@ -28,6 +28,7 @@ enum Filter {
     All,
     Favorites,
     Recent,
+    Hidden,
     Label(String),
 }
 
@@ -59,6 +60,7 @@ struct PropertiesEditor {
     address: String,
     user: String,
     repeater: String,
+    ssh_user: String,
     ssh: String,
     ssh_password: String,
     password: String,
@@ -72,8 +74,18 @@ struct PropertiesEditor {
 
 impl PropertiesEditor {
     /// Why the SSH field can't be used as typed, if it can't.
+    /// The SSH target as saved (`user@host[:port]`), with the separate user field folded in.
+    fn ssh_spec(&self) -> String {
+        let (host, user) = (self.ssh.trim(), self.ssh_user.trim());
+        if user.is_empty() || host.is_empty() || host.contains('@') {
+            host.to_string()
+        } else {
+            format!("{user}@{host}")
+        }
+    }
+
     fn ssh_problem(&self) -> Option<String> {
-        match SshTarget::parse(&self.ssh) {
+        match SshTarget::parse(&self.ssh_spec()) {
             Err(e) => Some(e),
             Ok(Some(_)) if !self.repeater.trim().is_empty() => Some("SSH and a repeater can't be combined: clear one of them".into()),
             Ok(_) => None,
@@ -91,6 +103,7 @@ impl Default for PropertiesEditor {
             address: String::new(),
             user: String::new(),
             repeater: String::new(),
+            ssh_user: String::new(),
             ssh: String::new(),
             ssh_password: String::new(),
             password: String::new(),
@@ -115,6 +128,7 @@ enum TileAction {
     Select(usize),
     Connect(usize, Option<bool>),
     ToggleFavorite(usize),
+    ToggleHidden(usize),
     ToggleLabel(usize, String),
     AddLabel(usize, String),
     Rename(usize),
@@ -395,9 +409,10 @@ impl Dashboard {
         ui.label(RichText::new("ADDRESS BOOK").size(11.0).strong().weak());
         ui.add_space(6.0);
 
-        let total = self.saved.len();
-        let favs = self.saved.iter().filter(|c| c.favorite).count();
-        let recent = self.saved.iter().filter(|c| c.last_connected > 0).count();
+        let total = self.saved.iter().filter(|c| !c.hidden).count();
+        let favs = self.saved.iter().filter(|c| c.favorite && !c.hidden).count();
+        let recent = self.saved.iter().filter(|c| c.last_connected > 0 && !c.hidden).count();
+        let hidden = self.saved.iter().filter(|c| c.hidden).count();
 
         if sidebar_item(ui, &format!("{}  All connections", char::from(Icon::LayoutGrid)), total, self.filter == Filter::All).clicked() {
             self.filter = Filter::All;
@@ -407,6 +422,11 @@ impl Dashboard {
         }
         if sidebar_item(ui, &format!("{}  Recent", char::from(Icon::Clock)), recent, self.filter == Filter::Recent).clicked() {
             self.filter = Filter::Recent;
+        }
+        if (hidden > 0 || self.filter == Filter::Hidden)
+            && sidebar_item(ui, &format!("{}  Hidden", char::from(Icon::EyeOff)), hidden, self.filter == Filter::Hidden).clicked()
+        {
+            self.filter = Filter::Hidden;
         }
 
         ui.add_space(16.0);
@@ -464,6 +484,7 @@ impl Dashboard {
             Filter::All => "All connections".to_string(),
             Filter::Favorites => "Favorites".to_string(),
             Filter::Recent => "Recently connected".to_string(),
+            Filter::Hidden => "Hidden connections".to_string(),
             Filter::Label(l) => format!("{}  {l}", char::from(Icon::Tag)),
         };
 
@@ -885,6 +906,15 @@ impl Dashboard {
             action = Some(TileAction::ToggleFavorite(idx));
             ui.close();
         }
+        let hide_label = if c.hidden {
+            format!("{}  Show in Address Book", char::from(Icon::Eye))
+        } else {
+            format!("{}  Hide", char::from(Icon::EyeOff))
+        };
+        if ui.button(hide_label).clicked() {
+            action = Some(TileAction::ToggleHidden(idx));
+            ui.close();
+        }
 
         ui.menu_button(format!("{}  Labels", char::from(Icon::Tags)), |ui| {
             ui.set_min_width(160.0);
@@ -966,6 +996,14 @@ impl Dashboard {
             TileAction::ToggleFavorite(idx) => {
                 if let Some(c) = self.saved.get_mut(idx) {
                     c.favorite = !c.favorite;
+                    self.persist();
+                }
+                None
+            }
+            TileAction::ToggleHidden(idx) => {
+                if let Some(c) = self.saved.get_mut(idx) {
+                    c.hidden = !c.hidden;
+                    self.selected = None;
                     self.persist();
                 }
                 None
@@ -1108,7 +1146,8 @@ impl Dashboard {
                         field(ui, "Friendly Name", &mut self.editor.name, "optional, e.g. Office PC");
                         field(ui, "Username", &mut self.editor.user, "optional, for MS-Logon (Windows login)");
                         field(ui, "Repeater", &mut self.editor.repeater, "optional UltraVNC repeater, e.g. repeater.example.com:5901");
-                        field(ui, "SSH", &mut self.editor.ssh, "optional user@host[:port]: encrypts VNC and files through SSH");
+                        field(ui, "SSH user", &mut self.editor.ssh_user, "optional, the account on the SSH server (e.g. vboxuser)");
+                        field(ui, "SSH", &mut self.editor.ssh, "optional host[:port]: encrypts VNC and files through SSH");
                         if !self.editor.ssh.trim().is_empty() {
                             ui.label(RichText::new("SSH password").strong());
                             ui.add(
@@ -1156,7 +1195,7 @@ impl Dashboard {
                                 self.save_editor(target.clone());
                                 request = Some(ConnectRequest {
                                     repeater: ServerAddress::parse(&self.editor.repeater),
-                                    ssh: self.editor.ssh.trim().into(),
+                                    ssh: self.editor.ssh_spec(),
                                     address: target,
                                     creds,
                                     options: opts,
@@ -1261,7 +1300,7 @@ impl Dashboard {
                         self.save_editor(t.clone());
                         request = Some(ConnectRequest {
                             repeater: ServerAddress::parse(&self.editor.repeater),
-                            ssh: self.editor.ssh.trim().into(),
+                            ssh: self.editor.ssh_spec(),
                             address: t,
                             creds,
                             options: opts,
@@ -1485,6 +1524,8 @@ impl Dashboard {
             .iter()
             .enumerate()
             .filter(|(_, c)| match &self.filter {
+                Filter::Hidden => c.hidden,
+                _ if c.hidden => false,
                 Filter::All => true,
                 Filter::Favorites => c.favorite,
                 Filter::Recent => c.last_connected > 0,
@@ -1546,6 +1587,7 @@ impl Dashboard {
             address: prefill_address.unwrap_or_default().to_string(),
             user: String::new(),
             repeater: String::new(),
+            ssh_user: String::new(),
             ssh: String::new(),
             ssh_password: String::new(),
             password: String::new(),
@@ -1568,7 +1610,8 @@ impl Dashboard {
             address: c.address.as_str().to_string(),
             user: c.user.clone(),
             repeater: c.repeater.clone(),
-            ssh: c.ssh.clone(),
+            ssh_user: split_ssh(&c.ssh).0,
+            ssh: split_ssh(&c.ssh).1,
             ssh_password: SshTarget::parse(&c.ssh).ok().flatten().and_then(|t| saved::ssh_password(&t)).unwrap_or_default(),
             password: saved::password(&c.address).unwrap_or_default(),
             show_password: false,
@@ -1591,7 +1634,7 @@ impl Dashboard {
         let labels = saved::parse_labels(&self.editor.labels_input);
         let user = self.editor.user.trim().to_string();
         let repeater = self.editor.repeater.trim().to_string();
-        let ssh = self.editor.ssh.trim().to_string();
+        let ssh = self.editor.ssh_spec();
         let old_ssh = self.editor.editing.and_then(|i| self.saved.get(i)).map(|c| c.ssh.clone());
         let favorite = self.editor.favorite;
         let options = self.editor.options.clone();
@@ -1601,6 +1644,7 @@ impl Dashboard {
         {
             let old_addr = self.saved[idx].address.clone();
             let last_connected = self.saved[idx].last_connected;
+            let hidden = self.saved[idx].hidden;
             if old_addr != address && !self.saved.iter().enumerate().any(|(i, c)| i != idx && c.address == old_addr) {
                 errors.extend(saved::set_password(&old_addr, "").err());
             }
@@ -1612,6 +1656,7 @@ impl Dashboard {
                 ssh: ssh.clone(),
                 labels,
                 favorite,
+                hidden,
                 options,
                 last_connected,
             };
@@ -1625,6 +1670,7 @@ impl Dashboard {
                 ssh: ssh.clone(),
                 labels,
                 favorite,
+                hidden: false,
                 options,
                 last_connected: 0,
             });
@@ -1644,7 +1690,7 @@ impl Dashboard {
 
     fn test_connection(&mut self, address: ServerAddress) {
         let repeater = ServerAddress::parse(&self.editor.repeater);
-        let ssh = SshTarget::parse(&self.editor.ssh).ok().flatten();
+        let ssh = SshTarget::parse(&self.editor.ssh_spec()).ok().flatten();
         let password = if self.editor.password.is_empty() {
             saved::password(&address).unwrap_or_default()
         } else {
@@ -1857,4 +1903,30 @@ fn default_backup_path() -> String {
         .join("lucarna-connections.txt")
         .display()
         .to_string()
+}
+
+/// Splits a saved `user@host[:port]` into (user, host[:port]).
+fn split_ssh(spec: &str) -> (String, String) {
+    match spec.rsplit_once('@') {
+        Some((user, host)) => (user.to_string(), host.to_string()),
+        None => (String::new(), spec.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod ssh_user_tests {
+    use super::*;
+
+    #[test]
+    fn user_field_joins_into_saved_spec_and_splits_back() {
+        let mut e = PropertiesEditor { ssh_user: "vboxuser".into(), ssh: "127.0.0.1:2222".into(), ..Default::default() };
+        assert_eq!(e.ssh_spec(), "vboxuser@127.0.0.1:2222");
+        assert_eq!(split_ssh(&e.ssh_spec()), ("vboxuser".into(), "127.0.0.1:2222".into()));
+        // A user typed inline in the host field is kept as is, not doubled.
+        e.ssh_user = "other".into();
+        e.ssh = "davidm@127.0.0.1:2222".into();
+        assert_eq!(e.ssh_spec(), "davidm@127.0.0.1:2222");
+        // No host, no SSH.
+        assert_eq!(PropertiesEditor { ssh_user: "x".into(), ..Default::default() }.ssh_spec(), "");
+    }
 }
