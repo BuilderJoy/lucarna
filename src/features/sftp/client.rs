@@ -816,3 +816,89 @@ fn upload_file(
         emit(Update::Uploaded(name));
     }
 }
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Waits for the next update that `pick` accepts, failing on `Failed` or a timeout.
+    fn wait<T>(rx: &Receiver<Update>, what: &str, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(Update::Failed(why)) => panic!("{what}: {why}"),
+                Ok(u) => {
+                    if let Some(v) = pick(u) {
+                        return v;
+                    }
+                }
+                Err(_) => panic!("{what}: timed out"),
+            }
+        }
+    }
+
+    /// Full SFTP round trip against the `tests/server/Dockerfile.ssh` container: open, list, upload,
+    /// rename, download, compare, delete. Needs SSH_TEST_TARGET (e.g. lucarna-test, an ~/.ssh/config alias).
+    #[test]
+    #[ignore = "needs a live SSH server"]
+    fn live_sftp_round_trip() {
+        let target = SshTarget::parse(&std::env::var("SSH_TEST_TARGET").unwrap())
+            .unwrap()
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let client = SftpClient::new(target, move |u| {
+            let _ = tx.lock().unwrap().send(u);
+        });
+
+        client.open();
+        wait(&rx, "open", |u| matches!(u, Update::Access(true)).then_some(()));
+        let (home, entries) = wait(&rx, "home listing", |u| match u {
+            Update::Listing { path, entries } => Some((path, entries)),
+            _ => None,
+        });
+        assert!(entries.iter().any(|e| e.name == "ft"), "no ft/ in {home}: {entries:?}");
+
+        let work = std::env::temp_dir().join(format!("lucarna-sftp-{}", std::process::id()));
+        let (up_dir, down_dir) = (work.join("up"), work.join("down"));
+        fs::create_dir_all(&up_dir).unwrap();
+        fs::create_dir_all(&down_dir).unwrap();
+        // Bigger than several chunks, with a tail that is not a multiple of CHUNK_SIZE.
+        let payload: Vec<u8> = (0..(CHUNK_SIZE as usize * 5 + 1234)).map(|i| (i * 31 % 251) as u8).collect();
+        let local = up_dir.join("payload.bin");
+        fs::write(&local, &payload).unwrap();
+
+        let remote_dir = format!("{home}ft/");
+        client.upload(&local, &remote_dir);
+        wait(&rx, "upload", |u| matches!(u, Update::Uploaded(_)).then_some(()));
+
+        let (from, to) = (format!("{remote_dir}payload.bin"), format!("{remote_dir}renamed.bin"));
+        client.rename(&from, &to);
+        wait(&rx, "rename", |u| match u {
+            Update::Command { ok, message } => {
+                assert!(ok, "rename: {message}");
+                Some(())
+            }
+            _ => None,
+        });
+
+        client.download(&to, &down_dir);
+        let dest = wait(&rx, "download", |u| match u {
+            Update::Downloaded(p) => Some(p),
+            _ => None,
+        });
+        assert_eq!(fs::read(&dest).unwrap(), payload, "downloaded bytes differ");
+
+        client.delete(&to);
+        wait(&rx, "delete", |u| match u {
+            Update::Command { ok, message } => {
+                assert!(ok, "delete: {message}");
+                Some(())
+            }
+            _ => None,
+        });
+        let _ = fs::remove_dir_all(&work);
+    }
+}

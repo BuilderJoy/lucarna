@@ -16,6 +16,12 @@ cargo clippy && cargo fmt
 docker build -t lucarna-test-server tests/server
 docker run -d --rm --name lucarna-test -p 5999:5900 lucarna-test-server
 VNC_TEST_ADDR=127.0.0.1:5999 VNC_TEST_PASSWORD=secret cargo test -- --ignored
+
+# Live SSH tunnel + SFTP (port 2223: 2222 is often taken by VirtualBox), key-only auth via the agent:
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/lucarna_test && ssh-add ~/.ssh/lucarna_test
+docker build -t lucarna-ssh-server -f tests/server/Dockerfile.ssh tests/server
+docker run -d --rm --name lucarna-ssh -p 2223:22 -e AUTHORIZED_KEY="$(cat ~/.ssh/lucarna_test.pub)" lucarna-ssh-server
+SSH_TEST_TARGET=lucarna@127.0.0.1:2223 VNC_TEST_PASSWORD=secret cargo test -- --ignored live_ssh live_sftp
 ```
 
 VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server". From a terminal, adding a blank line to `Cargo.toml` and then `git checkout Cargo.toml` forces a workspace reload and a fresh check (touching `.rs` files does not).
@@ -54,7 +60,7 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for
 
 ### SSH (system OpenSSH client)
 
-`features/ssh` runs the system `ssh` (on Windows `%SystemRoot%\System32\OpenSSH\ssh.exe`); there is no SSH crate. `Tunnel::open` (called by `session::run` when `ConnectRequest.ssh` is set) does `ssh -N -L 127.0.0.1:P:<target>` and returns the first successful connection to `127.0.0.1:P` as the VNC socket; the tunnel is dropped (ssh killed) when the session ends. `SshTarget::parse` refuses option-injection; an invalid SSH field or SSH + repeater is an error, never a fallback to unencrypted. SSH passwords live in the keychain under `ssh:<target>`; with one saved, ssh gets `SSH_ASKPASS=<our exe>` and `main()` starts in askpass mode (`ssh::askpass()`), answering password prompts only. Errors come from ssh's stderr at `LogLevel=INFO` (refused forwards are only reported at INFO). Live test: `live_ssh_tunnel` with `SSH_TEST_TARGET`.
+`features/ssh` runs the system `ssh` (on Windows `%SystemRoot%\System32\OpenSSH\ssh.exe`); there is no SSH crate. `Tunnel::open` (called by `session::run` when `ConnectRequest.ssh` is set) does `ssh -N -L 127.0.0.1:P:<target>` and returns the first successful connection to `127.0.0.1:P` as the VNC socket; the tunnel is dropped (ssh killed) when the session ends. `SshTarget::parse` refuses option-injection; an invalid SSH field or SSH + repeater is an error, never a fallback to unencrypted. SSH passwords live in the keychain under `ssh:<target>`; with one saved, ssh gets `SSH_ASKPASS=<our exe>` and `main()` starts in askpass mode (`ssh::askpass()`), answering password prompts only. Errors come from ssh's stderr at `LogLevel=INFO` (refused forwards are only reported at INFO). Live tests: `live_ssh_tunnel` and `live_sftp_round_trip` with `SSH_TEST_TARGET` against `tests/server/Dockerfile.ssh`. Windows server setup for users: `docs/windows-ssh.md`.
 
 ### Chat and repeater
 

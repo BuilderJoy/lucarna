@@ -23,6 +23,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 7: túnel documentado como forma oficial de uso por internet (sin VeNCrypt ni DSM) | ✅ |
 | Fase 8.1: túnel SSH integrado (cliente `ssh` del sistema, llaves o contraseña en el llavero) | ✅ (contraseña SSH desde Windows pendiente de prueba manual) |
 | Fase 8.2: archivos por SFTP v3 nativo (motor dual de archivos, independiente de la política VNC) | ✅ |
+| Fase 8.3: contenedor sshd de pruebas, tests en vivo de túnel y SFTP, guía de Windows | ✅ (guía pendiente de validar en un Windows real) |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -323,7 +324,7 @@ Plan original, para referencia:
 
 ---
 
-## Fase 8: SSH integrado (en curso)
+## Fase 8: SSH integrado ✅ (2026-11-03)
 
 Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protocolo cifrado y nube para atravesar NAT): SSH da el mismo cifrado y la transferencia de archivos sin construir ni mantener nada de eso. Se usa el **cliente `ssh` del sistema**, sin crates nuevos.
 
@@ -346,8 +347,13 @@ Códec SFTP v3 (`features/sftp`) sobre `ssh -s <target> sftp` sin crates externo
 
 ![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
 
-### 8.3 Pruebas en vivo y guía de Windows (siguiente)
-Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar OpenSSH Server en Windows y dejar UltraVNC escuchando solo en loopback (`127.0.0.1`).
+### 8.3 Pruebas en vivo y guía de Windows ✅ (2026-11-03)
+
+- **Contenedor:** `tests/server/Dockerfile.ssh` (Alpine): sshd solo con llave (`PasswordAuthentication no`, `AllowTcpForwarding local`, `internal-sftp`), usuario `lucarna` con la llave pública recibida en `AUTHORIZED_KEY`, y x11vnc con `-localhost`, así que la imagen solo puede llegar por el túnel.
+- **Tests en vivo:** `live_ssh_tunnel` (ya existía) y el nuevo `live_sftp_round_trip` en `sftp/client.rs`: abre la sesión, lista el home, sube un archivo de 5 bloques y pico, lo renombra, lo descarga, compara bytes y lo borra. Los dos pasan contra el contenedor.
+- **Guía:** [docs/windows-ssh.md](windows-ssh.md): OpenSSH Server en Windows, llaves (incluido `administrators_authorized_keys`), endurecimiento de `sshd_config`, UltraVNC con *Loopback Only* y tabla de errores frecuentes.
+- **Desviación:** el puerto de pruebas es **2223**, no 2222, que suele estar ocupado por el reenvío SSH de VirtualBox/Vagrant. Si se reconstruye la imagen, sus llaves de host cambian: `ssh-keygen -R "[127.0.0.1]:2223"`.
+- **Pendiente (manual):** recorrer la guía en un Windows 10/11 real con UltraVNC.
 
 ---
 
@@ -529,7 +535,7 @@ En lugar de servidores centrales de Lucarna, ofrecemos la misma facilidad de uso
 | 7 | Fase 1.5: Tight ✅ | 3–4 días |
 | 8 | Fase 5: chat y repetidor ✅ | 3–4 días |
 | 9 | Fase 7: cifrado (documentación de túneles) ✅ | 1 día |
-| 10 | Fase 8: túnel SSH integrado ✅ (8.1) + SFTP (8.2–8.3) | 1–2 semanas |
+| 10 | Fase 8: túnel SSH integrado + SFTP + pruebas en vivo ✅ | 1–2 semanas |
 | 11 | Fase 9: seguridad y endurecimiento transversal | 3–5 días |
 | 12 | Fase 10: diferenciadores VNC Pro (multimonitor, pestañas, grabación) | 2–3 semanas |
 | 13 | Fase 11: superpoderes sobre SSH y conectividad (SFTP directo, WoL, Tailscale) | 1–2 semanas |
