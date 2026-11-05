@@ -52,7 +52,9 @@ pub fn combo(out: &Outbound, keys: &[u32]) -> io::Result<()> {
 }
 
 fn combo_events(keys: &[u32]) -> impl Iterator<Item = (bool, u32)> + '_ {
-    keys.iter().map(|&k| (true, k)).chain(keys.iter().rev().map(|&k| (false, k)))
+    keys.iter()
+        .map(|&k| (true, k))
+        .chain(keys.iter().rev().map(|&k| (false, k)))
 }
 
 #[cfg(test)]

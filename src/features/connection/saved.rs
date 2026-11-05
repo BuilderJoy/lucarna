@@ -96,7 +96,10 @@ fn preview_path(address: &ServerAddress) -> Option<PathBuf> {
 }
 
 pub fn load() -> Vec<SavedConnection> {
-    file().and_then(|f| fs::read_to_string(f).ok()).map(|t| parse(&t)).unwrap_or_default()
+    file()
+        .and_then(|f| fs::read_to_string(f).ok())
+        .map(|t| parse(&t))
+        .unwrap_or_default()
 }
 
 pub fn store(list: &[SavedConnection]) -> Result<(), String> {
@@ -115,7 +118,8 @@ pub fn export_to(path: &Path, list: &[SavedConnection]) -> Result<(), String> {
 }
 
 pub fn import_from(path: &Path) -> Result<Vec<SavedConnection>, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
     Ok(parse(&text))
 }
 
@@ -152,10 +156,25 @@ fn render(list: &[SavedConnection]) -> String {
     let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
     list.iter()
         .map(|c| {
-            let labels = c.labels.iter().map(|l| clean(l).replace(',', " ")).collect::<Vec<_>>().join(",");
+            let labels = c
+                .labels
+                .iter()
+                .map(|l| clean(l).replace(',', " "))
+                .collect::<Vec<_>>()
+                .join(",");
             let flags = render_flags(c.favorite, &c.options);
-            if labels.is_empty() && flags.is_empty() && c.last_connected == 0 && c.repeater.is_empty() && c.ssh.is_empty() {
-                format!("{}\t{}\t{}\n", clean(&c.name), c.address.as_str(), clean(&c.user))
+            if labels.is_empty()
+                && flags.is_empty()
+                && c.last_connected == 0
+                && c.repeater.is_empty()
+                && c.ssh.is_empty()
+            {
+                format!(
+                    "{}\t{}\t{}\n",
+                    clean(&c.name),
+                    c.address.as_str(),
+                    clean(&c.user)
+                )
             } else {
                 format!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
@@ -225,7 +244,12 @@ fn render_flags(favorite: bool, opt: &SessionOptions) -> String {
 }
 
 /// Saves a compressed desktop thumbnail for `address`.
-pub fn save_preview(address: &ServerAddress, width: u16, height: u16, rgba: &[u8]) -> Result<(), String> {
+pub fn save_preview(
+    address: &ServerAddress,
+    width: u16,
+    height: u16,
+    rgba: &[u8],
+) -> Result<(), String> {
     let path = preview_path(address).ok_or_else(|| "no data directory for preview".to_string())?;
     let bytes = encode_preview(width, height, rgba).map_err(|e| format!("preview encode: {e}"))?;
     if let Some(parent) = path.parent() {
@@ -267,7 +291,10 @@ fn decode_preview(bytes: &[u8]) -> Option<(u16, u16, Vec<u8>)> {
     }
     let expected = usize::from(width) * usize::from(height) * 4;
     let mut rgba = Vec::with_capacity(expected);
-    ZlibDecoder::new(&bytes[8..]).take(expected as u64 + 1).read_to_end(&mut rgba).ok()?;
+    ZlibDecoder::new(&bytes[8..])
+        .take(expected as u64 + 1)
+        .read_to_end(&mut rgba)
+        .ok()?;
     (rgba.len() == expected).then_some((width, height, rgba))
 }
 
@@ -291,7 +318,10 @@ pub fn set_ssh_password(target: &SshTarget, password: &str) -> Result<(), String
 }
 
 fn get(account: &str) -> Option<String> {
-    keyring::Entry::new(SERVICE, account).ok()?.get_password().ok()
+    keyring::Entry::new(SERVICE, account)
+        .ok()?
+        .get_password()
+        .ok()
 }
 
 fn set(account: &str, password: &str) -> Result<(), String> {
@@ -313,11 +343,18 @@ mod tests {
     #[test]
     fn file_round_trip() {
         let list = vec![
-            SavedConnection::new("Office\tPC", ServerAddress::parse("10.0.0.5:1").unwrap(), "CORP\\ana"),
+            SavedConnection::new(
+                "Office\tPC",
+                ServerAddress::parse("10.0.0.5:1").unwrap(),
+                "CORP\\ana",
+            ),
             SavedConnection::new("Lab", ServerAddress::parse("lab::6000").unwrap(), ""),
         ];
         let text = render(&list);
-        assert_eq!(text, "Office PC\t10.0.0.5:5901\tCORP\\ana\nLab\tlab:6000\t\n");
+        assert_eq!(
+            text,
+            "Office PC\t10.0.0.5:5901\tCORP\\ana\nLab\tlab:6000\t\n"
+        );
         // Files written before the user or metadata columns existed still load.
         let old = "Old\t10.0.0.9:5900\n";
         assert_eq!(
@@ -332,10 +369,14 @@ mod tests {
 
     #[test]
     fn repeater_round_trip() {
-        let mut c = SavedConnection::new("Behind NAT", ServerAddress::parse("ID:1234").unwrap(), "");
+        let mut c =
+            SavedConnection::new("Behind NAT", ServerAddress::parse("ID:1234").unwrap(), "");
         c.repeater = "repeater.example.com:5901".into();
         let text = render(std::slice::from_ref(&c));
-        assert_eq!(text, "Behind NAT\tID:1234\t\t\t\t0\trepeater.example.com:5901\t\n");
+        assert_eq!(
+            text,
+            "Behind NAT\tID:1234\t\t\t\t0\trepeater.example.com:5901\t\n"
+        );
         assert_eq!(parse(&text), [c]);
     }
 
@@ -344,7 +385,10 @@ mod tests {
         let mut c = SavedConnection::new("Office", ServerAddress::parse("localhost").unwrap(), "");
         c.ssh = "ana@office.example.com:2222".into();
         let text = render(std::slice::from_ref(&c));
-        assert_eq!(text, "Office\tlocalhost:5900\t\t\t\t0\t\tana@office.example.com:2222\n");
+        assert_eq!(
+            text,
+            "Office\tlocalhost:5900\t\t\t\t0\t\tana@office.example.com:2222\n"
+        );
         assert_eq!(parse(&text), [c]);
         // A line written before the ssh column existed still loads, without SSH.
         assert_eq!(parse("Old\tpc:5900\t\t\t\t0\trep:5901\n")[0].ssh, "");
@@ -352,7 +396,11 @@ mod tests {
 
     #[test]
     fn metadata_and_options_round_trip() {
-        let mut c = SavedConnection::new("Prod DB", ServerAddress::parse("10.0.1.8").unwrap(), "admin");
+        let mut c = SavedConnection::new(
+            "Prod DB",
+            ServerAddress::parse("10.0.1.8").unwrap(),
+            "admin",
+        );
         c.labels = vec!["London".into(), "Production".into()];
         c.favorite = true;
         c.options = SessionOptions {

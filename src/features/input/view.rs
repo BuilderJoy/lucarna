@@ -20,7 +20,11 @@ impl InputForwarder {
             // On macOS, Cmd acts as Ctrl on the remote side.
             for (was, is, sym) in [
                 (self.mods.shift, m.shift, keysym::SHIFT),
-                (self.mods.ctrl || self.mods.mac_cmd, m.ctrl || m.mac_cmd, keysym::CONTROL),
+                (
+                    self.mods.ctrl || self.mods.mac_cmd,
+                    m.ctrl || m.mac_cmd,
+                    keysym::CONTROL,
+                ),
                 (self.mods.alt, m.alt, keysym::ALT),
             ] {
                 if was != is {
@@ -30,8 +34,9 @@ impl InputForwarder {
             self.mods = m;
 
             if let Some(p) = i.pointer.hover_pos().filter(|p| viewport.contains(*p)) {
-                let buttons =
-                    i.pointer.primary_down() as u8 | (i.pointer.middle_down() as u8) << 1 | (i.pointer.secondary_down() as u8) << 2;
+                let buttons = i.pointer.primary_down() as u8
+                    | (i.pointer.middle_down() as u8) << 1
+                    | (i.pointer.secondary_down() as u8) << 2;
                 let pos = viewport.to_remote(p);
                 if (buttons, pos) != (self.buttons, self.pos) {
                     let _ = protocol::pointer(out, buttons, pos);
@@ -56,7 +61,10 @@ impl InputForwarder {
                         }
                     }
                     Event::Key {
-                        key, pressed, modifiers, ..
+                        key,
+                        pressed,
+                        modifiers,
+                        ..
                     } => {
                         let sym = keysym::from_special_key(*key).or_else(|| {
                             let name = key.name();

@@ -195,14 +195,18 @@ pub fn test(
         None => connect(repeater.unwrap_or(address)).map_err(|e| e.to_string())?,
     };
     s.set_nodelay(true).map_err(|e| e.to_string())?;
-    s.set_read_timeout(Some(Duration::from_secs(6))).map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(Duration::from_secs(6)))
+        .map_err(|e| e.to_string())?;
     if repeater.is_some() {
         handshake::via_repeater(&mut s, address).map_err(|e| format!("Repeater error: {e}"))?;
     }
     match handshake::perform(&mut s, creds) {
         Ok(init) => {
             let ssh_tag = if ssh.is_some() { " (via SSH)" } else { "" };
-            Ok(format!("Connected to \"{}\" [{}×{}]{}", init.name, init.width, init.height, ssh_tag))
+            Ok(format!(
+                "Connected to \"{}\" [{}×{}]{}",
+                init.name, init.width, init.height, ssh_tag
+            ))
         }
         Err(e) => {
             let msg = e.to_string();

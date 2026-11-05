@@ -66,7 +66,10 @@ mod tests {
         assert_eq!(read(&message(OPEN, &[])).unwrap(), Msg::Open);
         assert_eq!(read(&message(CLOSE, &[])).unwrap(), Msg::Close);
         assert_eq!(read(&message(FINISHED, &[])).unwrap(), Msg::Finished);
-        assert_eq!(read(&message(5, b"ma\xf1an")).unwrap(), Msg::Text("mañan".into()));
+        assert_eq!(
+            read(&message(5, b"ma\xf1an")).unwrap(),
+            Msg::Text("mañan".into())
+        );
         assert_eq!(read(&message(0, &[])).unwrap(), Msg::Text(String::new()));
     }
 
@@ -77,7 +80,10 @@ mod tests {
 
     #[test]
     fn wire_layout() {
-        assert_eq!(message(3, b"hi\n"), [11, 0, 0, 0, 0, 0, 0, 3, b'h', b'i', b'\n']);
+        assert_eq!(
+            message(3, b"hi\n"),
+            [11, 0, 0, 0, 0, 0, 0, 3, b'h', b'i', b'\n']
+        );
         assert_eq!(&message(OPEN, &[])[4..], [0xFF; 4]);
     }
 }

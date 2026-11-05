@@ -12,11 +12,16 @@ impl ServerAddress {
         if let Some((host, port)) = input.split_once("::") {
             return Some(Self(format!("{host}:{port}")));
         }
-        Some(Self(match input.rsplit_once(':').and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?))) {
-            Some((host, n)) if n < 100 => format!("{host}:{}", 5900 + n),
-            Some((host, port)) => format!("{host}:{port}"),
-            None => format!("{input}:5900"),
-        }))
+        Some(Self(
+            match input
+                .rsplit_once(':')
+                .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))
+            {
+                Some((host, n)) if n < 100 => format!("{host}:{}", 5900 + n),
+                Some((host, port)) => format!("{host}:{port}"),
+                None => format!("{input}:5900"),
+            },
+        ))
     }
 
     pub fn as_str(&self) -> &str {
@@ -26,7 +31,10 @@ impl ServerAddress {
     /// Host and port; None for repeater IDs like `ID:1234`, whose "port" is not one.
     pub fn host_port(&self) -> Option<(&str, u16)> {
         let (host, port) = self.0.rsplit_once(':')?;
-        Some((host.trim_start_matches('[').trim_end_matches(']'), port.parse().ok()?))
+        Some((
+            host.trim_start_matches('[').trim_end_matches(']'),
+            port.parse().ok()?,
+        ))
     }
 }
 
@@ -57,7 +65,14 @@ impl SshTarget {
         let (host, port) = match rest.strip_prefix('[') {
             Some(v6) => {
                 let (host, after) = v6.split_once(']').ok_or_else(bad)?;
-                (host, if after.is_empty() { None } else { Some(after.strip_prefix(':').ok_or_else(bad)?) })
+                (
+                    host,
+                    if after.is_empty() {
+                        None
+                    } else {
+                        Some(after.strip_prefix(':').ok_or_else(bad)?)
+                    },
+                )
             }
             None if rest.matches(':').count() > 1 => return Err(bad()),
             None => match rest.split_once(':') {
@@ -73,13 +88,25 @@ impl SshTarget {
         if starts_badly(host) || user.is_some_and(starts_badly) || host.contains('@') {
             return Err(bad());
         }
-        Ok(Some(Self { user: user.map(str::to_string), host: host.to_string(), port }))
+        Ok(Some(Self {
+            user: user.map(str::to_string),
+            host: host.to_string(),
+            port,
+        }))
     }
 
     /// Normalized `user@host[:port]`, with brackets around IPv6 hosts.
     pub fn as_str(&self) -> String {
-        let host = if self.host.contains(':') { format!("[{}]", self.host) } else { self.host.clone() };
-        let user = self.user.as_ref().map(|u| format!("{u}@")).unwrap_or_default();
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        let user = self
+            .user
+            .as_ref()
+            .map(|u| format!("{u}@"))
+            .unwrap_or_default();
         let port = self.port.map(|p| format!(":{p}")).unwrap_or_default();
         format!("{user}{host}{port}")
     }
@@ -106,20 +133,49 @@ mod tests {
 
     #[test]
     fn host_port() {
-        assert_eq!(ServerAddress::parse("pc:1").unwrap().host_port(), Some(("pc", 5901)));
-        assert_eq!(ServerAddress::parse("ID:12345").unwrap().host_port(), Some(("ID", 12345)));
+        assert_eq!(
+            ServerAddress::parse("pc:1").unwrap().host_port(),
+            Some(("pc", 5901))
+        );
+        assert_eq!(
+            ServerAddress::parse("ID:12345").unwrap().host_port(),
+            Some(("ID", 12345))
+        );
     }
 
     #[test]
     fn ssh_targets() {
         let ok = |s| SshTarget::parse(s).unwrap().unwrap();
         assert_eq!(SshTarget::parse("  ").unwrap(), None);
-        assert_eq!(ok("ana@office.example.com"), SshTarget { user: Some("ana".into()), host: "office.example.com".into(), port: None });
+        assert_eq!(
+            ok("ana@office.example.com"),
+            SshTarget {
+                user: Some("ana".into()),
+                host: "office.example.com".into(),
+                port: None
+            }
+        );
         assert_eq!(ok("office:2222").port, Some(2222));
-        assert_eq!(ok("ana@corp.local@pc").user.as_deref(), Some("ana@corp.local"), "UPN-style Windows users");
+        assert_eq!(
+            ok("ana@corp.local@pc").user.as_deref(),
+            Some("ana@corp.local"),
+            "UPN-style Windows users"
+        );
         assert_eq!(ok("ana@[fd00::1]:22").as_str(), "ana@[fd00::1]:22");
         assert_eq!(ok("ana@pc:22").account(), "ssh:ana@pc:22");
-        for bad in ["-oProxyCommand=x", "ana@-oProxyCommand=x", "-l@pc", "@pc", "ana@", "ana pc", "pc:0", "pc:99999", "pc:x", "fd00::1", "a\tb@pc"] {
+        for bad in [
+            "-oProxyCommand=x",
+            "ana@-oProxyCommand=x",
+            "-l@pc",
+            "@pc",
+            "ana@",
+            "ana pc",
+            "pc:0",
+            "pc:99999",
+            "pc:x",
+            "fd00::1",
+            "a\tb@pc",
+        ] {
             assert!(SshTarget::parse(bad).is_err(), "{bad:?} should be refused");
         }
     }

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align, Color32, Layout, RichText};
 
 use crate::features::chat::{ChatView, Msg};
-use crate::features::clipboard::RemoteClipboard;
+use crate::features::clipboard::{ClipboardView, RemoteClipboard};
 use crate::features::connection::{
     ConnectRequest, Dashboard, ServerAddress, SessionOptions, SshTarget,
 };
@@ -29,6 +29,7 @@ struct LiveSession {
     files_view: FilesView,
     chat: ChatView,
     clipboard: Arc<RemoteClipboard>,
+    clipboard_view: ClipboardView,
     /// Don't forward keyboard, mouse or clipboard to the server.
     view_only: bool,
     share_clipboard: bool,
@@ -119,6 +120,7 @@ impl App {
                         files_view: FilesView::default(),
                         chat: ChatView::default(),
                         clipboard,
+                        clipboard_view: ClipboardView::default(),
                         view_only: opts.view_only,
                         share_clipboard: opts.share_clipboard,
                         save_preview: opts.save_preview,
@@ -178,12 +180,12 @@ impl App {
                     }
                 }
                 Event::ServerClipboard(text) => {
-                    if self
-                        .live
-                        .as_ref()
-                        .is_some_and(|l| l.share_clipboard && !l.view_only)
+                    if let Some(l) = self.live.as_mut()
+                        && l.share_clipboard
+                        && !l.view_only
                     {
-                        ctx.copy_text(text);
+                        ctx.copy_text(text.clone());
+                        l.clipboard_view.push(text, true);
                     }
                 }
                 Event::Closed(reason) => {
@@ -275,20 +277,28 @@ impl eframe::App for App {
                 }
                 let viewport = live.view.show(ui, &live.screen, live.scale);
                 // Clicks on our own windows and typing in our text inputs must not reach the remote machine.
-                let over_ui = [live.files_view.rect, live.chat.rect, live.bar_rect]
-                    .into_iter()
-                    .flatten()
-                    .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
+                let over_ui = [
+                    live.files_view.rect,
+                    live.chat.rect,
+                    live.clipboard_view.rect,
+                    live.bar_rect,
+                ]
+                .into_iter()
+                .flatten()
+                .any(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))));
                 live.view.draw_cursor(ui, &viewport, !over_ui);
                 if !over_ui && !live.view_only && !ui.ctx().egui_wants_keyboard_input() {
-                    if live.share_clipboard {
-                        live.clipboard.forward_paste(ui);
+                    if live.share_clipboard
+                        && let Some(text) = live.clipboard.forward_paste(ui)
+                    {
+                        live.clipboard_view.push(text, false);
                     }
                     live.input.forward(ui, &viewport, &live.outbound);
                 }
             });
         live.files_view.show(&ctx, &*live.files);
         live.chat.show(&ctx, &live.outbound);
+        live.clipboard_view.show(&ctx, &live.clipboard);
     }
 }
 
@@ -341,6 +351,16 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 .clicked()
             {
                 live.chat.toggle(&live.outbound);
+            }
+            if ui
+                .selectable_label(
+                    live.clipboard_view.open,
+                    format!("{} Clipboard", char::from(Icon::Clipboard)),
+                )
+                .on_hover_text("View and manage synchronized clipboard text")
+                .clicked()
+            {
+                live.clipboard_view.open = !live.clipboard_view.open;
             }
             ui.menu_button(format!("{} Keys", char::from(Icon::Keyboard)), |ui| {
                 ui.set_min_width(175.0);

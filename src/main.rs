@@ -23,8 +23,12 @@ fn main() -> eframe::Result {
             .with_icon(eframe::icon_data::from_png_bytes(LOGO_PNG).expect("valid logo.png")),
         ..Default::default()
     };
-    eframe::run_native("Lucarna", options, Box::new(|cc| {
-        app::apply_theme(&cc.egui_ctx);
-        Ok(Box::<app::App>::default())
-    }))
+    eframe::run_native(
+        "Lucarna",
+        options,
+        Box::new(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            Ok(Box::<app::App>::default())
+        }),
+    )
 }

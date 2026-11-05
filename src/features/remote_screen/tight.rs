@@ -26,7 +26,9 @@ pub struct Tight {
 
 impl Default for Tight {
     fn default() -> Self {
-        Self { streams: [0; 4].map(|_| Decompress::new(true)) }
+        Self {
+            streams: [0; 4].map(|_| Decompress::new(true)),
+        }
     }
 }
 
@@ -48,12 +50,18 @@ impl Tight {
                 jpeg(&read_bytes(s, len)?, w, h)
             }
             0..=7 => self.basic(s, kind, w, h),
-            _ => Err(invalid(format!("invalid Tight control byte {control:#04x}"))),
+            _ => Err(invalid(format!(
+                "invalid Tight control byte {control:#04x}"
+            ))),
         }
     }
 
     fn basic(&mut self, s: &mut impl Read, kind: u8, w: usize, h: usize) -> io::Result<Vec<u8>> {
-        let filter = if kind & EXPLICIT_FILTER != 0 { read_u8(s)? } else { COPY };
+        let filter = if kind & EXPLICIT_FILTER != 0 {
+            read_u8(s)?
+        } else {
+            COPY
+        };
         let palette: Vec<[u8; 4]> = if filter == PALETTE {
             let n = read_u8(s)? as usize + 1;
             if n < 2 {
@@ -74,17 +82,30 @@ impl Tight {
             read_bytes(s, size)?
         } else {
             let len = compact_len(s)?;
-            let data = zrle::inflate(&mut self.streams[usize::from(kind & 3)], &read_bytes(s, len)?, size)?;
+            let data = zrle::inflate(
+                &mut self.streams[usize::from(kind & 3)],
+                &read_bytes(s, len)?,
+                size,
+            )?;
             if data.len() != size {
                 return Err(invalid("Tight data has the wrong size"));
             }
             data
         };
         match filter {
-            PALETTE if palette.len() == 2 => Ok((0..w * h).flat_map(|i| palette[usize::from(data[(i / w) * row + (i % w) / 8] >> (7 - i % w % 8) & 1)]).collect()),
+            PALETTE if palette.len() == 2 => Ok((0..w * h)
+                .flat_map(|i| {
+                    palette[usize::from(data[(i / w) * row + (i % w) / 8] >> (7 - i % w % 8) & 1)]
+                })
+                .collect()),
             PALETTE => data
                 .iter()
-                .map(|&i| palette.get(usize::from(i)).copied().ok_or_else(|| invalid("Tight palette index out of range")))
+                .map(|&i| {
+                    palette
+                        .get(usize::from(i))
+                        .copied()
+                        .ok_or_else(|| invalid("Tight palette index out of range"))
+                })
                 .collect::<io::Result<Vec<_>>>()
                 .map(|px| px.concat()),
             GRADIENT => Ok(gradient(&data, w).chunks(3).flat_map(bgrx).collect()),
@@ -117,9 +138,21 @@ fn gradient(data: &[u8], w: usize) -> Vec<u8> {
     let mut rgb = vec![0u8; data.len()];
     for i in 0..data.len() {
         let (first_column, first_row) = (i % stride < 3, i < stride);
-        let above = if first_row { 0 } else { i32::from(rgb[i - stride]) };
-        let left = if first_column { 0 } else { i32::from(rgb[i - 3]) };
-        let above_left = if first_row || first_column { 0 } else { i32::from(rgb[i - stride - 3]) };
+        let above = if first_row {
+            0
+        } else {
+            i32::from(rgb[i - stride])
+        };
+        let left = if first_column {
+            0
+        } else {
+            i32::from(rgb[i - 3])
+        };
+        let above_left = if first_row || first_column {
+            0
+        } else {
+            i32::from(rgb[i - stride - 3])
+        };
         rgb[i] = ((above + left - above_left).clamp(0, 255) as u8).wrapping_add(data[i]);
     }
     rgb
@@ -127,10 +160,17 @@ fn gradient(data: &[u8], w: usize) -> Vec<u8> {
 
 fn jpeg(data: &[u8], w: usize, h: usize) -> io::Result<Vec<u8>> {
     // The size limits make the decoder refuse a bigger image before allocating for it.
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB).set_max_width(w).set_max_height(h);
+    let options = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGB)
+        .set_max_width(w)
+        .set_max_height(h);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options);
-    let rgb = decoder.decode().map_err(|e| invalid(format!("Tight JPEG: {e:?}")))?;
-    let info = decoder.info().ok_or_else(|| invalid("Tight JPEG without headers"))?;
+    let rgb = decoder
+        .decode()
+        .map_err(|e| invalid(format!("Tight JPEG: {e:?}")))?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| invalid("Tight JPEG without headers"))?;
     if (usize::from(info.width), usize::from(info.height)) != (w, h) || rgb.len() != w * h * 3 {
         return Err(invalid("Tight JPEG has the wrong size"));
     }
@@ -147,7 +187,11 @@ mod tests {
 
     fn decode(t: &mut Tight, msg: &[u8], w: usize, h: usize) -> io::Result<Vec<[u8; 4]>> {
         let mut s = msg;
-        let px = t.read(&mut s, w, h)?.chunks(4).map(|p| p.try_into().unwrap()).collect();
+        let px = t
+            .read(&mut s, w, h)?
+            .chunks(4)
+            .map(|p| p.try_into().unwrap())
+            .collect();
         assert!(s.is_empty(), "unread bytes");
         Ok(px)
     }
@@ -155,8 +199,14 @@ mod tests {
     #[test]
     fn compact_lengths() {
         assert_eq!(compact_len(&mut &[0x05][..]).unwrap(), 5);
-        assert_eq!(compact_len(&mut &[0x80 | 0x10, 0x01][..]).unwrap(), 0x10 | 1 << 7);
-        assert_eq!(compact_len(&mut &[0xFF, 0xFF, 0xFF][..]).unwrap(), (1 << 22) - 1);
+        assert_eq!(
+            compact_len(&mut &[0x80 | 0x10, 0x01][..]).unwrap(),
+            0x10 | 1 << 7
+        );
+        assert_eq!(
+            compact_len(&mut &[0xFF, 0xFF, 0xFF][..]).unwrap(),
+            (1 << 22) - 1
+        );
     }
 
     #[test]
@@ -164,18 +214,36 @@ mod tests {
         let mut t = Tight::default();
         assert_eq!(decode(&mut t, &[FILL << 4, 9, 0, 0], 2, 2).unwrap(), [R; 4]);
         // 2×1 copy is 6 bytes < 12: raw RGB, no length, no zlib.
-        assert_eq!(decode(&mut t, &[0x00, 9, 0, 0, 0, 9, 0], 2, 1).unwrap(), [R, G]);
+        assert_eq!(
+            decode(&mut t, &[0x00, 9, 0, 0, 0, 9, 0], 2, 1).unwrap(),
+            [R, G]
+        );
     }
 
     #[test]
     fn palettes() {
         let mut t = Tight::default();
         // Two colours, 1 bit per pixel, rows padded to a byte: 10, 01.
-        let msg = [(EXPLICIT_FILTER) << 4, PALETTE, 1, 9, 0, 0, 0, 9, 0, 0b1000_0000, 0b0100_0000];
+        let msg = [
+            (EXPLICIT_FILTER) << 4,
+            PALETTE,
+            1,
+            9,
+            0,
+            0,
+            0,
+            9,
+            0,
+            0b1000_0000,
+            0b0100_0000,
+        ];
         assert_eq!(decode(&mut t, &msg, 2, 2).unwrap(), [G, R, R, G]);
         // Three colours, one byte per pixel; index 3 does not exist.
         let three = [EXPLICIT_FILTER << 4, PALETTE, 2, 9, 0, 0, 0, 9, 0, 0, 0, 9];
-        assert_eq!(decode(&mut t, &[&three[..], &[1, 0]].concat(), 2, 1).unwrap(), [G, R]);
+        assert_eq!(
+            decode(&mut t, &[&three[..], &[1, 0]].concat(), 2, 1).unwrap(),
+            [G, R]
+        );
         assert!(decode(&mut t, &[&three[..], &[3, 0]].concat(), 2, 1).is_err());
     }
 
@@ -197,29 +265,46 @@ mod tests {
         let rect = |z: &mut Compress, control: u8| {
             let raw = [9u8, 0, 0].repeat(4); // 4×1 red: 12 bytes, so it goes through zlib
             let mut packed = Vec::with_capacity(64);
-            z.compress_vec(&raw, &mut packed, FlushCompress::Sync).unwrap();
+            z.compress_vec(&raw, &mut packed, FlushCompress::Sync)
+                .unwrap();
             [&[control, packed.len() as u8][..], &packed].concat()
         };
         // Stream 1 (control 0x10) twice on the same zlib stream, then a reset of stream 1 (bit 1).
         assert_eq!(decode(&mut t, &rect(&mut z, 0x10), 4, 1).unwrap(), [R; 4]);
         assert_eq!(decode(&mut t, &rect(&mut z, 0x10), 4, 1).unwrap(), [R; 4]);
         let mut fresh = Compress::new(Compression::default(), true);
-        assert_eq!(decode(&mut t, &rect(&mut fresh, 0x12), 4, 1).unwrap(), [R; 4]);
+        assert_eq!(
+            decode(&mut t, &rect(&mut fresh, 0x12), 4, 1).unwrap(),
+            [R; 4]
+        );
     }
 
     #[test]
     fn rejects_bad_input() {
         let mut t = Tight::default();
-        assert!(decode(&mut t, &[0xA0], 1, 1).is_err(), "control 10 is not supported");
-        assert!(decode(&mut t, &[EXPLICIT_FILTER << 4, 7], 1, 1).is_err(), "unknown filter");
-        assert!(decode(&mut t, &[EXPLICIT_FILTER << 4, PALETTE, 0, 1, 2, 3], 1, 1).is_err(), "one-colour palette");
+        assert!(
+            decode(&mut t, &[0xA0], 1, 1).is_err(),
+            "control 10 is not supported"
+        );
+        assert!(
+            decode(&mut t, &[EXPLICIT_FILTER << 4, 7], 1, 1).is_err(),
+            "unknown filter"
+        );
+        assert!(
+            decode(&mut t, &[EXPLICIT_FILTER << 4, PALETTE, 0, 1, 2, 3], 1, 1).is_err(),
+            "one-colour palette"
+        );
     }
 
     /// 16×8 JPEG, red left half and blue right half, made with ImageMagick at quality 100 without chroma subsampling.
     #[test]
     fn jpeg_decodes_to_bgrx() {
         let file = include_bytes!("../../../tests/fixtures/tight-red-blue-16x8.jpg");
-        let mut msg = vec![JPEG << 4, 0x80 | (file.len() & 0x7F) as u8, (file.len() >> 7) as u8];
+        let mut msg = vec![
+            JPEG << 4,
+            0x80 | (file.len() & 0x7F) as u8,
+            (file.len() >> 7) as u8,
+        ];
         msg.extend_from_slice(file);
         let px = decode(&mut Tight::default(), &msg, 16, 8).unwrap();
         let close = |p: [u8; 4], q: [u8; 3]| p[..3].iter().zip(q).all(|(a, b)| a.abs_diff(b) < 8);
