@@ -378,10 +378,11 @@ fn run_worker(
                                     // Desktop is always offered: ~/Desktop, else the root
                                     // user's (the visible desktop is often root's), else
                                     // ~/Desktop so the click explains itself.
-                                    let desktop = [format!("{home}/Desktop"), "/root/Desktop".into()]
-                                        .into_iter()
-                                        .find(|d| exists(&mut s, d))
-                                        .unwrap_or_else(|| format!("{home}/Desktop"));
+                                    let desktop =
+                                        [format!("{home}/Desktop"), "/root/Desktop".into()]
+                                            .into_iter()
+                                            .find(|d| exists(&mut s, d))
+                                            .unwrap_or_else(|| format!("{home}/Desktop"));
                                     v.push((desktop, 'd'));
                                     for name in ["Downloads", "Documents"] {
                                         let dir = format!("{home}/{name}");

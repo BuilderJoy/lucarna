@@ -404,7 +404,10 @@ impl FilesView {
             ui.label(RichText::new("Remote").strong());
             for (drive, kind) in &self.drives {
                 let (label, tip) = match kind {
-                    'h' => ("Home".to_string(), "Home folder: files you upload land here"),
+                    'h' => (
+                        "Home".to_string(),
+                        "Home folder: files you upload land here",
+                    ),
                     'd' => (
                         drive.rsplit('/').next().unwrap_or(drive).to_string(),
                         "Shortcut",
