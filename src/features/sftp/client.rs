@@ -353,6 +353,7 @@ fn run_worker(
                                 emit(Update::Access(true));
 
                                 // Discover drives:
+                                let mut s = s;
                                 let drives = if s.default_dir.contains(':') {
                                     // Windows OpenSSH (e.g. C:/Users/name)
                                     let drive_letter = s
@@ -364,7 +365,32 @@ fn run_worker(
                                     vec![(format!("{drive_letter}:"), 'l')]
                                 } else {
                                     // POSIX
-                                    vec![("/".into(), 'l'), ("~".into(), 'l')]
+                                    // 'h' = home, 'd' = common folder under it, 'l' = root.
+                                    let home = s.default_dir.trim_end_matches('/').to_string();
+                                    let mut v = vec![(home.clone(), 'h')];
+                                    let exists = |s: &mut SftpSession, dir: &str| {
+                                        s.open_dir_handle(dir)
+                                            .map(|h| {
+                                                let _ = s.close_handle(&h);
+                                            })
+                                            .is_ok()
+                                    };
+                                    // Desktop is always offered: ~/Desktop, else the root
+                                    // user's (the visible desktop is often root's), else
+                                    // ~/Desktop so the click explains itself.
+                                    let desktop = [format!("{home}/Desktop"), "/root/Desktop".into()]
+                                        .into_iter()
+                                        .find(|d| exists(&mut s, d))
+                                        .unwrap_or_else(|| format!("{home}/Desktop"));
+                                    v.push((desktop, 'd'));
+                                    for name in ["Downloads", "Documents"] {
+                                        let dir = format!("{home}/{name}");
+                                        if exists(&mut s, &dir) {
+                                            v.push((dir, 'd'));
+                                        }
+                                    }
+                                    v.push(("/".into(), 'l'));
+                                    v
                                 };
                                 emit(Update::Drives(drives));
 
@@ -854,27 +880,39 @@ mod live_tests {
         });
 
         client.open();
-        wait(&rx, "open", |u| matches!(u, Update::Access(true)).then_some(()));
+        wait(&rx, "open", |u| {
+            matches!(u, Update::Access(true)).then_some(())
+        });
         let (home, entries) = wait(&rx, "home listing", |u| match u {
             Update::Listing { path, entries } => Some((path, entries)),
             _ => None,
         });
-        assert!(entries.iter().any(|e| e.name == "ft"), "no ft/ in {home}: {entries:?}");
+        assert!(
+            entries.iter().any(|e| e.name == "ft"),
+            "no ft/ in {home}: {entries:?}"
+        );
 
         let work = std::env::temp_dir().join(format!("lucarna-sftp-{}", std::process::id()));
         let (up_dir, down_dir) = (work.join("up"), work.join("down"));
         fs::create_dir_all(&up_dir).unwrap();
         fs::create_dir_all(&down_dir).unwrap();
         // Bigger than several chunks, with a tail that is not a multiple of CHUNK_SIZE.
-        let payload: Vec<u8> = (0..(CHUNK_SIZE as usize * 5 + 1234)).map(|i| (i * 31 % 251) as u8).collect();
+        let payload: Vec<u8> = (0..(CHUNK_SIZE as usize * 5 + 1234))
+            .map(|i| (i * 31 % 251) as u8)
+            .collect();
         let local = up_dir.join("payload.bin");
         fs::write(&local, &payload).unwrap();
 
         let remote_dir = format!("{home}ft/");
         client.upload(&local, &remote_dir);
-        wait(&rx, "upload", |u| matches!(u, Update::Uploaded(_)).then_some(()));
+        wait(&rx, "upload", |u| {
+            matches!(u, Update::Uploaded(_)).then_some(())
+        });
 
-        let (from, to) = (format!("{remote_dir}payload.bin"), format!("{remote_dir}renamed.bin"));
+        let (from, to) = (
+            format!("{remote_dir}payload.bin"),
+            format!("{remote_dir}renamed.bin"),
+        );
         client.rename(&from, &to);
         wait(&rx, "rename", |u| match u {
             Update::Command { ok, message } => {
