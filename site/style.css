@@ -78,6 +78,10 @@ nav a:hover { color: var(--link); }
 nav a.gh {
   border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
 }
+nav a.gh { display: inline-flex; align-items: center; gap: 6px; }
+nav a.gh .star-ico { fill: var(--accent); stroke: var(--accent); stroke-width: 1; stroke-linejoin: round; }
+nav a.gh .count { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+@media (prefers-color-scheme: light) { nav a.gh .star-ico { fill: #e0a100; stroke: #e0a100; } }
 
 /* Hero */
 .hero { padding: 72px 0 64px; background:
@@ -155,6 +159,15 @@ pre code { background: none; padding: 0; color: #f5f7fb; font-size: inherit; }
 .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; margin-top: 8px; }
 .dot.ok { background: var(--ok); }
 .dot.warn { background: var(--warn); }
+
+/* Star call to action */
+.center-sub { margin-inline: auto; }
+.btn.star { display: inline-flex; align-items: center; gap: 10px; padding: 14px 26px; font-size: 1.05rem; background: var(--card); }
+.btn.star .star-ico { fill: var(--accent); stroke: var(--accent); stroke-width: 1; stroke-linejoin: round; transition: transform 0.2s ease; }
+.btn.star .count { margin-left: 4px; padding: 1px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 0.9rem; font-weight: 700; color: var(--muted); }
+.btn.star:hover .star-ico { transform: rotate(18deg) scale(1.12); }
+@media (prefers-color-scheme: light) { .btn.star .star-ico { fill: #e0a100; stroke: #e0a100; } }
+@media (prefers-reduced-motion: reduce) { .btn.star .star-ico { transition: none; } .btn.star:hover .star-ico { transform: none; } }
 
 /* Footer */
 footer { border-top: 1px solid var(--line); padding: 32px 0; color: var(--muted); font-size: 0.95rem; }
