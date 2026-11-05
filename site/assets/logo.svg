@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Lucarna</title>
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#1a3a6b"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd36b" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffd36b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset="1" stop-color="#ffbe3d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="512" height="512" rx="112" fill="url(#night)"/>
+
+  <!-- light falling through the skylight -->
+  <polygon points="160,196 352,196 440,460 72,460" fill="url(#beam)"/>
+
+  <!-- skylight in perspective, four panes -->
+  <polygon points="196,92 316,92 352,196 160,196" fill="url(#glass)"/>
+  <g fill="none" stroke="#f5f7fb" stroke-width="12" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="196,92 316,92 352,196 160,196"/>
+    <line x1="256" y1="92" x2="256" y2="196"/>
+    <line x1="178" y1="144" x2="334" y2="144"/>
+  </g>
+
+  <!-- remote cursor lit by the beam -->
+  <path transform="translate(226 270) scale(1.15)"
+        d="M0 0 L0 120 L32 92 L54 140 L76 130 L54 84 L96 84 Z"
+        fill="#f5f7fb" stroke="#0b1d3a" stroke-width="9" stroke-linejoin="round"/>
+</svg>
