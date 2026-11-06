@@ -18,7 +18,8 @@ pub fn inflate(z: &mut Decompress, input: &[u8], max: usize) -> io::Result<Vec<u
     loop {
         out.reserve(64 << 10);
         let (before_in, before_out) = (z.total_in(), z.total_out());
-        z.decompress_vec(&input[pos..], &mut out, FlushDecompress::Sync).map_err(|e| invalid(e.to_string()))?;
+        z.decompress_vec(&input[pos..], &mut out, FlushDecompress::Sync)
+            .map_err(|e| invalid(e.to_string()))?;
         pos += (z.total_in() - before_in) as usize;
         if out.len() > max {
             return Err(invalid("zlib data too large"));
@@ -81,14 +82,21 @@ fn tile(s: &mut &[u8], w: usize, h: usize) -> io::Result<Vec<Pixel>> {
             Ok(px)
         }
         128 | 130..=255 => {
-            let pal = if sub == 128 { None } else { Some(palette(s, sub - 128)?) };
+            let pal = if sub == 128 {
+                None
+            } else {
+                Some(palette(s, sub - 128)?)
+            };
             let mut px = Vec::with_capacity(n);
             while px.len() < n {
                 let (colour, run) = match &pal {
                     None => (cpixel(s)?, run_length(s)?),
                     Some(pal) => {
                         let i = take(s, 1)?[0];
-                        (lookup(pal, i & 127)?, if i & 128 != 0 { run_length(s)? } else { 1 })
+                        (
+                            lookup(pal, i & 127)?,
+                            if i & 128 != 0 { run_length(s)? } else { 1 },
+                        )
                     }
                 };
                 if px.len() + run > n {
@@ -103,7 +111,9 @@ fn tile(s: &mut &[u8], w: usize, h: usize) -> io::Result<Vec<Pixel>> {
 }
 
 fn take<'a>(s: &mut &'a [u8], n: usize) -> io::Result<&'a [u8]> {
-    let (head, rest) = s.split_at_checked(n).ok_or_else(|| invalid("truncated ZRLE data"))?;
+    let (head, rest) = s
+        .split_at_checked(n)
+        .ok_or_else(|| invalid("truncated ZRLE data"))?;
     *s = rest;
     Ok(head)
 }
@@ -119,7 +129,9 @@ fn palette(s: &mut &[u8], n: usize) -> io::Result<Vec<Pixel>> {
 }
 
 fn lookup(pal: &[Pixel], i: u8) -> io::Result<Pixel> {
-    pal.get(i as usize).copied().ok_or_else(|| invalid("ZRLE palette index out of range"))
+    pal.get(i as usize)
+        .copied()
+        .ok_or_else(|| invalid("ZRLE palette index out of range"))
 }
 
 /// Sum of bytes up to and including the first one that is not 255, plus one.
@@ -142,7 +154,10 @@ mod tests {
     const G: Pixel = [0, 9, 0, 0];
 
     fn pixels(data: &[u8], w: usize, h: usize) -> io::Result<Vec<Pixel>> {
-        Ok(decode(data, w, h)?.chunks_exact(4).map(|p| p.try_into().unwrap()).collect())
+        Ok(decode(data, w, h)?
+            .chunks_exact(4)
+            .map(|p| p.try_into().unwrap())
+            .collect())
     }
 
     #[test]
@@ -150,11 +165,20 @@ mod tests {
         assert_eq!(pixels(&[0, 0, 0, 9, 0, 9, 0], 2, 1).unwrap(), [R, G]);
         assert_eq!(pixels(&[1, 0, 9, 0], 2, 2).unwrap(), [G; 4]);
         // 2-colour palette, 1 bit per pixel, rows padded to a byte: 10, 01.
-        assert_eq!(pixels(&[2, 0, 0, 9, 0, 9, 0, 0b1000_0000, 0b0100_0000], 2, 2).unwrap(), [G, R, R, G]);
+        assert_eq!(
+            pixels(&[2, 0, 0, 9, 0, 9, 0, 0b1000_0000, 0b0100_0000], 2, 2).unwrap(),
+            [G, R, R, G]
+        );
         // Plain RLE: R×3, G×1.
-        assert_eq!(pixels(&[128, 0, 0, 9, 2, 0, 9, 0, 0], 4, 1).unwrap(), [R, R, R, G]);
+        assert_eq!(
+            pixels(&[128, 0, 0, 9, 2, 0, 9, 0, 0], 4, 1).unwrap(),
+            [R, R, R, G]
+        );
         // Palette RLE: run of G×2 then a single R.
-        assert_eq!(pixels(&[130, 0, 0, 9, 0, 9, 0, 0x81, 1, 0], 3, 1).unwrap(), [G, G, R]);
+        assert_eq!(
+            pixels(&[130, 0, 0, 9, 0, 9, 0, 0x81, 1, 0], 3, 1).unwrap(),
+            [G, G, R]
+        );
     }
 
     #[test]
@@ -169,8 +193,14 @@ mod tests {
 
     #[test]
     fn rejects_malicious_tiles() {
-        assert!(pixels(&[128, 0, 0, 9, 4], 4, 1).is_err(), "run overflows tile");
-        assert!(pixels(&[130, 0, 0, 9, 0, 9, 0, 2], 1, 1).is_err(), "index outside palette");
+        assert!(
+            pixels(&[128, 0, 0, 9, 4], 4, 1).is_err(),
+            "run overflows tile"
+        );
+        assert!(
+            pixels(&[130, 0, 0, 9, 0, 9, 0, 2], 1, 1).is_err(),
+            "index outside palette"
+        );
         assert!(pixels(&[17], 1, 1).is_err(), "invalid subencoding");
         assert!(pixels(&[1, 0, 9, 0, 7], 1, 1).is_err(), "trailing bytes");
         assert!(pixels(&[0, 0, 9], 1, 1).is_err(), "truncated");
@@ -183,7 +213,8 @@ mod tests {
         let mut z = Decompress::new(true);
         for rect in [&[1u8, 0, 9, 0][..], &[1, 0, 0, 9]] {
             let mut wire = Vec::with_capacity(64);
-            c.compress_vec(rect, &mut wire, FlushCompress::Sync).unwrap();
+            c.compress_vec(rect, &mut wire, FlushCompress::Sync)
+                .unwrap();
             assert_eq!(inflate(&mut z, &wire, max_inflated(1, 1)).unwrap(), rect);
         }
     }

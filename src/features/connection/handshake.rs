@@ -2,10 +2,10 @@
 
 use std::io::{self, Read, Write};
 
+use super::ServerAddress;
 use super::auth::{self, Credentials};
 use super::mslogon;
-use super::ServerAddress;
-use crate::shared::wire::{invalid, read_bytes, read_string, read_u16, read_u32, read_u8};
+use crate::shared::wire::{invalid, read_bytes, read_string, read_u8, read_u16, read_u32};
 
 #[derive(Debug)]
 pub struct ServerInit {
@@ -25,7 +25,11 @@ const AUTH_CONTINUE: u32 = 0xFFFF_FFFF;
 
 /// Picks a security type from a 3.7+ server's list. MS-Logon only when a user name was given.
 fn pick(types: &[u8], creds: &Credentials) -> io::Result<u8> {
-    let order: &[u8] = if creds.user.is_empty() { &[VNC_AUTH, NONE] } else { &[MS_LOGON_III, MS_LOGON_II, VNC_AUTH, NONE] };
+    let order: &[u8] = if creds.user.is_empty() {
+        &[VNC_AUTH, NONE]
+    } else {
+        &[MS_LOGON_III, MS_LOGON_II, VNC_AUTH, NONE]
+    };
     if let Some(&t) = order.iter().find(|t| types.contains(t)) {
         return Ok(t);
     }
@@ -55,14 +59,23 @@ pub fn perform(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<S
     if &ver[..4] != b"RFB " {
         return Err(invalid("not a VNC server"));
     }
-    let minor: u32 = std::str::from_utf8(&ver[8..11]).ok().and_then(|v| v.parse().ok()).ok_or_else(|| invalid("bad version"))?;
+    let minor: u32 = std::str::from_utf8(&ver[8..11])
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| invalid("bad version"))?;
     let legacy = minor < 7; // RFB 3.3
-    s.write_all(if legacy { b"RFB 003.003\n" } else { b"RFB 003.008\n" })?;
+    s.write_all(if legacy {
+        b"RFB 003.003\n"
+    } else {
+        b"RFB 003.008\n"
+    })?;
 
     let sec = if legacy {
         match read_u32(s)? {
             0 => return Err(invalid(read_string(s, 4096)?)),
-            LEGACY_MS_LOGON if creds.user.is_empty() => return Err(invalid("this server needs a Windows user name (MS-Logon)")),
+            LEGACY_MS_LOGON if creds.user.is_empty() => {
+                return Err(invalid("this server needs a Windows user name (MS-Logon)"));
+            }
             LEGACY_MS_LOGON => MS_LOGON_II,
             t @ (1 | 2) => t as u8,
             t => return Err(invalid(format!("unsupported security type {t}"))),
@@ -90,10 +103,22 @@ pub fn perform(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<S
     if !(legacy && sec == NONE) {
         match read_u32(s)? {
             0 => {}
-            AUTH_CONTINUE => return Err(invalid("the server asks for an extra login step Lucarna doesn't support")),
+            AUTH_CONTINUE => {
+                return Err(invalid(
+                    "the server asks for an extra login step Lucarna doesn't support",
+                ));
+            }
             _ => {
-                let reason = if legacy { String::new() } else { read_string(s, 4096)? };
-                return Err(invalid(format!("authentication failed {reason}").trim_end().to_string()));
+                let reason = if legacy {
+                    String::new()
+                } else {
+                    read_string(s, 4096)?
+                };
+                return Err(invalid(
+                    format!("authentication failed {reason}")
+                        .trim_end()
+                        .to_string(),
+                ));
             }
         }
     }
@@ -103,7 +128,11 @@ pub fn perform(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<S
     let height = read_u16(s)?;
     read_bytes(s, 16)?; // server pixel format, overridden by remote_screen::negotiate
     let name = read_string(s, 4096)?;
-    Ok(ServerInit { width, height, name })
+    Ok(ServerInit {
+        width,
+        height,
+        name,
+    })
 }
 
 #[cfg(test)]
@@ -112,7 +141,10 @@ mod tests {
     use crate::shared::wire::Duplex;
 
     fn creds(user: &str) -> Credentials {
-        Credentials { user: user.into(), password: "pw".into() }
+        Credentials {
+            user: user.into(),
+            password: "pw".into(),
+        }
     }
 
     fn init() -> Vec<u8> {
@@ -131,26 +163,47 @@ mod tests {
         assert_eq!(&conn.output[..8], b"ID:1234\0");
         assert!(conn.output[7..].iter().all(|&b| b == 0));
         // A plain server (or anything else) behind the "repeater" is refused rather than misread.
-        let err = via_repeater(&mut Duplex::new(b"RFB 003.008\n".to_vec()), &ServerAddress::parse("pc").unwrap());
-        assert!(err.unwrap_err().to_string().contains("not an UltraVNC repeater"));
+        let err = via_repeater(
+            &mut Duplex::new(b"RFB 003.008\n".to_vec()),
+            &ServerAddress::parse("pc").unwrap(),
+        );
+        assert!(
+            err.unwrap_err()
+                .to_string()
+                .contains("not an UltraVNC repeater")
+        );
         let long = ServerAddress::parse(&"h".repeat(250)).unwrap();
         assert!(via_repeater(&mut Duplex::new(b"RFB 000.000\n".to_vec()), &long).is_err());
     }
 
     #[test]
     fn picks_by_whether_a_user_was_given() {
-        assert_eq!(pick(&[17, 0x75, 0x76, 0x71], &creds("ana")).unwrap(), MS_LOGON_III);
+        assert_eq!(
+            pick(&[17, 0x75, 0x76, 0x71], &creds("ana")).unwrap(),
+            MS_LOGON_III
+        );
         assert_eq!(pick(&[17, 0x71], &creds("ana")).unwrap(), MS_LOGON_II);
         assert_eq!(pick(&[17, 2], &creds("ana")).unwrap(), VNC_AUTH);
         assert_eq!(pick(&[17, 2], &creds("")).unwrap(), VNC_AUTH);
-        assert!(pick(&[17, 0x76, 0x71], &creds("")).unwrap_err().to_string().contains("user name"));
-        assert!(pick(&[17, 0x68], &creds("ana")).unwrap_err().to_string().contains("unsupported"));
+        assert!(
+            pick(&[17, 0x76, 0x71], &creds(""))
+                .unwrap_err()
+                .to_string()
+                .contains("user name")
+        );
+        assert!(
+            pick(&[17, 0x68], &creds("ana"))
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported")
+        );
     }
 
     #[test]
     fn vnc_auth_over_rfb_38() {
         let mut input = b"RFB 003.008
-".to_vec();
+"
+        .to_vec();
         input.extend([2, 17, 2]); // two types: UltraVNC marker and VNC auth
         input.extend([5u8; 16]); // challenge
         input.extend(0u32.to_be_bytes());
@@ -158,8 +211,11 @@ mod tests {
         let mut conn = Duplex::new(input);
         let got = perform(&mut conn, &creds("")).unwrap();
         assert_eq!((got.width, got.height, got.name.as_str()), (4, 3, "pc"));
-        assert_eq!(&conn.output[..13], b"RFB 003.008
-");
+        assert_eq!(
+            &conn.output[..13],
+            b"RFB 003.008
+"
+        );
         assert_eq!(conn.output[13..29], auth::vnc_response("pw", &[5; 16]));
     }
 
@@ -167,7 +223,8 @@ mod tests {
     fn ms_logon_iii_over_rfb_38() {
         let server = x25519_dalek::StaticSecret::from([3u8; 32]);
         let mut input = b"RFB 003.008
-".to_vec();
+"
+        .to_vec();
         input.extend([4, 17, 0x75, 0x76, 0x71]);
         input.extend(x25519_dalek::PublicKey::from(&server).as_bytes());
         input.extend(0u32.to_be_bytes());
@@ -175,34 +232,54 @@ mod tests {
         let mut conn = Duplex::new(input);
         perform(&mut conn, &creds("ana")).unwrap();
         assert_eq!(conn.output[12], MS_LOGON_III, "chooses III over II");
-        assert_eq!(conn.output.len(), 12 + 1 + 32 + 256 + 64 + 1, "version, choice, key, credentials, ClientInit");
+        assert_eq!(
+            conn.output.len(),
+            12 + 1 + 32 + 256 + 64 + 1,
+            "version, choice, key, credentials, ClientInit"
+        );
     }
 
     #[test]
     fn legacy_rfb_33_ms_logon() {
         let (generator, modulus, public) = (7u64, 2_147_483_629u64, 1_000u64);
         let mut input = b"RFB 003.003
-".to_vec();
+"
+        .to_vec();
         input.extend(LEGACY_MS_LOGON.to_be_bytes());
-        input.extend([generator, modulus, public].iter().flat_map(|v| v.to_be_bytes()));
+        input.extend(
+            [generator, modulus, public]
+                .iter()
+                .flat_map(|v| v.to_be_bytes()),
+        );
         input.extend(0u32.to_be_bytes());
         input.extend(init());
         assert!(perform(&mut Duplex::new(input.clone()), &creds("ana")).is_ok());
-        assert!(perform(&mut Duplex::new(input), &creds("")).unwrap_err().to_string().contains("user name"));
+        assert!(
+            perform(&mut Duplex::new(input), &creds(""))
+                .unwrap_err()
+                .to_string()
+                .contains("user name")
+        );
     }
 
     #[test]
     fn failures_are_reported_and_continue_is_refused() {
         let reply = |result: u32, reason: &str| {
             let mut input = b"RFB 003.008
-".to_vec();
+"
+            .to_vec();
             input.extend([1, 1]); // None auth, so no exchange before the result
             input.extend(result.to_be_bytes());
             input.extend((reason.len() as u32).to_be_bytes());
             input.extend(reason.as_bytes());
-            perform(&mut Duplex::new(input), &creds("")).unwrap_err().to_string()
+            perform(&mut Duplex::new(input), &creds(""))
+                .unwrap_err()
+                .to_string()
         };
-        assert_eq!(reply(1, "authentication rejected"), "authentication failed authentication rejected");
+        assert_eq!(
+            reply(1, "authentication rejected"),
+            "authentication failed authentication rejected"
+        );
         assert!(reply(AUTH_CONTINUE, "").contains("extra login step"));
     }
 }

@@ -1,0 +1,22 @@
+# Test SSH + VNC server (roadmap 8.3): sshd on 22, x11vnc listening ONLY on the container's loopback,
+# so the picture can only reach the viewer through the SSH tunnel; SFTP uses the same sshd.
+#   docker build -t lucarna-ssh-server -f tests/server/Dockerfile.ssh tests/server
+#   docker run -d --rm --name lucarna-ssh -p 2223:22 -e AUTHORIZED_KEY="$(cat ~/.ssh/lucarna_test.pub)" lucarna-ssh-server
+FROM alpine:3.20
+RUN apk add --no-cache openssh-server openssh-sftp-server x11vnc xvfb xterm && \
+    ssh-keygen -A && \
+    adduser -D -s /bin/sh lucarna && sed -i 's/^lucarna:!/lucarna:*/' /etc/shadow && \
+    mkdir -p /home/lucarna/.ssh /home/lucarna/ft && \
+    printf 'lucarna sftp test\n' > /home/lucarna/ft/hello.txt && \
+    chown -R lucarna:lucarna /home/lucarna && chmod 700 /home/lucarna/.ssh && \
+    printf 'PasswordAuthentication no\nPermitRootLogin no\nAllowTcpForwarding local\nGatewayPorts no\nSubsystem sftp internal-sftp\n' \
+        > /etc/ssh/sshd_config.d/lucarna.conf
+COPY colors.sh /colors.sh
+EXPOSE 22
+CMD set -e; \
+    [ -n "$AUTHORIZED_KEY" ] || { echo "set AUTHORIZED_KEY" >&2; exit 1; }; \
+    echo "$AUTHORIZED_KEY" > /home/lucarna/.ssh/authorized_keys; \
+    chown lucarna:lucarna /home/lucarna/.ssh/authorized_keys; chmod 600 /home/lucarna/.ssh/authorized_keys; \
+    Xvfb :0 -screen 0 1024x768x24 & sleep 1; DISPLAY=:0 xterm -bg navy -e /colors.sh & \
+    x11vnc -display :0 -localhost -passwd "${VNC_PASSWORD:-secret}" -forever -shared -quiet & \
+    exec /usr/sbin/sshd -D -e

@@ -31,7 +31,10 @@ impl Viewport {
 
     pub fn to_remote(&self, p: Pos2) -> (u16, u16) {
         let v = (p - self.rect.min) / self.scale;
-        (v.x.clamp(0.0, self.width - 1.0) as u16, v.y.clamp(0.0, self.height - 1.0) as u16)
+        (
+            v.x.clamp(0.0, self.width - 1.0) as u16,
+            v.y.clamp(0.0, self.height - 1.0) as u16,
+        )
     }
 }
 
@@ -54,25 +57,53 @@ impl ScreenView {
     /// Pass `active = false` while the pointer is over our own windows.
     pub fn draw_cursor(&self, ui: &egui::Ui, viewport: &Viewport, active: bool) {
         let Some(shape) = &self.cursor else { return };
-        let Some(p) = ui.input(|i| i.pointer.hover_pos()).filter(|p| active && viewport.contains(*p)) else { return };
+        let Some(p) = ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| active && viewport.contains(*p))
+        else {
+            return;
+        };
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
         if let Some(t) = &shape.texture {
-            let rect = Rect::from_min_size(p - shape.hotspot * viewport.scale, shape.size * viewport.scale);
-            ui.painter().image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            let rect = Rect::from_min_size(
+                p - shape.hotspot * viewport.scale,
+                shape.size * viewport.scale,
+            );
+            ui.painter().image(
+                t.id(),
+                rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
         }
     }
 
     /// Paints the screen according to `mode`.
-    pub fn show(&mut self, ui: &mut egui::Ui, screen: &Mutex<Framebuffer>, mode: Scale) -> Viewport {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        screen: &Mutex<Framebuffer>,
+        mode: Scale,
+    ) -> Viewport {
         let (width, height, new_cursor) = {
             let mut fb = screen.lock().unwrap();
             let full = [0, 0, fb.width, fb.height];
             let dirty = fb.dirty.take();
-            let image = |r: [usize; 4]| ColorImage::from_rgba_unmultiplied([r[2] - r[0], r[3] - r[1]], &fb.rgba(r));
+            let image = |r: [usize; 4]| {
+                ColorImage::from_rgba_unmultiplied([r[2] - r[0], r[3] - r[1]], &fb.rgba(r))
+            };
             match &mut self.texture {
-                None => self.texture = Some(ui.ctx().load_texture("screen", image(full), TextureOptions::LINEAR)),
+                None => {
+                    self.texture = Some(ui.ctx().load_texture(
+                        "screen",
+                        image(full),
+                        TextureOptions::LINEAR,
+                    ))
+                }
                 // Whole screen or a resize (DesktopSize sets the full region dirty).
-                Some(t) if dirty == Some(full) || t.size() != [fb.width, fb.height] => t.set(image(full), TextureOptions::LINEAR),
+                Some(t) if dirty == Some(full) || t.size() != [fb.width, fb.height] => {
+                    t.set(image(full), TextureOptions::LINEAR)
+                }
                 Some(t) => {
                     if let Some(r) = dirty.filter(|r| r[0] < r[2] && r[1] < r[3]) {
                         t.set_partial([r[0], r[1]], image(r), TextureOptions::LINEAR);
@@ -83,33 +114,68 @@ impl ScreenView {
         };
         if let Some(c) = new_cursor {
             let [w, h] = c.size;
-            let texture = (w > 0 && h > 0).then(|| ui.ctx().load_texture("cursor", ColorImage::from_rgba_unmultiplied(c.size, &c.rgba), TextureOptions::NEAREST));
-            self.cursor = Some(CursorShape { texture, hotspot: egui::vec2(c.hotspot.0 as f32, c.hotspot.1 as f32), size: egui::vec2(w as f32, h as f32) });
+            let texture = (w > 0 && h > 0).then(|| {
+                ui.ctx().load_texture(
+                    "cursor",
+                    ColorImage::from_rgba_unmultiplied(c.size, &c.rgba),
+                    TextureOptions::NEAREST,
+                )
+            });
+            self.cursor = Some(CursorShape {
+                texture,
+                hotspot: egui::vec2(c.hotspot.0 as f32, c.hotspot.1 as f32),
+                size: egui::vec2(w as f32, h as f32),
+            });
         }
 
         let id = self.texture.as_ref().unwrap().id();
         let paint = |ui: &egui::Ui, rect: Rect| {
-            ui.painter().image(id, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            ui.painter().image(
+                id,
+                rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
         };
         match mode {
             Scale::Fit => {
                 let avail = ui.available_rect_before_wrap();
                 let scale = (avail.width() / width).min(avail.height() / height);
-                let rect = Rect::from_center_size(avail.center(), egui::vec2(width * scale, height * scale));
+                let rect = Rect::from_center_size(
+                    avail.center(),
+                    egui::vec2(width * scale, height * scale),
+                );
                 paint(ui, rect);
-                Viewport { rect, visible: rect, scale, width, height }
+                Viewport {
+                    rect,
+                    visible: rect,
+                    scale,
+                    width,
+                    height,
+                }
             }
             Scale::Actual => {
                 let scale = 1.0 / ui.ctx().pixels_per_point();
                 let size = egui::vec2(width * scale, height * scale);
                 let avail = ui.available_size();
                 // Dragging and the mouse wheel belong to the remote machine, so only the scroll bars scroll.
-                egui::ScrollArea::both().auto_shrink(false).scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR).show(ui, |ui| {
-                    let (area, _) = ui.allocate_exact_size(size.max(avail), egui::Sense::hover());
-                    let rect = Rect::from_center_size(area.center(), size);
-                    paint(ui, rect);
-                    Viewport { rect, visible: ui.clip_rect(), scale, width, height }
-                }).inner
+                egui::ScrollArea::both()
+                    .auto_shrink(false)
+                    .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
+                    .show(ui, |ui| {
+                        let (area, _) =
+                            ui.allocate_exact_size(size.max(avail), egui::Sense::hover());
+                        let rect = Rect::from_center_size(area.center(), size);
+                        paint(ui, rect);
+                        Viewport {
+                            rect,
+                            visible: ui.clip_rect(),
+                            scale,
+                            width,
+                            height,
+                        }
+                    })
+                    .inner
             }
         }
     }

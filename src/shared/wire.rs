@@ -24,6 +24,10 @@ pub fn read_u32(s: &mut impl Read) -> io::Result<u32> {
     Ok(u32::from_be_bytes(read_bytes(s, 4)?.try_into().unwrap()))
 }
 
+pub fn read_u64(s: &mut impl Read) -> io::Result<u64> {
+    Ok(u64::from_be_bytes(read_bytes(s, 8)?.try_into().unwrap()))
+}
+
 /// Windows-ANSI text off the wire, read as Latin-1.
 pub fn from_latin1(b: &[u8]) -> String {
     b.iter().map(|&c| char::from(c)).collect()
@@ -31,7 +35,9 @@ pub fn from_latin1(b: &[u8]) -> String {
 
 /// Characters outside Latin-1 become '?'.
 pub fn to_latin1(s: &str) -> Vec<u8> {
-    s.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect()
+    s.chars()
+        .map(|c| if (c as u32) < 256 { c as u8 } else { b'?' })
+        .collect()
 }
 
 /// u32 length-prefixed string, rejected above `max` bytes.
@@ -53,7 +59,10 @@ pub struct Duplex {
 #[cfg(test)]
 impl Duplex {
     pub fn new(input: Vec<u8>) -> Self {
-        Self { input: io::Cursor::new(input), output: Vec::new() }
+        Self {
+            input: io::Cursor::new(input),
+            output: Vec::new(),
+        }
     }
 }
 

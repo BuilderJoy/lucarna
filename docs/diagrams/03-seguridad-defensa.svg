@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="118%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="badge-shadow" x="-12%" y="-12%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#1a3a6b"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd36b" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#ffd36b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset="1" stop-color="#ffbe3d"/>
+    </linearGradient>
+
+    <marker id="arrow-dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1e293b"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#15803d"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1600" height="920" fill="#f1f3f6"/>
+
+  <!-- Header Banner -->
+  <rect x="30" y="22" width="1540" height="74" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+  <g transform="translate(50, 31) scale(0.11)">
+    <rect width="512" height="512" rx="112" fill="url(#night)"/>
+    <polygon points="160,196 352,196 440,460 72,460" fill="url(#beam)"/>
+    <polygon points="196,92 316,92 352,196 160,196" fill="url(#glass)"/>
+    <g fill="none" stroke="#f5f7fb" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="196,92 316,92 352,196 160,196"/>
+      <line x1="256" y1="92" x2="256" y2="196"/>
+      <line x1="178" y1="144" x2="334" y2="144"/>
+    </g>
+    <path transform="translate(226 270) scale(1.15)" d="M0 0 L0 120 L32 92 L54 140 L76 130 L54 84 L96 84 Z" fill="#f5f7fb" stroke="#0b1d3a" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+  <text x="122" y="55" font-size="22" font-weight="800" fill="#0f172a">LUCARNA — Arquitectura de Seguridad y Defensa en Profundidad (Fase 9)</text>
+  <text x="122" y="79" font-size="14" font-weight="500" fill="#475569">Modelo de amenaza doble: protección contra escuchas en la red (MITM) y protección del técnico frente a un Servidor Remoto Hostil</text>
+
+  <!-- ==================== RING 1: PROTECCIÓN DE SECRETOS Y CATÁLOGO LOCAL ==================== -->
+  <rect x="35" y="122" width="465" height="760" rx="16" fill="#ffffff" stroke="#c4b5fd" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="35" y="122" width="465" height="44" rx="16" fill="#ede9fe"/>
+  <text x="267" y="150" text-anchor="middle" font-size="15.5" font-weight="800" fill="#4c1d95">BARRERA 1: Secretos Locales e Higiene en RAM</text>
+
+  <!-- Card 1.1 -->
+  <g transform="translate(60, 195)">
+    <rect width="415" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#6d28d9" filter="url(#badge-shadow)"/>
+    <path d="M52 52 L68 60 L68 74 C68 85 52 92 52 92 C52 92 36 85 36 74 L36 60 Z" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">1. Llavero del SO (Zero-Disk Secrets)</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Contraseñas VNC y SSH viven solo en Keychain /</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  Credential Manager / Secret Service.</text>
+    <text x="104" y="103" font-size="12" fill="#6d28d9" font-weight="700">• Nunca se escriben contraseñas en connections.txt.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Cuentas separadas: &lt;host:port&gt; vs ssh:&lt;user@host&gt;.</text>
+  </g>
+
+  <!-- Card 1.2 -->
+  <g transform="translate(60, 365)">
+    <rect width="415" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#7c3aed" filter="url(#badge-shadow)"/>
+    <rect x="36" y="58" width="32" height="28" rx="4" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M44 72 L50 78 L62 66" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">2. Modo Askpass Aislado &amp; Zeroize</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Ningún secreto viaja por argv ni variables de entorno</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  (invisible en ps aux / Process Explorer).</text>
+    <text x="104" y="103" font-size="12" fill="#6d28d9" font-weight="700">• Zeroize: borrado con ceros en RAM al autenticar.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Askpass solo responde a prompts de password reales.</text>
+  </g>
+
+  <!-- Card 1.3 -->
+  <g transform="translate(60, 535)">
+    <rect width="415" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#4f46e5" filter="url(#badge-shadow)"/>
+    <rect x="37" y="56" width="30" height="32" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="43" y1="66" x2="61" y2="66" stroke="#ffffff" stroke-width="2.2"/>
+    <line x1="43" y1="74" x2="57" y2="74" stroke="#ffffff" stroke-width="2.2"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">3. Catálogos Compartidos Seguros</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Importar connections.txt de un colega nunca ejecuta</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  comandos locales (bloqueo de -oProxyCommand).</text>
+    <text x="104" y="103" font-size="12.5" fill="#4338ca" font-weight="700">• El host siempre se pasa a ssh después de «--».</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Teclado bloqueado hacia VNC al escribir en la UI local.</text>
+  </g>
+
+  <!-- Card 1.4 Summary Badge -->
+  <rect x="60" y="705" width="415" height="150" rx="12" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="267" y="735" text-anchor="middle" font-size="14" font-weight="800" fill="#4c1d95">GARANTÍA LOCAL</text>
+  <text x="267" y="760" text-anchor="middle" font-size="12.5" fill="#334155">Un atacante con acceso de lectura al disco o a</text>
+  <text x="267" y="780" text-anchor="middle" font-size="12.5" fill="#334155">la lista de procesos del sistema NO puede extraer</text>
+  <text x="267" y="800" text-anchor="middle" font-size="12.5" fill="#334155">contraseñas VNC ni SSH, ni inyectar argumentos</text>
+  <text x="267" y="820" text-anchor="middle" font-size="12.5" fill="#4c1d95" font-weight="700">mediante archivos de conexiones compartidos.</text>
+
+  <!-- ==================== RING 2: TRANSPORTE FAIL-CLOSED Y ANTI-MITM ==================== -->
+  <rect x="535" y="122" width="510" height="760" rx="16" fill="#ffffff" stroke="#86efac" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="535" y="122" width="510" height="44" rx="16" fill="#dcfce7"/>
+  <text x="790" y="150" text-anchor="middle" font-size="15.5" font-weight="800" fill="#14532d">BARRERA 2: Transporte Cifrado y Política «Fail-Closed»</text>
+
+  <!-- Card 2.1 -->
+  <g transform="translate(562, 195)">
+    <rect width="456" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#15803d" filter="url(#badge-shadow)"/>
+    <rect x="38" y="68" width="28" height="20" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M44 68 L44 60 C44 53 60 53 60 60 L60 68" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">4. Política «Fail-Closed» (Nunca Cae a Plano)</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Si el túnel SSH falla o el destino es inválido, la sesión</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  aborta de inmediato; jamás intenta VNC sin cifrar.</text>
+    <text x="104" y="103" font-size="12.5" fill="#15803d" font-weight="700">• Modo «Exigir Túnel SSH» para bloquear texto plano.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Indicador visual de candado en tarjeta y barra activa.</text>
+  </g>
+
+  <!-- Card 2.2 -->
+  <g transform="translate(562, 365)">
+    <rect width="456" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#0d9488" filter="url(#badge-shadow)"/>
+    <circle cx="52" cy="72" r="16" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <circle cx="52" cy="72" r="5" fill="#ffffff"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">5. Verificación de Identidad SSH (Anti-MITM)</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Pinning de clave del servidor en known_hosts y vista</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  de huella SHA-256 en las propiedades de conexión.</text>
+    <text x="104" y="103" font-size="12.5" fill="#0f766e" font-weight="700">• Si la clave del servidor cambia → bloqueo rotundo.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Sin reenvío de ssh-agent (-oForwardAgent=no) ni X11.</text>
+  </g>
+
+  <!-- Card 2.3 -->
+  <g transform="translate(562, 535)">
+    <rect width="456" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#0284c7" filter="url(#badge-shadow)"/>
+    <path d="M36 72 L68 72 M58 62 L68 72 L58 82" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">6. Portapapeles Direccional (Anti-Exfiltración)</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Evita que un servidor remoto espíe lo que copias en tu</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  máquina local mientras la ventana está abierta.</text>
+    <text x="104" y="103" font-size="12.5" fill="#0369a1" font-weight="700">• Modos: Off · Solo Enviar · Solo Recibir · Ambos.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Limpieza automática de caracteres de control / NUL.</text>
+  </g>
+
+  <!-- Card 2.4 Summary Badge -->
+  <rect x="562" y="705" width="456" height="150" rx="12" fill="#f0fdf4" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="790" y="735" text-anchor="middle" font-size="14" font-weight="800" fill="#14532d">GARANTÍA EN RED</text>
+  <text x="790" y="760" text-anchor="middle" font-size="12.5" fill="#334155">Aunque VNC (DES 56-bit / MS-Logon) sea débil por</text>
+  <text x="790" y="780" text-anchor="middle" font-size="12.5" fill="#334155">diseño histórico, nunca viaja expuesto: va dentro</text>
+  <text x="790" y="800" text-anchor="middle" font-size="12.5" fill="#334155">de SSHv2 / WireGuard y el puerto 5900 remoto</text>
+  <text x="790" y="820" text-anchor="middle" font-size="12.5" fill="#14532d" font-weight="700">permanece cerrado al mundo (solo 127.0.0.1).</text>
+
+  <!-- ==================== RING 3: FRONTERA CONTRA SERVIDOR HOSTIL ==================== -->
+  <rect x="1080" y="122" width="485" height="760" rx="16" fill="#ffffff" stroke="#fca5a5" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="1080" y="122" width="485" height="44" rx="16" fill="#fee2e2"/>
+  <text x="1322" y="150" text-anchor="middle" font-size="15.5" font-weight="800" fill="#991b1b">BARRERA 3: Escudo Contra Servidor Remoto Hostil</text>
+
+  <!-- Card 3.1 -->
+  <g transform="translate(1105, 195)">
+    <rect width="435" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#dc2626" filter="url(#badge-shadow)"/>
+    <circle cx="52" cy="72" r="22" fill="none" stroke="#ffffff" stroke-width="2" stroke-dasharray="4,3"/>
+    <path d="M52 57 L64 63 L64 74 C64 82 52 87 52 87 C52 87 40 82 40 74 L40 63 Z" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">7. Validación de Rectángulos y Bombas Zlib</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Ningún mensaje del servidor reserva memoria sin antes</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  validar MAX_DIM, Framebuffer::contains y longitud.</text>
+    <text x="104" y="103" font-size="12.5" fill="#b91c1c" font-weight="700">• Inflado zlib/JPEG acotado contra ataques de OOM.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Índices de paleta y corridas RLE verificados al byte.</text>
+  </g>
+
+  <!-- Card 3.2 -->
+  <g transform="translate(1105, 365)">
+    <rect width="435" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#b91c1c" filter="url(#badge-shadow)"/>
+    <path d="M36 62 L46 62 L50 66 L68 66 L68 84 L36 84 Z" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <line x1="45" y1="71" x2="59" y2="79" stroke="#ffffff" stroke-width="2.5"/>
+    <line x1="59" y1="71" x2="45" y2="79" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">8. Sandbox de Archivos (FT y SFTP)</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• Rechazo de «..», rutas absolutas, UNC, symlinks</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  externos y nombres reservados (CON, NUL, COM1).</text>
+    <text x="104" y="103" font-size="12.5" fill="#b91c1c" font-weight="700">• Prohibido el envío de archivos no pedidos por la UI.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Descarga a .lucarna-part y renombrado al verificar.</text>
+  </g>
+
+  <!-- Card 3.3 -->
+  <g transform="translate(1105, 535)">
+    <rect width="435" height="145" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="52" cy="72" r="34" fill="#991b1b" filter="url(#badge-shadow)"/>
+    <line x1="40" y1="60" x2="64" y2="84" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <line x1="64" y1="60" x2="40" y2="84" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <text x="104" y="42" font-size="15" font-weight="800" fill="#0f172a">9. Corte Inmediato ante Anomalía</text>
+    <text x="104" y="65" font-size="12.5" fill="#334155">• No se anuncia ningún encoding cuyo parser no esté</text>
+    <text x="104" y="83" font-size="12.5" fill="#334155">  implementado y probado con casos maliciosos.</text>
+    <text x="104" y="103" font-size="12.5" fill="#991b1b" font-weight="700">• Cualquier byte sobrante o inválido cierra el socket.</text>
+    <text x="104" y="123" font-size="12" fill="#64748b">• Rust garantiza ausencia de buffer overflows / UAF.</text>
+  </g>
+
+  <!-- Card 3.4 Summary Badge -->
+  <rect x="1105" y="705" width="435" height="150" rx="12" fill="#fef2f2" stroke="#f87171" stroke-width="1.5"/>
+  <text x="1322" y="735" text-anchor="middle" font-size="14" font-weight="800" fill="#991b1b">GARANTÍA ANTE SERVIDOR COMPROMETIDO</text>
+  <text x="1322" y="760" text-anchor="middle" font-size="12.5" fill="#334155">Si te conectas a un servidor infectado o a un</text>
+  <text x="1322" y="780" text-anchor="middle" font-size="12.5" fill="#334155">honeypot malicioso, el servidor NO puede escribir</text>
+  <text x="1322" y="800" text-anchor="middle" font-size="12.5" fill="#334155">fuera de tu carpeta de descargas, ni agotar tu RAM,</text>
+  <text x="1322" y="820" text-anchor="middle" font-size="12.5" fill="#991b1b" font-weight="700">ni robar tu llave SSH ni tu portapapeles.</text>
+
+  <!-- Connecting Shield Arrows Between Rings -->
+  <line x1="500" y1="490" x2="533" y2="490" stroke="#1e293b" stroke-width="3" marker-end="url(#arrow-dark)"/>
+  <line x1="1045" y1="490" x2="1078" y2="490" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+</svg>

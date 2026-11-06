@@ -41,7 +41,7 @@ Download the file for your system from the [latest release](https://github.com/B
 - **Windows 10/11 (64-bit):** run `Lucarna-<version>-windows-x64-setup.exe`. The installer is not code-signed yet, so SmartScreen may warn: **More info → Run anyway**. It can install for your user only, without admin rights.
 - **Linux (x86_64):** on Debian/Ubuntu, `sudo apt install ./lucarna_<version>_amd64.deb`. Elsewhere, extract `lucarna-<version>-linux-x86_64.tar.gz` and run `./lucarna`. Saving passwords needs a Secret Service keyring (GNOME Keyring or KWallet).
 
-To build from source instead: `cargo run --release`.
+To build from source on any platform: `cargo run --release`.
 
 ## Using Lucarna over the internet: always through a tunnel
 
@@ -51,9 +51,19 @@ VNC does not encrypt the session. Screen, keystrokes (including passwords you ty
 - **MS-Logon II:** a 31-bit key exchange that can be brute-forced in seconds, which exposes the **Windows** user and password.
 - **MS-Logon III:** a strong key exchange, but the credentials are still encrypted with DES (56 bits). Details in [docs/ultravnc-auth.md](docs/ultravnc-auth.md).
 
-**Never open port 5900 (or the repeater ports) to the internet.** Put one of these in front of it; Lucarna needs no extra settings, you just connect to the tunnel's local end.
+**Never open port 5900 (or the repeater ports) to the internet.**
 
-**SSH tunnel** (the server, or a machine on its network, runs an SSH server; Windows 10+ ships OpenSSH Server as an optional feature):
+**Built-in SSH (recommended).** In the connection's properties, fill in **SSH** with `user@host[:port]`. Lucarna starts your system's `ssh` client, opens a tunnel and connects VNC through it, so screen, keyboard and UltraVNC file transfer are encrypted. If the VNC server runs on the SSH host itself, the tunnel ends at its loopback, so you can set UltraVNC to accept loopback connections only. Log in with your SSH keys (`~/.ssh`, ssh-agent, `~/.ssh/config`) or save an **SSH password**, kept in the OS keychain. Needs:
+
+- an OpenSSH client on your computer (built into macOS, Linux and Windows 10/11);
+- an SSH server on the remote machine (Windows 10/11 ships OpenSSH Server as an optional feature) that allows tunnels (`AllowTcpForwarding yes`, the default on Windows);
+- for SSH *passwords*, OpenSSH 8.4 or newer on your computer (`ssh -V`). Older clients, such as some Windows 10 installs, can still use SSH keys.
+
+New hosts are trusted on first use; if a host's key later changes, Lucarna refuses to connect and tells you how to clear the old key.
+
+Other options, if you prefer to run the tunnel yourself (Lucarna then just connects to its local end):
+
+**Manual SSH tunnel** (the server, or a machine on its network, runs an SSH server):
 
 ```bash
 ssh -N -L 5901:localhost:5900 user@server             # SSH runs on the VNC server itself
@@ -76,9 +86,19 @@ Then connect Lucarna to `localhost:5901`.
 
 UltraVNC's DSM encryption plugins (SecureVNC, MSRC4) are not supported, and VeNCrypt (TLS) is not implemented yet: a tunnel covers both cases with tools that are better audited.
 
+![Zero-Trust Connectivity: Tailscale and Cloudflare Tunnel](docs/diagrams/04-arquitectura-tailscale-cloudflare.png)
+
 ## Architecture
 
-Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Comprehensive threat model, attack vectors and security guarantees: [docs/SECURITY.md](docs/SECURITY.md).
+
+![Lucarna System Architecture](docs/diagrams/01-arquitectura-modulos.png)
+
+![Defense in Depth and Security Model](docs/diagrams/03-seguridad-defensa.png)
+
+![Lucarna System Architecture](docs/diagrams/01-arquitectura-modulos.png)
+
+![Defense in Depth and Security Model](docs/diagrams/03-seguridad-defensa.png)
 
 Vertical slices, one per feature, named in the domain's language (RFB, RFC 6143):
 

@@ -46,7 +46,11 @@ pub fn read(s: &mut impl Read, w: usize, h: usize) -> io::Result<Vec<u8>> {
             let coloured = flags & SUBRECTS_COLOURED != 0;
             let sub = read_bytes(s, n * if coloured { 6 } else { 2 })?;
             for r in sub.chunks_exact(if coloured { 6 } else { 2 }) {
-                let (colour, xy) = if coloured { (&r[..4], &r[4..]) } else { (&fg[..], r) };
+                let (colour, xy) = if coloured {
+                    (&r[..4], &r[4..])
+                } else {
+                    (&fg[..], r)
+                };
                 let (x, y) = ((xy[0] >> 4) as usize, (xy[0] & 15) as usize);
                 let (sw, sh) = ((xy[1] >> 4) as usize + 1, (xy[1] & 15) as usize + 1);
                 if x + sw > tw || y + sh > th {
@@ -71,7 +75,10 @@ mod tests {
     const B: [u8; 4] = [2, 2, 2, 0];
 
     fn pixels(mut data: &[u8], w: usize, h: usize) -> io::Result<Vec<[u8; 4]>> {
-        let px = read(&mut data, w, h)?.chunks_exact(4).map(|p| p.try_into().unwrap()).collect();
+        let px = read(&mut data, w, h)?
+            .chunks_exact(4)
+            .map(|p| p.try_into().unwrap())
+            .collect();
         assert!(data.is_empty(), "unread bytes");
         Ok(px)
     }
@@ -79,13 +86,29 @@ mod tests {
     #[test]
     fn tiles() {
         // Background A, foreground B, one 1×2 subrect at (1,0).
-        let t = [&[BACKGROUND | FOREGROUND | ANY_SUBRECTS][..], &A, &B, &[1, 0x10, 0x01]].concat();
+        let t = [
+            &[BACKGROUND | FOREGROUND | ANY_SUBRECTS][..],
+            &A,
+            &B,
+            &[1, 0x10, 0x01],
+        ]
+        .concat();
         assert_eq!(pixels(&t, 2, 2).unwrap(), [A, B, A, B]);
         // Coloured subrect at (0,1), 1×1.
-        let t = [&[BACKGROUND | ANY_SUBRECTS | SUBRECTS_COLOURED][..], &A, &[1], &B, &[0x01, 0x00]].concat();
+        let t = [
+            &[BACKGROUND | ANY_SUBRECTS | SUBRECTS_COLOURED][..],
+            &A,
+            &[1],
+            &B,
+            &[0x01, 0x00],
+        ]
+        .concat();
         assert_eq!(pixels(&t, 1, 2).unwrap(), [A, B]);
         // Raw tile.
-        assert_eq!(pixels(&[&[RAW][..], &B, &A].concat(), 2, 1).unwrap(), [B, A]);
+        assert_eq!(
+            pixels(&[&[RAW][..], &B, &A].concat(), 2, 1).unwrap(),
+            [B, A]
+        );
     }
 
     #[test]
@@ -97,7 +120,13 @@ mod tests {
 
     #[test]
     fn rejects_subrect_outside_tile() {
-        let t = [&[BACKGROUND | FOREGROUND | ANY_SUBRECTS][..], &A, &B, &[1, 0x10, 0x10]].concat();
+        let t = [
+            &[BACKGROUND | FOREGROUND | ANY_SUBRECTS][..],
+            &A,
+            &B,
+            &[1, 0x10, 0x10],
+        ]
+        .concat();
         assert!(pixels(&t, 2, 1).is_err());
     }
 }

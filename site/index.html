@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lucarna · Visor VNC libre con transferencia de archivos UltraVNC</title>
+  <meta name="description" content="Lucarna es un visor VNC gratuito y de código abierto para macOS, Windows y Linux, pensado para UltraVNC: transferencia de archivos, chat, MS-Logon y repetidor.">
+  <meta name="theme-color" content="#0b1d3a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Lucarna · Visor VNC libre">
+  <meta property="og:description" content="Visor VNC gratuito y de código abierto para macOS, Windows y Linux, pensado para UltraVNC.">
+  <meta property="og:image" content="https://builderjoy.github.io/lucarna/assets/logo.png">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+
+  <header class="top">
+    <div class="wrap bar">
+      <a class="brand" href="#inicio" aria-label="Lucarna, inicio">
+        <img src="assets/logo.svg" alt="" width="32" height="32">
+        <span>Lucarna</span>
+      </a>
+      <nav aria-label="Principal">
+        <a href="#vnc">Qué es VNC</a>
+        <a href="#funciones">Funciones</a>
+        <a href="#instalar">Instalar</a>
+        <a href="#estado">Estado</a>
+        <a class="gh" href="https://github.com/BuilderJoy/lucarna">GitHub <svg class="star-ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M12 2.5l2.94 5.96 6.58.96-4.76 4.64 1.12 6.55L12 17.5l-5.88 3.09 1.12-6.55L2.48 9.42l6.58-.96L12 2.5z"/></svg><span class="count" data-stars>2</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="contenido">
+    <section class="hero" id="inicio">
+      <div class="wrap hero-grid">
+        <div>
+          <p class="eyebrow">Versión 0.x · en desarrollo activo</p>
+          <h1>Un visor VNC libre, hecho para trabajar con UltraVNC</h1>
+          <p class="lead">Lucarna te deja ver y controlar otro equipo desde macOS, Windows o Linux, y mover archivos con el protocolo de transferencia de UltraVNC. Gratis y de código abierto.</p>
+          <div class="cta">
+            <a class="btn primary" href="https://github.com/BuilderJoy/lucarna/releases/latest">Descargar la última versión</a>
+            <a class="btn" href="https://github.com/BuilderJoy/lucarna">Ver el código</a>
+          </div>
+          <p class="note">Licencia GPL-2.0 o posterior. Hecho en Rust.</p>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <img src="assets/logo.svg" alt="" width="280" height="280">
+        </div>
+      </div>
+    </section>
+
+    <section id="vnc">
+      <div class="wrap">
+        <h2>Qué es VNC, en una frase</h2>
+        <p class="sub">VNC permite ver la pantalla de otro equipo y manejarlo con tu teclado y tu ratón, a través de la red.</p>
+        <div class="two">
+          <div>
+            <ol class="steps">
+              <li><strong>Saludo.</strong> Cliente y servidor acuerdan la versión del protocolo.</li>
+              <li><strong>Acceso.</strong> El servidor pide una contraseña, o usuario y contraseña de Windows en UltraVNC.</li>
+              <li><strong>Pantalla.</strong> El cliente pregunta qué cambió y el servidor manda solo las zonas que cambiaron, comprimidas.</li>
+              <li><strong>Entrada.</strong> Cada tecla, movimiento o clic viaja al servidor como un mensaje pequeño.</li>
+            </ol>
+          </div>
+          <figure class="diagram">
+            <svg viewBox="0 0 520 220" role="img" aria-label="El cliente envía teclas y ratón al servidor, y el servidor devuelve los cambios de pantalla">
+              <defs>
+                <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" fill="currentColor"/>
+                </marker>
+              </defs>
+              <rect x="16" y="60" width="150" height="100" rx="12" class="box"/>
+              <text x="91" y="104" text-anchor="middle" class="t strong">Tu equipo</text>
+              <text x="91" y="126" text-anchor="middle" class="t">Lucarna</text>
+              <rect x="354" y="60" width="150" height="100" rx="12" class="box"/>
+              <text x="429" y="104" text-anchor="middle" class="t strong">Equipo remoto</text>
+              <text x="429" y="126" text-anchor="middle" class="t">Servidor VNC</text>
+              <path d="M170 95H350" class="line" marker-end="url(#arr)"/>
+              <text x="260" y="84" text-anchor="middle" class="t small">teclas y ratón</text>
+              <path d="M350 130H170" class="line" marker-end="url(#arr)"/>
+              <text x="260" y="154" text-anchor="middle" class="t small">cambios de pantalla</text>
+            </svg>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="funciones" class="alt">
+      <div class="wrap">
+        <h2>Lo que hace hoy</h2>
+        <p class="sub">Un visor ligero, con pocas dependencias, que se siente como una aplicación nativa.</p>
+        <div class="cards">
+          <article class="card">
+            <h3>Pantalla fluida</h3>
+            <p>Codificaciones Tight (con JPEG para enlaces lentos), ZRLE, Zlib, Hextile, CopyRect y Raw. El cursor local se pinta sin retraso.</p>
+          </article>
+          <article class="card">
+            <h3>Pensado para UltraVNC</h3>
+            <p>Inicio de sesión MS-Logon II y III con usuario y contraseña de Windows, repetidor (<code>host:puerto</code> o <code>ID:1234</code>) y chat de texto.</p>
+          </article>
+          <article class="card">
+            <h3>Transferencia de archivos <span class="tag">en pruebas</span></h3>
+            <p>Navegador de dos paneles, local y remoto, con descargas, subidas por arrastrar y soltar, carpetas, renombrar y borrar.</p>
+          </article>
+          <article class="card">
+            <h3>Libreta de direcciones</h3>
+            <p>Conexiones guardadas con miniatura de la pantalla, etiquetas, favoritos y vista en cuadrícula o lista.</p>
+          </article>
+          <article class="card">
+            <h3>Contraseñas a salvo</h3>
+            <p>Se guardan en el llavero de tu sistema operativo. Nunca se escriben en un archivo.</p>
+          </article>
+          <article class="card">
+            <h3>Barra de sesión</h3>
+            <p>Solo ver, ajustar a la ventana o 1:1, pantalla completa, menú de teclas especiales y Ctrl+Alt+Supr.</p>
+          </article>
+        </div>
+        <p class="coming"><strong>En desarrollo:</strong> túnel SSH integrado y archivos por SFTP, para cifrar la conexión sin instalar nada en el servidor. Mira la <a href="https://github.com/BuilderJoy/lucarna/blob/develop/docs/ROADMAP.md">hoja de ruta</a>.</p>
+      </div>
+    </section>
+
+    <section id="instalar">
+      <div class="wrap">
+        <h2>Instalar</h2>
+        <p class="sub">Descarga el instalador de tu sistema desde la <a href="https://github.com/BuilderJoy/lucarna/releases/latest">última versión</a>.</p>
+        <div class="cards three">
+          <article class="card">
+            <h3>macOS</h3>
+            <p>Como Lucarna aún no tiene firma de Apple, lo más simple es compilarla con Rust:</p>
+            <pre><code>git clone https://github.com/BuilderJoy/lucarna.git
+cd lucarna
+./packaging/macos/install-local.sh</code></pre>
+            <p class="small">También hay un <code>.dmg</code> universal; macOS lo bloqueará hasta que lo permitas en Ajustes del Sistema → Privacidad y seguridad.</p>
+          </article>
+          <article class="card">
+            <h3>Windows</h3>
+            <p>Descarga el instalador <code>…-windows-x64-setup.exe</code> y ábrelo. Se instala para tu usuario, en español o inglés.</p>
+          </article>
+          <article class="card">
+            <h3>Linux</h3>
+            <p>En Debian o Ubuntu usa el paquete <code>.deb</code>:</p>
+            <pre><code>sudo apt install ./lucarna_*_amd64.deb</code></pre>
+            <p class="small">También hay un <code>.tar.gz</code> para otras distribuciones.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="dentro" class="alt">
+      <div class="wrap">
+        <h2>Cómo funciona por dentro</h2>
+        <p class="sub">Cuatro piezas, y una regla de seguridad que las atraviesa.</p>
+        <div class="cards four">
+          <article class="card">
+            <h3>La ventana</h3>
+            <p>Muestra la libreta de direcciones y la pantalla remota, y captura tu teclado y tu ratón.</p>
+          </article>
+          <article class="card">
+            <h3>La sesión</h3>
+            <p>Cada conexión corre en su propio hilo, así la ventana nunca se congela esperando datos.</p>
+          </article>
+          <article class="card">
+            <h3>El lector</h3>
+            <p>Es el único que lee del servidor: identifica cada mensaje y lo entrega a pantalla, portapapeles, chat o archivos.</p>
+          </article>
+          <article class="card">
+            <h3>La pantalla en memoria</h3>
+            <p>Guarda la última imagen y solo redibuja la zona que cambió.</p>
+          </article>
+        </div>
+        <p class="rule"><strong>Regla de seguridad:</strong> el servidor se trata como no confiable. Cada tamaño y cada rectángulo que llega se valida antes de usarse.</p>
+        <p class="small center">Más detalle, con diagramas, en la <a href="https://github.com/BuilderJoy/lucarna/blob/develop/docs/ARCHITECTURE.md">guía de arquitectura</a>.</p>
+      </div>
+    </section>
+
+    <section id="estado">
+      <div class="wrap narrow">
+        <h2>Estado del proyecto</h2>
+        <p class="sub">Lucarna está en la versión 0.x y todavía le faltan pruebas. Preferimos decirlo claro.</p>
+        <ul class="status">
+          <li><span class="dot ok" aria-hidden="true"></span><span><strong>Funciona:</strong> pantalla, teclado, ratón, libreta de direcciones, contraseñas en el llavero, MS-Logon, chat y repetidor.</span></li>
+          <li><span class="dot warn" aria-hidden="true"></span><span><strong>En pruebas:</strong> la transferencia de archivos y el portapapeles, que todavía se están probando con distintos servidores.</span></li>
+          <li><span class="dot warn" aria-hidden="true"></span><span><strong>Sin confirmar:</strong> ninguna función se ha validado aún contra un UltraVNC Server real. Se seguirá en 0.x hasta hacerlo.</span></li>
+        </ul>
+        <p>¿Encontraste un problema o quieres proponer algo? Abre un <a href="https://github.com/BuilderJoy/lucarna/issues">issue en GitHub</a>.</p>
+      </div>
+    </section>
+
+    <section id="apoyo" class="alt">
+      <div class="wrap narrow center">
+        <h2>¿Te sirve Lucarna?</h2>
+        <p class="sub center-sub">Una estrella en GitHub ayuda a que más gente encuentre el proyecto y nos dice que vamos por buen camino.</p>
+        <p><a class="btn star" href="https://github.com/BuilderJoy/lucarna"><svg class="star-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M12 2.5l2.94 5.96 6.58.96-4.76 4.64 1.12 6.55L12 17.5l-5.88 3.09 1.12-6.55L2.48 9.42l6.58-.96L12 2.5z"/></svg><span>Dar una estrella en GitHub</span><span class="count" data-stars>2</span></a></p>
+        <p class="small">También puedes <a href="https://github.com/BuilderJoy/lucarna/issues">abrir un issue</a> con lo que falla o con lo que te gustaría ver.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <p><strong>Lucarna</strong> · Visor VNC libre. Software libre bajo licencia GPL-2.0 o posterior.</p>
+      <p><a href="https://github.com/BuilderJoy/lucarna">Código</a> · <a href="https://github.com/BuilderJoy/lucarna">★ Dar una estrella</a> · <a href="https://github.com/BuilderJoy/lucarna/releases">Versiones</a> · <a href="https://github.com/BuilderJoy/lucarna/issues">Issues</a> · <a href="https://github.com/BuilderJoy/lucarna/blob/develop/docs/ROADMAP.md">Hoja de ruta</a></p>
+    </div>
+  </footer>
+</body>
+</html>

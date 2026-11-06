@@ -1,0 +1,268 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 940" width="1600" height="940" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="118%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="badge-shadow" x="-12%" y="-12%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+
+    <!-- Lucarna Logo Gradients -->
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#1a3a6b"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd36b" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#ffd36b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset="1" stop-color="#ffbe3d"/>
+    </linearGradient>
+
+    <!-- Arrowhead Markers -->
+    <marker id="arrow-dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1e293b"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#15803d"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1600" height="940" fill="#f1f3f6"/>
+
+  <!-- Header Banner -->
+  <rect x="30" y="22" width="1540" height="74" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+  <g transform="translate(50, 31) scale(0.11)">
+    <rect width="512" height="512" rx="112" fill="url(#night)"/>
+    <polygon points="160,196 352,196 440,460 72,460" fill="url(#beam)"/>
+    <polygon points="196,92 316,92 352,196 160,196" fill="url(#glass)"/>
+    <g fill="none" stroke="#f5f7fb" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="196,92 316,92 352,196 160,196"/>
+      <line x1="256" y1="92" x2="256" y2="196"/>
+      <line x1="178" y1="144" x2="334" y2="144"/>
+    </g>
+    <path transform="translate(226 270) scale(1.15)" d="M0 0 L0 120 L32 92 L54 140 L76 130 L54 84 L96 84 Z" fill="#f5f7fb" stroke="#0b1d3a" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+  <text x="122" y="55" font-size="22" font-weight="800" fill="#0f172a">LUCARNA — Arquitectura de Conectividad Zero-Trust: Tailscale &amp; Cloudflare Tunnel</text>
+  <text x="122" y="79" font-size="14" font-weight="500" fill="#475569">Cómo atravesar NAT y CGNAT sin abrir el puerto 5900 ni mantener servidores propios, combinando mallas WireGuard y túneles Zero-Trust</text>
+
+  <!-- ==================== LEFT COLUMN: EQUIPO DEL TÉCNICO (LUCARNA) ==================== -->
+  <rect x="30" y="118" width="320" height="790" rx="16" fill="#ffffff" stroke="#94a3b8" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="30" y="118" width="320" height="42" rx="16" fill="#e2e8f0"/>
+  <text x="190" y="145" text-anchor="middle" font-size="15" font-weight="800" fill="#0f172a">EQUIPO DEL TÉCNICO (CLIENTE)</text>
+
+  <!-- Lucarna App Node -->
+  <g transform="translate(190, 245)">
+    <rect x="-44" y="-44" width="88" height="88" rx="20" fill="url(#night)" filter="url(#badge-shadow)"/>
+    <polygon points="-18,-10 18,-10 34,34 -34,34" fill="url(#beam)"/>
+    <polygon points="-12,-28 12,-28 18,-10 -18,-10" fill="url(#glass)" stroke="#f5f7fb" stroke-width="2.2"/>
+    <path d="M-4 2 L-4 24 L2 18 L6 27 L10 25 L6 16 L14 16 Z" fill="#f5f7fb"/>
+    <text x="0" y="66" text-anchor="middle" font-size="15.5" font-weight="800" fill="#0f172a">Lucarna Viewer</text>
+    <text x="0" y="84" text-anchor="middle" font-size="12" fill="#475569">Address Book + Sesión RFB/SFTP</text>
+    <text x="0" y="100" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6d28d9">Credenciales en Keychain del SO</text>
+  </g>
+
+  <!-- Local Tailscale Client Badge -->
+  <g transform="translate(190, 465)">
+    <rect x="-130" y="-42" width="260" height="94" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.8"/>
+    <!-- Tailscale 3x3 dot grid logo -->
+    <circle cx="-90" cy="5" r="28" fill="#1e293b" filter="url(#badge-shadow)"/>
+    <circle cx="-101" cy="-6" r="3.5" fill="#94a3b8"/>
+    <circle cx="-90" cy="-6" r="3.5" fill="#ffffff"/>
+    <circle cx="-79" cy="-6" r="3.5" fill="#94a3b8"/>
+    <circle cx="-101" cy="5" r="3.5" fill="#ffffff"/>
+    <circle cx="-90" cy="5" r="3.5" fill="#ffffff"/>
+    <circle cx="-79" cy="5" r="3.5" fill="#ffffff"/>
+    <circle cx="-101" cy="16" r="3.5" fill="#94a3b8"/>
+    <circle cx="-90" cy="16" r="3.5" fill="#ffffff"/>
+    <circle cx="-79" cy="16" r="3.5" fill="#38bdf8"/>
+    <text x="-48" y="-8" font-size="14" font-weight="800" fill="#1e3a8a">Cliente Tailscale Local</text>
+    <text x="-48" y="10" font-size="11.5" fill="#334155">• Interfaz utun / 100.x.y.z</text>
+    <text x="-48" y="26" font-size="11.5" fill="#334155">• MagicDNS (.ts.net)</text>
+    <text x="-48" y="42" font-size="11" font-weight="700" fill="#2563eb">• Auto-discovery: tailscale status</text>
+  </g>
+
+  <!-- Local cloudflared Client Badge -->
+  <g transform="translate(190, 635)">
+    <rect x="-130" y="-42" width="260" height="94" rx="12" fill="#fff7ed" stroke="#f97316" stroke-width="1.8"/>
+    <!-- Cloudflare orange cloud logo -->
+    <circle cx="-90" cy="5" r="28" fill="#ea580c" filter="url(#badge-shadow)"/>
+    <path d="M-106 12 L-74 12 C-70 12 -68 7 -72 4 C-72 -2 -78 -5 -83 -3 C-86 -9 -96 -9 -99 -2 C-104 -2 -109 3 -106 12 Z" fill="#ffffff"/>
+    <text x="-48" y="-8" font-size="14" font-weight="800" fill="#9a3412">cloudflared access tcp</text>
+    <text x="-48" y="10" font-size="11.5" fill="#334155">• Escucha en 127.0.0.1:P local</text>
+    <text x="-48" y="26" font-size="11.5" fill="#334155">• Valida token SSO / MFA</text>
+    <text x="-48" y="42" font-size="11" font-weight="700" fill="#ea580c">• Lanzado por Lucarna al conectar</text>
+  </g>
+
+  <!-- Optional Inner SSH Layer Badge -->
+  <g transform="translate(190, 795)">
+    <rect x="-130" y="-36" width="260" height="82" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.8"/>
+    <circle cx="-90" cy="5" r="24" fill="#15803d"/>
+    <rect x="-98" y="3" width="16" height="12" rx="2" fill="none" stroke="#ffffff" stroke-width="2.2"/>
+    <path d="M-94 3 L-94 -2 C-94 -6 -86 -6 -86 -2 L-86 3" fill="none" stroke="#ffffff" stroke-width="2.2"/>
+    <text x="-54" y="-6" font-size="13.5" font-weight="800" fill="#14532d">Doble Blindaje Opcional</text>
+    <text x="-54" y="12" font-size="11.5" fill="#334155">Túnel SSH (features/ssh) sobre</text>
+    <text x="-54" y="28" font-size="11.5" font-weight="700" fill="#15803d">Tailscale o Cloudflare + SFTP v3</text>
+  </g>
+
+  <!-- ==================== CENTER TOP: RUTA A — TAILSCALE / WIREGUARD MESH ==================== -->
+  <rect x="385" y="118" width="790" height="378" rx="16" fill="#eff6ff" stroke="#2563eb" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="385" y="118" width="790" height="42" rx="16" fill="#dbeafe"/>
+  <text x="412" y="145" font-size="15.5" font-weight="800" fill="#1e3a8a">OPCIÓN A: Red en Malla Tailscale / WireGuard (Conexión Directa P2P Punto a Punto)</text>
+
+  <!-- Tailscale Control Plane & ACLs -->
+  <g transform="translate(560, 240)">
+    <rect x="-148" y="-52" width="296" height="104" rx="12" fill="#ffffff" stroke="#93c5fd" stroke-width="1.8" filter="url(#shadow)"/>
+    <circle cx="-106" cy="0" r="26" fill="#1e293b"/>
+    <circle cx="-115" cy="-9" r="3" fill="#38bdf8"/>
+    <circle cx="-106" cy="-9" r="3" fill="#ffffff"/>
+    <circle cx="-97" cy="-9" r="3" fill="#38bdf8"/>
+    <circle cx="-115" cy="0" r="3" fill="#ffffff"/>
+    <circle cx="-106" cy="0" r="3" fill="#ffffff"/>
+    <circle cx="-97" cy="0" r="3" fill="#ffffff"/>
+    <circle cx="-115" cy="9" r="3" fill="#38bdf8"/>
+    <circle cx="-106" cy="9" r="3" fill="#ffffff"/>
+    <circle cx="-97" cy="9" r="3" fill="#38bdf8"/>
+    <text x="-68" y="-20" font-size="13.5" font-weight="800" fill="#0f172a">Plano de Control &amp; ACLs</text>
+    <text x="-68" y="-2" font-size="11" fill="#475569">• Intercambio de claves públicas</text>
+    <text x="-68" y="15" font-size="11" fill="#475569">• Políticas Zero-Trust (puerto 5900/22)</text>
+    <text x="-68" y="32" font-size="11" font-weight="700" fill="#15803d">• NUNCA ve tus datos ni tu pantalla</text>
+  </g>
+
+  <!-- WireGuard Data Plane P2P Tunnel -->
+  <g transform="translate(560, 405)">
+    <rect x="-148" y="-52" width="296" height="104" rx="12" fill="#1d4ed8" filter="url(#badge-shadow)"/>
+    <circle cx="-106" cy="0" r="26" fill="#ffffff"/>
+    <path d="M-106 -14 L-93 -7 L-93 3 C-93 11 -106 16 -106 16 C-106 16 -119 11 -119 3 L-119 -7 Z" fill="none" stroke="#1d4ed8" stroke-width="2.6"/>
+    <text x="-68" y="-18" font-size="13.5" font-weight="800" fill="#ffffff">Túnel P2P WireGuard</text>
+    <text x="-68" y="1" font-size="11" fill="#dbeafe">• Cifrado Noise / ChaCha20-Poly1305</text>
+    <text x="-68" y="18" font-size="11" fill="#dbeafe">• NAT Hole Punching (STUN / ICE)</text>
+    <text x="-68" y="35" font-size="11" font-weight="700" fill="#fde047">• Latencia mínima (directo entre IPs)</text>
+  </g>
+
+  <!-- Tailscale SSH & DERP Fallback -->
+  <g transform="translate(990, 322)">
+    <rect x="-145" y="-120" width="290" height="240" rx="14" fill="#ffffff" stroke="#60a5fa" stroke-width="2" filter="url(#shadow)"/>
+    <circle cx="0" cy="-68" r="32" fill="#2563eb" filter="url(#badge-shadow)"/>
+    <path d="M-14 -68 L14 -68 M6 -76 L14 -68 L6 -60 M-6 -76 L-14 -68 L-6 -60" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/>
+    <text x="0" y="-18" text-anchor="middle" font-size="15" font-weight="800" fill="#1e3a8a">Ventajas para Lucarna</text>
+    <text x="-125" y="10" font-size="12" fill="#334155">1. Conecta por nombre MagicDNS:</text>
+    <text x="-112" y="28" font-size="12" font-weight="700" fill="#2563eb">oficina-pc.tailnet.ts.net:5900</text>
+    <text x="-125" y="52" font-size="12" fill="#334155">2. Tailscale SSH opcional: autentica</text>
+    <text x="-112" y="70" font-size="12" fill="#475569">el túnel SSH sin gestionar llaves.</text>
+    <text x="-125" y="94" font-size="12" fill="#334155">3. Relé DERP cifrado E2E automático</text>
+    <text x="-112" y="110" font-size="12" fill="#475569">si un firewall corporativo bloquea UDP.</text>
+  </g>
+
+  <!-- ==================== CENTER BOTTOM: RUTA B — CLOUDFLARE TUNNEL + ACCESS ==================== -->
+  <rect x="385" y="522" width="790" height="386" rx="16" fill="#fff7ed" stroke="#ea580c" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="385" y="522" width="790" height="42" rx="16" fill="#ffedd5"/>
+  <text x="412" y="549" font-size="15.5" font-weight="800" fill="#9a3412">OPCIÓN B: Cloudflare Tunnel (cloudflared) + Cloudflare Access (Zero-Trust Corporativo)</text>
+
+  <!-- Identity Provider + Cloudflare Access -->
+  <g transform="translate(560, 648)">
+    <rect x="-148" y="-54" width="296" height="108" rx="12" fill="#ffffff" stroke="#fdba74" stroke-width="1.8" filter="url(#shadow)"/>
+    <circle cx="-106" cy="0" r="26" fill="#7c3aed"/>
+    <rect x="-120" y="-12" width="28" height="24" rx="3" fill="none" stroke="#ffffff" stroke-width="2.3"/>
+    <circle cx="-110" cy="-2" r="4" fill="#ffffff"/>
+    <line x1="-102" y1="-2" x2="-96" y2="-2" stroke="#ffffff" stroke-width="2"/>
+    <text x="-68" y="-22" font-size="13.5" font-weight="800" fill="#0f172a">1. Cloudflare Access (SSO)</text>
+    <text x="-68" y="-3" font-size="11" fill="#475569">• Login con Google, GitHub, Okta,</text>
+    <text x="-68" y="14" font-size="11" fill="#475569">  Microsoft Entra ID + MFA / FIDO2</text>
+    <text x="-68" y="33" font-size="11" font-weight="700" fill="#6d28d9">• Verifica identidad antes de abrir TCP</text>
+  </g>
+
+  <!-- Cloudflare Edge Network -->
+  <g transform="translate(560, 815)">
+    <rect x="-148" y="-54" width="296" height="108" rx="12" fill="#ea580c" filter="url(#badge-shadow)"/>
+    <circle cx="-106" cy="0" r="26" fill="#ffffff"/>
+    <path d="M-120 7 L-92 7 C-88 7 -86 2 -90 -1 C-90 -6 -95 -9 -100 -7 C-103 -13 -112 -13 -114 -6 C-119 -6 -123 -1 -120 7 Z" fill="#ea580c"/>
+    <text x="-68" y="-20" font-size="13.5" font-weight="800" fill="#ffffff">2. Red Edge Anycast (TLS)</text>
+    <text x="-68" y="-1" font-size="11" fill="#ffedd5">• vnc.empresa.com (sin IP pública)</text>
+    <text x="-68" y="16" font-size="11" fill="#ffedd5">• Protección DDoS y registro de</text>
+    <text x="-68" y="33" font-size="11" font-weight="700" fill="#fde047">  auditoría por usuario y sesión</text>
+  </g>
+
+  <!-- Outbound-Only cloudflared Connector -->
+  <g transform="translate(990, 730)">
+    <rect x="-145" y="-120" width="290" height="240" rx="14" fill="#ffffff" stroke="#fb923c" stroke-width="2" filter="url(#shadow)"/>
+    <circle cx="0" cy="-68" r="32" fill="#ea580c" filter="url(#badge-shadow)"/>
+    <path d="M-14 -68 L14 -68 M4 -78 L14 -68 L4 -58" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+    <text x="0" y="-18" text-anchor="middle" font-size="15" font-weight="800" fill="#9a3412">Conector Saliente (Outbound)</text>
+    <text x="-125" y="10" font-size="12" fill="#334155">1. El servidor remoto inicia 4 túneles</text>
+    <text x="-112" y="28" font-size="12" font-weight="700" fill="#ea580c">salientes QUIC / HTTP2 hacia el Edge.</text>
+    <text x="-125" y="52" font-size="12" fill="#334155">2. Firewall entrante 100% cerrado:</text>
+    <text x="-112" y="70" font-size="12" fill="#475569">cero puertos abiertos en el router.</text>
+    <text x="-125" y="94" font-size="12" fill="#15803d" font-weight="700">3. Recomendación Lucarna: tunelar SSH</text>
+    <text x="-112" y="110" font-size="12" fill="#15803d" font-weight="700">dentro de Cloudflare para cifrado E2E.</text>
+  </g>
+
+  <!-- ==================== RIGHT COLUMN: SERVIDOR REMOTO BLINDADO ==================== -->
+  <rect x="1210" y="118" width="360" height="790" rx="16" fill="#ffffff" stroke="#15803d" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="1210" y="118" width="360" height="42" rx="16" fill="#dcfce7"/>
+  <text x="1390" y="145" text-anchor="middle" font-size="15" font-weight="800" fill="#14532d">SERVIDOR REMOTO (DETRÁS DE NAT)</text>
+
+  <!-- Firewall Badge: Zero Inbound Ports -->
+  <g transform="translate(1390, 235)">
+    <rect x="-145" y="-44" width="290" height="88" rx="12" fill="#fef2f2" stroke="#f87171" stroke-width="2"/>
+    <circle cx="-102" cy="0" r="26" fill="#dc2626"/>
+    <path d="M-112 -10 L-92 10 M-92 -10 L-112 10" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+    <text x="-64" y="-12" font-size="14" font-weight="800" fill="#991b1b">Firewall / Router Local</text>
+    <text x="-64" y="8" font-size="12" fill="#7f1d1d" font-weight="700">• 0 Puertos Abiertos a Internet</text>
+    <text x="-64" y="26" font-size="11.5" fill="#475569">• Invisible a escaneos Shodan / Censys</text>
+  </g>
+
+  <!-- Remote Daemons (tailscaled / cloudflared / sshd) -->
+  <g transform="translate(1390, 465)">
+    <rect x="-145" y="-85" width="290" height="170" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.8"/>
+    <circle cx="0" cy="-42" r="28" fill="#0f172a" filter="url(#badge-shadow)"/>
+    <path d="M-12 -46 L-3 -39 L-12 -32 M1 -32 L12 -32" fill="none" stroke="#38bdf8" stroke-width="2.6" stroke-linecap="round"/>
+    <text x="0" y="4" text-anchor="middle" font-size="14.5" font-weight="800" fill="#0f172a">Agentes Auditados de Red</text>
+    <text x="0" y="26" text-anchor="middle" font-size="12" fill="#334155">• tailscaled (interfaz tailscale0)</text>
+    <text x="0" y="45" text-anchor="middle" font-size="12" fill="#334155">• cloudflared service (tcp://localhost)</text>
+    <text x="0" y="64" text-anchor="middle" font-size="12" font-weight="700" fill="#15803d">• OpenSSH Server (Puerto 22 interno)</text>
+  </g>
+
+  <!-- Loopback VNC Server -->
+  <g transform="translate(1390, 735)">
+    <rect x="-145" y="-85" width="290" height="185" rx="12" fill="#f0fdf4" stroke="#4ade80" stroke-width="2"/>
+    <circle cx="0" cy="-40" r="30" fill="#15803d" filter="url(#badge-shadow)"/>
+    <rect x="-14" y="-50" width="28" height="18" rx="2.5" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <line x1="-7" y1="-27" x2="7" y2="-27" stroke="#ffffff" stroke-width="2.4"/>
+    <text x="0" y="8" text-anchor="middle" font-size="15" font-weight="800" fill="#14532d">UltraVNC / x11vnc / macOS</text>
+    <text x="0" y="30" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b91c1c">Escuchando SOLO en 127.0.0.1:5900</text>
+    <text x="0" y="50" text-anchor="middle" font-size="12" fill="#334155">• LoopbackOnly=1 en ultravnc.ini</text>
+    <text x="0" y="68" text-anchor="middle" font-size="12" fill="#334155">• MS-Logon III + File Transfer</text>
+    <text x="0" y="86" text-anchor="middle" font-size="12" fill="#15803d" font-weight="700">• + Archivos por SFTP v3 (Fase 8.2)</text>
+  </g>
+
+  <!-- ==================== CONNECTING ARROWS ==================== -->
+  <!-- Lucarna -> Tailscale & Cloudflared local -->
+  <line x1="190" y1="355" x2="190" y2="418" stroke="#2563eb" stroke-width="2.8" marker-end="url(#arrow-blue)"/>
+  <path d="M 140 250 L 44 250 L 44 635 L 55 635" fill="none" stroke="#ea580c" stroke-width="2.6" marker-end="url(#arrow-orange)"/>
+
+  <!-- Local Tailscale -> Tailscale Option A -->
+  <line x1="322" y1="455" x2="406" y2="415" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="560" y1="295" x2="560" y2="348" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="5,4" marker-end="url(#arrow-blue)"/>
+  <line x1="710" y1="405" x2="838" y2="355" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="1138" y1="322" x2="1238" y2="430" stroke="#2563eb" stroke-width="3" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+
+  <!-- Local cloudflared -> Cloudflare Option B -->
+  <line x1="322" y1="648" x2="406" y2="648" stroke="#ea580c" stroke-width="2.8" marker-end="url(#arrow-orange)"/>
+  <line x1="322" y1="665" x2="406" y2="800" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <line x1="560" y1="705" x2="560" y2="755" stroke="#ea580c" stroke-width="2.6" marker-end="url(#arrow-orange)"/>
+  <line x1="710" y1="815" x2="838" y2="765" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <line x1="1238" y1="500" x2="1138" y2="710" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+
+  <!-- Remote Daemons -> Loopback VNC -->
+  <line x1="1390" y1="552" x2="1390" y2="644" stroke="#15803d" stroke-width="3.2" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+</svg>

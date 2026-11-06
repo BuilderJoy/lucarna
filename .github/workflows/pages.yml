@@ -1,0 +1,45 @@
+name: Pages
+
+# Publishes the static site in site/ to GitHub Pages. No build step: plain HTML and CSS.
+# The star count shown on the page is written in at deploy time, and a new deploy runs
+# whenever someone stars the repository, so the page never calls the GitHub API itself.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Put the current star count in the page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          stars=$(gh api "repos/${{ github.repository }}" --jq .stargazers_count)
+          sed -i -E "s|data-stars>[0-9]*<|data-stars>${stars}<|g" site/index.html
+          grep -o 'data-stars>[0-9]*<' site/index.html | sort | uniq -c
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -31,7 +31,11 @@ impl ChatView {
     /// The bar button. Opening or closing asks the server to do the same on its side.
     pub fn toggle(&mut self, out: &Outbound) {
         self.open = !self.open;
-        if self.open { protocol::open(out) } else { protocol::close(out) }
+        if self.open {
+            protocol::open(out)
+        } else {
+            protocol::close(out)
+        }
     }
 
     pub fn show(&mut self, ctx: &egui::Context, out: &Outbound) {
@@ -45,16 +49,29 @@ impl ChatView {
             .default_size([340.0, 300.0])
             .show(ctx, |ui| {
                 let accent = ui.visuals().selection.bg_fill;
-                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).max_height(ui.available_height() - 36.0).show(ui, |ui| {
-                    for (mine, line) in &self.log {
-                        let who = if *mine { RichText::new("me").strong().color(accent) } else { RichText::new("remote").strong() };
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(who);
-                            ui.label(line);
-                        });
-                    }
-                });
-                let reply = ui.add(egui::TextEdit::singleline(&mut self.input).hint_text("Type and press Enter").char_limit(2000).desired_width(f32::INFINITY));
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink(false)
+                    .max_height(ui.available_height() - 36.0)
+                    .show(ui, |ui| {
+                        for (mine, line) in &self.log {
+                            let who = if *mine {
+                                RichText::new("me").strong().color(accent)
+                            } else {
+                                RichText::new("remote").strong()
+                            };
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(who);
+                                ui.label(line);
+                            });
+                        }
+                    });
+                let reply = ui.add(
+                    egui::TextEdit::singleline(&mut self.input)
+                        .hint_text("Type and press Enter")
+                        .char_limit(2000)
+                        .desired_width(f32::INFINITY),
+                );
                 if reply.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                     let line = std::mem::take(&mut self.input);
                     if !line.trim().is_empty() {

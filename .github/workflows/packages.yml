@@ -1,5 +1,6 @@
 # Builds the installers on every pull request (so packaging is checked on all three systems)
-# and publishes them as a GitHub pre-release when a version tag like v0.1.0 is pushed.
+# and publishes them as the latest GitHub release when a version tag like v0.1.0 is pushed.
+# The release page starts with packaging/release-notes.md (download links and install steps).
 name: Packages
 
 on:
@@ -72,13 +73,15 @@ jobs:
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - name: Publish pre-release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sed "s/{VERSION}/${GITHUB_REF_NAME#v}/g" packaging/release-notes.md > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --title "Lucarna $GITHUB_REF_NAME" --prerelease --generate-notes
+            --title "Lucarna $GITHUB_REF_NAME" --notes "$(cat notes.md)" --generate-notes --latest
