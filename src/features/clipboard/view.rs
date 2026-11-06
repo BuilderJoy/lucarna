@@ -63,6 +63,7 @@ impl ClipboardView {
             return;
         }
         let mut open = true;
+        let mut input_id = None;
         let window = egui::Window::new(format!("{} Clipboard Sync", char::from(Icon::Clipboard)))
             .open(&mut open)
             .default_size([440.0, 480.0])
@@ -88,7 +89,7 @@ impl ClipboardView {
                         .hint_text("Paste or type text here to send to remote computer…")
                         .desired_rows(3)
                         .desired_width(f32::INFINITY);
-                    ui.add(edit);
+                    input_id = Some(ui.add(edit).id);
                 });
 
                 ui.add_space(2.0);
@@ -213,5 +214,16 @@ impl ClipboardView {
             self.open = false;
         }
         self.rect = window.map(|w| w.response.rect);
+        // A click outside the window must give the keyboard back to the remote screen, or Ctrl+V keeps pasting into the box.
+        if let Some(id) = input_id
+            && ctx.input(|i| i.pointer.any_pressed())
+            && !ctx.input(|i| {
+                i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| self.rect.is_some_and(|r| r.contains(p)))
+            })
+        {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+        }
     }
 }
