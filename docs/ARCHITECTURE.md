@@ -5,6 +5,7 @@ Lucarna es un visor VNC de escritorio en Rust (edición 2024) con [eframe/egui](
 Lecturas complementarias:
 
 - [ROADMAP.md](ROADMAP.md): qué está hecho, qué falta y por qué se decidió cada cosa.
+- [SECURITY.md](SECURITY.md): modelo de amenazas, vectores de ataque y garantías técnicas de seguridad.
 - [ultravnc-ft.md](ultravnc-ft.md): bytes exactos de la transferencia de archivos.
 - [ultravnc-auth.md](ultravnc-auth.md): MS-Logon y sus límites de seguridad.
 - [../CLAUDE.md](../CLAUDE.md): reglas de trabajo (ramas, tests, convenciones).

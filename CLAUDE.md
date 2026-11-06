@@ -78,6 +78,10 @@ Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on 
 
 `connection/saved.rs`: names, addresses, usernames, labels, favorites, per-connection `SessionOptions` and `last_connected` timestamps in `connections.txt` under `eframe::storage_dir("Lucarna")` (backward-compatible with 2- and 3-column files); compressed RGBA desktop preview thumbnails in `previews/<address>.lcpv` (`Framebuffer::thumbnail`); passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the RealVNC-style Address Book start screen with sidebar label filtering, grid/list views, context menus, keyboard shortcuts and the per-connection `Properties` dialog.
 
+### Website (GitHub Pages)
+
+`site/` is a static site (plain HTML and CSS, no build step, no external requests) published at https://builderjoy.github.io/lucarna/ by `.github/workflows/pages.yml`, which deploys on every push to `develop` that touches `site/`. Keep its claims in line with the README and `docs/ROADMAP.md`: do not list a feature as working before it is merged and tested.
+
 ### Security rule
 
 Treat the server as untrusted: validate every size, length and rectangle before allocating or indexing (see `MAX_DIM`, `MAX_TEXT`, `read_string` max, `Framebuffer::contains` checks).

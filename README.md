@@ -90,7 +90,11 @@ UltraVNC's DSM encryption plugins (SecureVNC, MSRC4) are not supported, and VeNC
 
 ## Architecture
 
-Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Full walkthrough with diagrams (modules, threads, connection sequence, message dispatch, screen pipeline, file transfer, storage, extension guide): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Comprehensive threat model, attack vectors and security guarantees: [docs/SECURITY.md](docs/SECURITY.md).
+
+![Lucarna System Architecture](docs/diagrams/01-arquitectura-modulos.png)
+
+![Defense in Depth and Security Model](docs/diagrams/03-seguridad-defensa.png)
 
 ![Lucarna System Architecture](docs/diagrams/01-arquitectura-modulos.png)
 
