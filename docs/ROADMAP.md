@@ -9,7 +9,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Handshake RFB 3.3 / 3.8, seguridad None y VNC Auth | ✅ |
 | Pantalla: Tight (con JPEG), ZRLE, Zlib, Hextile, Raw, CopyRect, DesktopSize, LastRect | ✅ |
 | Teclado, ratón, rueda, Cmd→Ctrl en macOS | ✅ |
-| Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ✅ |
+| Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ⚠️ desactivado (2026-10-20): solo Latin-1 hasta probar contra UltraVNC |
 | Botón Ctrl+Alt+Del | ✅ |
 | Tema, formulario de conexión, spinner hasta el primer frame | ✅ |
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
@@ -21,6 +21,9 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 4: MS-Logon II y III (usuario y contraseña de Windows) | ✅ en papel y tests, falta probar con un UltraVNC real |
 | Fase 5: chat de texto y repetidor UltraVNC (Modo I y II) | ✅ repetidor probado de punta a punta; chat por tests y formato del código oficial |
 | Fase 7: túnel documentado como forma oficial de uso por internet (sin VeNCrypt ni DSM) | ✅ |
+| Fase 8.1: túnel SSH integrado (cliente `ssh` del sistema, llaves o contraseña en el llavero) | ✅ (contraseña SSH desde Windows pendiente de prueba manual) |
+| Fase 8.2: archivos por SFTP v3 nativo (motor dual de archivos, independiente de la política VNC) | ✅ |
+| Fase 8.3: contenedor sshd de pruebas, tests en vivo de túnel y SFTP, guía de Windows | ✅ (guía pendiente de validar en un Windows real) |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.
@@ -212,7 +215,7 @@ features/file_transfer/
 | 3.5 | Conexiones guardadas y Address Book ✅ (2026-10-18) | Rediseñado al estilo RealVNC Viewer: barra superior de búsqueda y conexión rápida, barra lateral con `All connections`, `Favorites`, `Recent` y etiquetas (`LABELS`), vista en cuadrícula o lista con miniatura del escritorio remoto (`previews/*.lcpv` comprimida con zlib, o ilustración vectorial si aún no se conectó), menú contextual completo (`Connect`, `View only`, `Favorites`, `Labels`, `Rename` F2, `Duplicate` ⌘D, `Clear preview`, `Delete`, `Properties…` Alt+Enter), importar/exportar y opciones por conexión (`Fit`/`1:1`, `View only`, `Full screen`, `Share clipboard`, `Save preview`). Contraseñas solo en el llavero del SO (`keyring`). | M |
 | 3.6 | Reconexión ✅ (2026-10-18) | Cuando una sesión termina inesperadamente o falla al conectar, la barra inferior muestra el motivo junto con un botón **Reconnect (`<servidor>`)** que relanza el último `ConnectRequest` con un clic. | XS |
 | 3.7 | Teclas especiales y AltGr ✅ (2026-10-18) | Menú "Keys" con Ctrl+Esc, Alt+Tab, Alt+F4, tecla Windows (`0xffeb`), Print Screen, `AltGr (ISO Level 3)` (`0xfe03`) y botonera rápida de símbolos españoles/AltGr (`@`, `\`, `|`, `{`, `}`, `[`, `]`, `~`, `#`, `€`). Además, al escribir con `Option` en macOS se suelta temporalmente `Alt` remoto alrededor del carácter para que servidores Windows sinteticen su propio `AltGr` sin interpretarlo como `Alt+tecla`. | S |
-| 3.8 | Portapapeles extendido ✅ (2026-10-18) | Pseudo-encoding `Extended Clipboard` (`0xC0A1E5CE` / `-1063131698`) anunciado en `SetEncodings`. Si el servidor envía `CLIP_CAPS`, `RemoteClipboard` responde con capacidades UTF-8 y negocia `CLIP_PROVIDE`, `CLIP_NOTIFY`, `CLIP_REQUEST` y `CLIP_PEEK` con compresión zlib y normalización CRLF/NUL; si el servidor no lo anuncia, mantiene Latin-1 automáticamente. | M |
+| 3.8 | Portapapeles extendido ✅ (2026-10-18) | Pseudo-encoding `Extended Clipboard` (`0xC0A1E5CE` / `-1063131698`) anunciado en `SetEncodings`. Si el servidor envía `CLIP_CAPS`, `RemoteClipboard` responde con capacidades UTF-8 y negocia `CLIP_PROVIDE`, `CLIP_NOTIFY`, `CLIP_REQUEST` y `CLIP_PEEK` con compresión zlib y normalización CRLF/NUL; si el servidor no lo anuncia, mantiene Latin-1 automáticamente. **Desviación (2026-10-20):** ya no se anuncia en `SetEncodings`: x11vnc/libvncserver 0.9.14 cerraba la conexión al pegar texto UTF-8 (`zlib inflation error`). Todo el portapapeles va en Latin-1 hasta probarlo contra UltraVNC. | M |
 | 3.9 | Campana ✅ (2026-10-18) | Mensaje 2 (`Bell`): `session::run` emite `Event::Bell`, solicita atención de la ventana (`ViewportCommand::RequestUserAttention`) y muestra un indicador visual `Bell` en la barra de sesión durante 2 s (revelando la barra flotante si está en pantalla completa). | XS |
 
 ---
@@ -321,7 +324,7 @@ Plan original, para referencia:
 
 ---
 
-## Fase 8: SSH integrado (en curso)
+## Fase 8: SSH integrado ✅ (2026-11-03)
 
 Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protocolo cifrado y nube para atravesar NAT): SSH da el mismo cifrado y la transferencia de archivos sin construir ni mantener nada de eso. Se usa el **cliente `ssh` del sistema**, sin crates nuevos.
 
@@ -338,13 +341,19 @@ Opción elegida en lugar de un servidor propio estilo RealVNC (servidor, protoco
   - Contraseña SSH guardada de punta a punta en macOS: no se puede automatizar, porque leer del llavero una entrada creada por otro programa abre un diálogo de macOS. En uso normal la guarda y la lee el mismo ejecutable.
   - Contraseña desde un cliente **Windows 10/11**: su OpenSSH puede ser anterior a 8.4.
 
-### 8.2 Archivos por SFTP (siguiente)
-Códec SFTP v3 sobre `ssh -s … sftp`, integrado en el panel de archivos actual (`FilesView`), reutilizando la misma interfaz de dos columnas local | remoto para cualquier servidor con SSH (incluso cuando el servidor VNC no es UltraVNC, como `x11vnc`, `TigerVNC` o macOS Screen Sharing).
+### 8.2 Archivos por SFTP ✅ (2026-10-21)
+
+Códec SFTP v3 (`features/sftp`) sobre `ssh -s <target> sftp` sin crates externos, integrado con `FilesView` a través de la abstracción unificada `DualFiles` (`FileOps`). Permite explorar, descargar, subir con drag & drop, crear carpetas, renombrar y borrar archivos en cualquier servidor con SSH incluso cuando el servidor VNC no implementa UltraVNC FT o tiene desactivada la política de transferencia de archivos (`EnableFileTransfer = 0`). Cuenta con conmutación automática por fallback de VNC FT a SFTP y soporte para rutas POSIX y Windows.
 
 ![Tubería Gráfica de 60 FPS y Motor Dual de Archivos](diagrams/06-pipeline-pantalla-archivos.png)
 
-### 8.3 Pruebas en vivo y guía de Windows (siguiente)
-Contenedor de pruebas con sshd, prueba `live_ssh` completa y guía para activar OpenSSH Server en Windows y dejar UltraVNC escuchando solo en loopback (`127.0.0.1`).
+### 8.3 Pruebas en vivo y guía de Windows ✅ (2026-11-03)
+
+- **Contenedor:** `tests/server/Dockerfile.ssh` (Alpine): sshd solo con llave (`PasswordAuthentication no`, `AllowTcpForwarding local`, `internal-sftp`), usuario `lucarna` con la llave pública recibida en `AUTHORIZED_KEY`, y x11vnc con `-localhost`, así que la imagen solo puede llegar por el túnel.
+- **Tests en vivo:** `live_ssh_tunnel` (ya existía) y el nuevo `live_sftp_round_trip` en `sftp/client.rs`: abre la sesión, lista el home, sube un archivo de 5 bloques y pico, lo renombra, lo descarga, compara bytes y lo borra. Los dos pasan contra el contenedor.
+- **Guía:** [docs/windows-ssh.md](windows-ssh.md): OpenSSH Server en Windows, llaves (incluido `administrators_authorized_keys`), endurecimiento de `sshd_config`, UltraVNC con *Loopback Only* y tabla de errores frecuentes.
+- **Desviación:** el puerto de pruebas es **2223**, no 2222, que suele estar ocupado por el reenvío SSH de VirtualBox/Vagrant. Si se reconstruye la imagen, sus llaves de host cambian: `ssh-keygen -R "[127.0.0.1]:2223"`.
+- **Pendiente (manual):** recorrer la guía en un Windows 10/11 real con UltraVNC.
 
 ---
 
@@ -526,7 +535,7 @@ En lugar de servidores centrales de Lucarna, ofrecemos la misma facilidad de uso
 | 7 | Fase 1.5: Tight ✅ | 3–4 días |
 | 8 | Fase 5: chat y repetidor ✅ | 3–4 días |
 | 9 | Fase 7: cifrado (documentación de túneles) ✅ | 1 día |
-| 10 | Fase 8: túnel SSH integrado ✅ (8.1) + SFTP (8.2–8.3) | 1–2 semanas |
+| 10 | Fase 8: túnel SSH integrado + SFTP + pruebas en vivo ✅ | 1–2 semanas |
 | 11 | Fase 9: seguridad y endurecimiento transversal | 3–5 días |
 | 12 | Fase 10: diferenciadores VNC Pro (multimonitor, pestañas, grabación) | 2–3 semanas |
 | 13 | Fase 11: superpoderes sobre SSH y conectividad (SFTP directo, WoL, Tailscale) | 1–2 semanas |

@@ -18,7 +18,8 @@ const PASSWORD_LEN: usize = 64;
 
 /// MS-Logon II: the server sends generator, modulus and its public value; we answer with ours.
 pub fn logon_ii(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<()> {
-    let mut read_u64 = || Ok::<_, io::Error>(u64::from_be_bytes(read_bytes(s, 8)?.try_into().unwrap()));
+    let mut read_u64 =
+        || Ok::<_, io::Error>(u64::from_be_bytes(read_bytes(s, 8)?.try_into().unwrap()));
     let (generator, modulus, server_public) = (read_u64()?, read_u64()?, read_u64()?);
     // The official viewer applies the same limits; they also keep every product below 2^62.
     if !(2..=DH_LIMIT).contains(&modulus) || generator > modulus || server_public >= DH_LIMIT {
@@ -26,7 +27,11 @@ pub fn logon_ii(s: &mut (impl Read + Write), creds: &Credentials) -> io::Result<
     }
     let private = u64::from(u32::from_le_bytes(random()?) & 0x7fff_ffff);
     s.write_all(&pow_mod(generator, private, modulus).to_be_bytes())?;
-    send_credentials(s, creds, pow_mod(server_public, private, modulus).to_be_bytes())
+    send_credentials(
+        s,
+        creds,
+        pow_mod(server_public, private, modulus).to_be_bytes(),
+    )
 }
 
 /// MS-Logon III: X25519 public keys are exchanged (server first), then credentials follow.
@@ -55,7 +60,9 @@ fn send_credentials(s: &mut impl Write, creds: &Credentials, key: [u8; 8]) -> io
 fn latin1(text: &str, limit: usize, size: usize, what: &str) -> io::Result<Vec<u8>> {
     let mut bytes = to_latin1(text);
     if bytes.len() > limit {
-        return Err(invalid(format!("{what} too long for MS-Logon (max {limit})")));
+        return Err(invalid(format!(
+            "{what} too long for MS-Logon (max {limit})"
+        )));
     }
     bytes.resize(size, 0);
     Ok(bytes)
@@ -97,11 +104,17 @@ mod tests {
     use crate::shared::wire::Duplex;
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     fn creds(user: &str, password: &str) -> Credentials {
-        Credentials { user: user.into(), password: password.into() }
+        Credentials {
+            user: user.into(),
+            password: password.into(),
+        }
     }
 
     /// Vectors produced by compiling UltraVNC's own d3des.c and `vncEncryptBytes2`.
@@ -110,14 +123,20 @@ mod tests {
         let plain: Vec<u8> = (0..32u8).map(|i| i * 7 + 3).collect();
         let mut data = plain.clone();
         encrypt(&mut data, hex("0123456789abcdef").try_into().unwrap());
-        assert_eq!(data, hex("b8c85d577cef00e6bbf4adbce71c43c785ce6916e0c9835613bca78b222088ef"));
+        assert_eq!(
+            data,
+            hex("b8c85d577cef00e6bbf4adbce71c43c785ce6916e0c9835613bca78b222088ef")
+        );
         let mut data = plain[..16].to_vec();
         encrypt(&mut data, hex("ff00807f1020fe01").try_into().unwrap());
         assert_eq!(data, hex("0e64f2805932e6f97c94f9e6f7f392f2"));
     }
 
     fn expected(user: &str, password: &str, key: [u8; 8]) -> Vec<u8> {
-        let (mut u, mut p) = (latin1(user, 254, USER_LEN, "").unwrap(), latin1(password, 63, PASSWORD_LEN, "").unwrap());
+        let (mut u, mut p) = (
+            latin1(user, 254, USER_LEN, "").unwrap(),
+            latin1(password, 63, PASSWORD_LEN, "").unwrap(),
+        );
         encrypt(&mut u, key);
         encrypt(&mut p, key);
         [u, p].concat()
@@ -127,7 +146,11 @@ mod tests {
     fn ii_agrees_on_the_key_with_the_server() {
         let (generator, modulus, server_private) = (7u64, 2_147_483_629u64, 123_456_789u64);
         let mut input = Vec::new();
-        for v in [generator, modulus, pow_mod(generator, server_private, modulus)] {
+        for v in [
+            generator,
+            modulus,
+            pow_mod(generator, server_private, modulus),
+        ] {
             input.extend(v.to_be_bytes());
         }
         let mut conn = Duplex::new(input);
@@ -145,7 +168,9 @@ mod tests {
         logon_iii(&mut conn, &creds("admin", "secret")).unwrap();
         assert_eq!(conn.output.len(), 32 + 256 + 64);
         let client_public = PublicKey::from(<[u8; 32]>::try_from(&conn.output[..32]).unwrap());
-        let key = Sha256::digest(server.diffie_hellman(&client_public).as_bytes())[..8].try_into().unwrap();
+        let key = Sha256::digest(server.diffie_hellman(&client_public).as_bytes())[..8]
+            .try_into()
+            .unwrap();
         assert_eq!(conn.output[32..], expected("admin", "secret", key));
         // An all-zero server key gives a predictable secret and is refused.
         assert!(logon_iii(&mut Duplex::new(vec![0; 32]), &creds("a", "b")).is_err());
@@ -153,15 +178,30 @@ mod tests {
 
     #[test]
     fn rejects_hostile_dh_parameters() {
-        let params = |g: u64, m: u64, p: u64| [g, m, p].iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<u8>>();
-        for bad in [params(2, 0, 5), params(2, 1, 0), params(10, 5, 1), params(2, 1 << 32, 1), params(2, 97, 1 << 31)] {
+        let params = |g: u64, m: u64, p: u64| {
+            [g, m, p]
+                .iter()
+                .flat_map(|v| v.to_be_bytes())
+                .collect::<Vec<u8>>()
+        };
+        for bad in [
+            params(2, 0, 5),
+            params(2, 1, 0),
+            params(10, 5, 1),
+            params(2, 1 << 32, 1),
+            params(2, 97, 1 << 31),
+        ] {
             assert!(logon_ii(&mut Duplex::new(bad), &creds("a", "b")).is_err());
         }
     }
 
     #[test]
     fn refuses_credentials_that_would_be_truncated() {
-        let mut conn = Duplex::new(PublicKey::from(&StaticSecret::from([1u8; 32])).as_bytes().to_vec());
+        let mut conn = Duplex::new(
+            PublicKey::from(&StaticSecret::from([1u8; 32]))
+                .as_bytes()
+                .to_vec(),
+        );
         assert!(logon_iii(&mut conn, &creds("a", &"x".repeat(64))).is_err());
         assert!(latin1(&"u".repeat(254), 254, USER_LEN, "user").is_ok());
         assert!(latin1(&"u".repeat(255), 254, USER_LEN, "user").is_err());

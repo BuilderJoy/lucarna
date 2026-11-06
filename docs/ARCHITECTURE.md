@@ -31,6 +31,7 @@ flowchart TB
         clipboard["clipboard<br/>Latin-1 y Extended Clipboard UTF-8"]
         ft["file_transfer<br/>listados, descargas, subidas,<br/>comandos, panel de dos columnas"]
         chat["chat<br/>TextChat"]
+        ssh["ssh<br/>túnel SSH y modo askpass<br/>(cliente ssh del sistema)"]
     end
 
     session["session/mod.rs<br/>único lector del socket;<br/>despacha cada mensaje"]
@@ -38,7 +39,8 @@ flowchart TB
 
     app --> connection & screen & input & clipboard & ft & chat
     app -- "lanza un hilo por conexión" --> session
-    session --> connection & screen & clipboard & ft & chat
+    session --> connection & screen & clipboard & ft & chat & ssh
+    ssh -- "proceso ssh hijo (-L)" --> server
     F --> wire
     session --> wire
 
@@ -60,9 +62,11 @@ flowchart TB
 | `remote_screen` | `protocol.rs`, `framebuffer.rs`, `view.rs`, `tight.rs`, `zrle.rs`, `hextile.rs` | Formato de píxel, lista de encodings, `FramebufferUpdate`, imagen en memoria, textura y cursor local |
 | `input` | `view.rs`, `protocol.rs`, `keysym.rs` | Traduce eventos de egui a `KeyEvent`/`PointerEvent`; Cmd→Ctrl en macOS; menú de teclas y AltGr |
 | `clipboard` | `mod.rs` | Portapapeles en ambos sentidos; negocia UTF-8 (Extended Clipboard) y cae a Latin-1 |
-| `file_transfer` | `protocol.rs`, `transfer.rs`, `view.rs` | Protocolo de archivos de UltraVNC (mensaje 7) y su panel |
+| `file_transfer` | `protocol.rs`, `transfer.rs`, `view.rs` | Protocolo de archivos de UltraVNC (mensaje 7), gestor `DualFiles` (`FileOps`) y panel de 2 columnas |
+| `sftp` | `protocol.rs`, `client.rs` | Cliente nativo SFTP v3 sobre `ssh -s target sftp` (Motor B de archivos) |
 | `chat` | `protocol.rs`, `view.rs` | Chat de texto de UltraVNC (mensaje 11) |
-| `session` | `mod.rs` | Conecta, autentica, negocia y lee el socket en un bucle |
+| `ssh` | `mod.rs` | Lanza el `ssh` del sistema: túnel `-L` para VNC, mensajes de error con pista, y el modo askpass que responde la contraseña SSH desde el llavero |
+| `session` | `mod.rs` | Conecta (directo, por repetidor o por túnel SSH), autentica, negocia y lee el socket en un bucle |
 | `shared` | `wire.rs` | Primitivas de lectura compartidas |
 
 ## 2. Hilos, canales y estado compartido
@@ -108,6 +112,16 @@ Puntos clave:
 - **`Framebuffer`** guarda la imagen en BGRX y acumula una **región sucia**; `ScreenView` sube a la GPU solo ese rectángulo.
 - **Las descargas se escriben en el hilo lector** y **las subidas leen el disco en su propio hilo**: el disco nunca bloquea la interfaz.
 
+### Procesos hijos: el túnel SSH
+
+Con SSH configurado, `session::run` no abre el socket directamente, sino que llama a `ssh::Tunnel::open`:
+
+1. Toma un puerto libre de `127.0.0.1` y lanza `ssh -N -L 127.0.0.1:P:<destino> -- host` con opciones fijas (`StrictHostKeyChecking=accept-new`, sin reenvío de agente ni X11, sin `ControlMaster`). El destino es `localhost:<puerto VNC>` cuando el servidor VNC es el propio host SSH.
+2. Reintenta conectar a `127.0.0.1:P`. `ssh` solo escucha ahí después de autenticarse, así que **esa conexión ya es el socket VNC**: no hay conexión de prueba.
+3. El `Tunnel` vive lo que dura la sesión. Al soltarlo (`Drop`) se mata el proceso `ssh`. Si la sesión se corta, el motivo que ve el usuario es el de `ssh` (clave rechazada, túneles prohibidos, VNC inalcanzable…), no un "connection closed" sin más.
+
+**Contraseña SSH (modo askpass).** Si hay una contraseña SSH guardada, `ssh` arranca con `SSH_ASKPASS=<el propio ejecutable de Lucarna>`, `SSH_ASKPASS_REQUIRE=force` y `LUCARNA_ASKPASS=<user@host:port>`, que no es secreto. Cuando `ssh` necesita la contraseña, ejecuta Lucarna con el texto del prompt. La primera línea de `main()` lo detecta (`ssh::askpass()`): imprime la contraseña de la cuenta `ssh:…` del llavero, solo si el prompt pide una *password* (nunca una passphrase, un código ni un sí/no), y sale sin abrir ventana. Sin contraseña guardada, `ssh` usa `BatchMode=yes`: solo llaves y agente, y falla rápido si no alcanzan. Ningún secreto pasa por argumentos ni variables de entorno.
+
 ### Conectividad Zero-Trust: Tailscale y Cloudflare Tunnel
 
 Además del túnel SSH directo, Lucarna se integra con redes en malla **Tailscale (WireGuard)** y túneles corporativos **Cloudflare Tunnel (`cloudflared access tcp`)**, manteniendo siempre el puerto `5900` cerrado a internet (escuchando solo en `127.0.0.1`).
@@ -132,9 +146,17 @@ sequenceDiagram
 
     U->>D: Connect (o doble clic en una tarjeta)
     D->>D: contraseña desde el llavero (saved::password)
-    D-->>A: ConnectRequest { address, repeater, creds, options }
-    A->>S: thread::spawn(run(address, repeater, creds, tx, notify))
-    S->>S: connect(): todas las IP resueltas, timeout 10 s
+    D-->>A: ConnectRequest { address, repeater, ssh, creds, options }
+    A->>A: valida el campo SSH (si es inválido, error: nunca conecta sin cifrar)
+    A->>S: thread::spawn(run(address, repeater, ssh, creds, tx, notify))
+
+    alt con SSH
+        S->>S: ssh::Tunnel::open: lanza ssh -N -L 127.0.0.1:P
+        Note over S,V: ssh se autentica (llaves, agente o contraseña vía askpass)<br/>y reenvía 127.0.0.1:P al VNC del otro lado
+        S->>S: la conexión a 127.0.0.1:P es el socket VNC
+    else directo
+        S->>S: connect(): todas las IP resueltas, timeout 10 s
+    end
 
     alt con repetidor
         S->>R: TCP al repetidor
@@ -248,12 +270,21 @@ sequenceDiagram
 - Una carpeta se pide como `ruta\[ nombre ]`: el servidor la comprime y llega como `nombre.zip`, que se guarda sin descomprimir.
 - Si la transferencia está desactivada en el servidor, **no responde nada**: el panel muestra el aviso tras 10 s.
 
+### Motor Dual de Archivos: UltraVNC FT y SFTP v3 (`features/sftp`)
+
+`DualFiles` implementa la abstracción común `FileOps` y gestiona dos motores en segundo plano:
+
+1. **Motor A (UltraVNC FT):** Usa el mensaje RFB 7 sobre el socket VNC.
+2. **Motor B (SFTP v3 nativo):** Invoca `ssh -s <target> sftp` usando el cliente `ssh` del sistema operativo (sin crates pesados externos), comunicando paquetes binarios de SFTP v3 por `stdin`/`stdout` en un hilo de streaming independiente.
+3. **Conmutación automática (Fallback):** Si el servidor VNC rechaza la transferencia (`Update::Access(false)` o timeout) y la conexión tiene destino SSH configurado, `DualFiles` conmuta automáticamente a SFTP v3 y llama a `open()`, permitiendo explorar y transferir archivos en cualquier servidor (incluyendo Linux, macOS y Windows 10/11 con OpenSSH) sin depender de las políticas de VNC.
+4. **Seguridad compartida:** Tanto UltraVNC FT como SFTP pasan por el mismo saneamiento estricto de nombres (`local_name`: bloqueo de `..`, `/`, `\`, rutas UNC y nombres reservados `CON`/`NUL`) y escriben atómicamente en `.archivo.lucarna-part` antes de renombrar al final.
+
 ## 7. Qué se guarda y dónde
 
 | Dato | Dónde | Formato |
 |---|---|---|
-| Conexiones (nombre, dirección, usuario, etiquetas, opciones, última conexión, repetidor) | `eframe::storage_dir("Lucarna")/connections.txt` (en macOS, `~/Library/Application Support/Lucarna/`) | Una conexión por línea, columnas separadas por tabulador. Las columnas nuevas son opcionales, así que los archivos viejos siguen cargando |
-| Contraseñas | Llavero del SO (Keychain, Credential Manager o Secret Service), servicio `Lucarna`, cuenta = dirección normalizada | **Nunca** se escriben a disco |
+| Conexiones (nombre, dirección, usuario, etiquetas, opciones, última conexión, repetidor, destino SSH) | `eframe::storage_dir("Lucarna")/connections.txt` (en macOS, `~/Library/Application Support/Lucarna/`) | Una conexión por línea, columnas separadas por tabulador. Las columnas nuevas son opcionales, así que los archivos viejos siguen cargando |
+| Contraseñas | Llavero del SO (Keychain, Credential Manager o Secret Service), servicio `Lucarna`. VNC: cuenta = dirección normalizada; SSH: cuenta = `ssh:user@host[:port]` | **Nunca** se escriben a disco |
 | Vistas previas del escritorio | `…/Lucarna/previews/*.lcpv` | Miniatura de 320×200 como máximo, cada 5 s mientras la sesión está abierta |
 | Tamaño de la ventana | eframe (`persistence`) | Automático |
 

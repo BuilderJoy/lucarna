@@ -64,7 +64,12 @@ pub fn drives_request() -> Vec<u8> {
 
 /// `path` is a Windows directory ending in `\`.
 pub fn dir_request(path: &str) -> Vec<u8> {
-    message(DIR_CONTENT_REQUEST, R_DIR_CONTENT | UNICODE, 0, path.as_bytes())
+    message(
+        DIR_CONTENT_REQUEST,
+        R_DIR_CONTENT | UNICODE,
+        0,
+        path.as_bytes(),
+    )
 }
 
 /// Asks for a file, with per-block zlib compression.
@@ -162,7 +167,8 @@ pub fn read(s: &mut impl Read) -> io::Result<Msg> {
         FILE_HEADER => {
             // The high half of the size travels after the name, outside `length`.
             let high = read_u32(s)?;
-            let size = (size != ERROR || high != ERROR).then_some(u64::from(high) << 32 | u64::from(size));
+            let size =
+                (size != ERROR || high != ERROR).then_some(u64::from(high) << 32 | u64::from(size));
             Msg::FileHeader {
                 size,
                 low: size.map_or(ERROR, |s| s as u32),
@@ -204,7 +210,11 @@ pub fn parse_entry(data: &[u8], unicode: bool) -> io::Result<Entry> {
     let u32le = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
     let name = &data[44..];
     let name = if unicode {
-        let units: Vec<u16> = name.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|&u| u != 0).collect();
+        let units: Vec<u16> = name
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&u| u != 0)
+            .collect();
         String::from_utf16_lossy(&units)
     } else {
         ansi(name)
@@ -220,7 +230,10 @@ pub fn parse_entry(data: &[u8], unicode: bool) -> io::Result<Entry> {
 
 /// Server-codepage text, read as Latin-1 up to the first NUL.
 pub fn ansi(b: &[u8]) -> String {
-    b.iter().take_while(|&&c| c != 0).map(|&c| char::from(c)).collect()
+    b.iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| char::from(c))
+        .collect()
 }
 
 /// `"C:l\0D:c\0"` → `[("C:\", 'l'), ("D:\", 'c')]`; the letter after the colon is the drive type.
@@ -259,20 +272,35 @@ mod tests {
     #[test]
     fn requests() {
         assert_eq!(permission_request(), [7, 7, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(dir_request("C:\\"), [7, 1, 1, 0x80, 0, 0, 0, 0, 0, 0, 0, 3, b'C', b':', b'\\']);
+        assert_eq!(
+            dir_request("C:\\"),
+            [7, 1, 1, 0x80, 0, 0, 0, 0, 0, 0, 0, 3, b'C', b':', b'\\']
+        );
         assert_eq!(download_request("C:\\a")[4..8], [0, 0, 0, 1]);
         assert_eq!(
             upload_offer("C:\\a", (2 << 32) | 9),
-            [7, 8, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, b'C', b':', b'\\', b'a', 0, 0, 0, 2]
+            [
+                7, 8, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, b'C', b':', b'\\', b'a', 0, 0, 0, 2
+            ]
         );
-        assert_eq!(file_packet(true, b"xy"), [7, 5, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, b'x', b'y']);
+        assert_eq!(
+            file_packet(true, b"xy"),
+            [7, 5, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, b'x', b'y']
+        );
         assert_eq!(end_of_file(), [7, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(create_dir("C:\\d"), [7, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0, 4, b'C', b':', b'\\', b'd']);
-        assert_eq!(delete("C:\\f"), [7, 10, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, b'C', b':', b'\\', b'f']);
+        assert_eq!(
+            create_dir("C:\\d"),
+            [7, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0, 4, b'C', b':', b'\\', b'd']
+        );
+        assert_eq!(
+            delete("C:\\f"),
+            [7, 10, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, b'C', b':', b'\\', b'f']
+        );
         assert_eq!(
             rename("C:\\a", "C:\\b"),
             [
-                7, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0, 9, b'C', b':', b'\\', b'a', b'*', b'C', b':', b'\\', b'b'
+                7, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0, 9, b'C', b':', b'\\', b'a', b'*', b'C', b':',
+                b'\\', b'b'
             ]
         );
     }
@@ -289,7 +317,10 @@ mod tests {
         );
         assert_eq!(read(server(ACCESS, 0, 1, &[], &[])), Msg::Access(true));
         assert_eq!(read(server(ACCESS, 0, ERROR, &[], &[])), Msg::Access(false));
-        assert_eq!(read(server(DIR_PACKET, 3, 0, b"C:l\0", &[])), Msg::Drives(b"C:l\0".to_vec()));
+        assert_eq!(
+            read(server(DIR_PACKET, 3, 0, b"C:l\0", &[])),
+            Msg::Drives(b"C:l\0".to_vec())
+        );
         assert_eq!(
             read(server(FILE_HEADER, 0, 5, b"C:\\a,x", &[0, 0, 0, 1])),
             Msg::FileHeader {
@@ -299,10 +330,19 @@ mod tests {
         );
         assert_eq!(
             read(server(FILE_HEADER, 0, ERROR, b"C:\\a", &[0xFF; 4])),
-            Msg::FileHeader { size: None, low: ERROR }
+            Msg::FileHeader {
+                size: None,
+                low: ERROR
+            }
         );
-        assert_eq!(read(server(FILE_ACCEPT_HEADER, 0, 0, b"C:\\!UVNCPFT-a", &[])), Msg::FileAccept(true));
-        assert_eq!(read(server(FILE_ACCEPT_HEADER, 0, ERROR, b"C:\\a", &[])), Msg::FileAccept(false));
+        assert_eq!(
+            read(server(FILE_ACCEPT_HEADER, 0, 0, b"C:\\!UVNCPFT-a", &[])),
+            Msg::FileAccept(true)
+        );
+        assert_eq!(
+            read(server(FILE_ACCEPT_HEADER, 0, ERROR, b"C:\\a", &[])),
+            Msg::FileAccept(false)
+        );
         assert_eq!(
             read(server(COMMAND_RETURN, A_DIR_CREATE, 0, b"C:\\d", &[])),
             Msg::CommandReturn {
@@ -335,7 +375,10 @@ mod tests {
         let mut w = e.clone();
         w.extend("ñá".encode_utf16().flat_map(u16::to_le_bytes).chain([0, 0]));
         let w = parse_entry(&w, true).unwrap();
-        assert_eq!((w.name.as_str(), w.is_dir, w.size, w.inaccessible), ("ñá", true, 7, true));
+        assert_eq!(
+            (w.name.as_str(), w.is_dir, w.size, w.inaccessible),
+            ("ñá", true, 7, true)
+        );
         e[0] = 0x20;
         e.extend([b'r', 0xE9]);
         assert_eq!(parse_entry(&e, false).unwrap().name, "ré");
@@ -344,6 +387,9 @@ mod tests {
 
     #[test]
     fn drives() {
-        assert_eq!(parse_drives(b"C:l\0D:c\0\0"), [("C:\\".to_string(), 'l'), ("D:\\".to_string(), 'c')]);
+        assert_eq!(
+            parse_drives(b"C:l\0D:c\0\0"),
+            [("C:\\".to_string(), 'l'), ("D:\\".to_string(), 'c')]
+        );
     }
 }

@@ -13,7 +13,13 @@ use flate2::write::ZlibEncoder;
 use crate::session::Outbound;
 use crate::shared::wire::{invalid, read_bytes, read_u32};
 
-/// Pseudo-encoding advertised in `SetEncodings` to negotiate Extended Clipboard.
+mod view;
+pub use view::ClipboardView;
+
+/// Pseudo-encoding that would negotiate Extended Clipboard (UTF-8). Not advertised: libvncserver
+/// 0.9.14 (x11vnc 0.9.16) closes the connection on our UTF-8 Provide. Text stays Latin-1.
+/// ponytail: re-advertise once a server that handles UTF-8 Provide is verified (UltraVNC).
+#[allow(dead_code)]
 pub const ENC_EXTENDED_CLIPBOARD: i32 = 0xC0A1_E5CE_u32 as i32;
 
 const MAX_TEXT: usize = 16 << 20;
@@ -69,19 +75,26 @@ impl RemoteClipboard {
     }
 
     /// On local paste, hands the text to the server. Must run before input forwards Ctrl+V.
-    pub fn forward_paste(&self, ui: &egui::Ui) {
+    pub fn forward_paste(&self, ui: &egui::Ui) -> Option<String> {
+        let mut pasted = None;
         ui.input(|i| {
             for event in &i.events {
                 if let Event::Paste(text) = event {
                     let _ = self.send_client_text(text);
+                    pasted = Some(text.clone());
                 }
             }
         });
+        pasted
     }
 }
 
 impl ProtocolState {
-    fn process_server_msg(&self, s: &mut impl Read, reply: &mut Vec<u8>) -> io::Result<Option<String>> {
+    fn process_server_msg(
+        &self,
+        s: &mut impl Read,
+        reply: &mut Vec<u8>,
+    ) -> io::Result<Option<String>> {
         read_bytes(s, 3)?;
         let raw_len = read_u32(s)? as i32;
         if raw_len >= 0 {
@@ -146,7 +159,10 @@ impl ProtocolState {
 }
 
 fn encode_latin1(text: &str) -> Vec<u8> {
-    let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
+    let bytes: Vec<u8> = text
+        .chars()
+        .map(|c| if (c as u32) < 256 { c as u8 } else { b'?' })
+        .collect();
     let mut m = vec![6, 0, 0, 0];
     m.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
     m.extend_from_slice(&bytes);
@@ -201,7 +217,8 @@ fn decode_utf8_provide(compressed: &[u8]) -> io::Result<String> {
     if bytes.last() == Some(&0) {
         bytes.pop();
     }
-    let text = String::from_utf8(bytes).map_err(|_| invalid("extended clipboard is not valid UTF-8"))?;
+    let text =
+        String::from_utf8(bytes).map_err(|_| invalid("extended clipboard is not valid UTF-8"))?;
     Ok(normalize_lf(&text))
 }
 
@@ -241,7 +258,12 @@ mod tests {
 
         let cb = ProtocolState::default();
         let mut reply = Vec::new();
-        assert_eq!(cb.process_server_msg(&mut Cursor::new(incoming), &mut reply).unwrap().as_deref(), Some("Café\n"));
+        assert_eq!(
+            cb.process_server_msg(&mut Cursor::new(incoming), &mut reply)
+                .unwrap()
+                .as_deref(),
+            Some("Café\n")
+        );
         assert!(reply.is_empty());
 
         let sent = cb.encode_client_msg("Ñandú 🚀").unwrap();
@@ -257,10 +279,15 @@ mod tests {
         // Server announces Extended Clipboard capabilities.
         let mut caps_msg = vec![0, 0, 0];
         caps_msg.extend_from_slice(&(-8_i32).to_be_bytes());
-        caps_msg.extend_from_slice(&(CLIP_CAPS | CLIP_UTF8 | CLIP_PROVIDE | CLIP_NOTIFY).to_be_bytes());
+        caps_msg
+            .extend_from_slice(&(CLIP_CAPS | CLIP_UTF8 | CLIP_PROVIDE | CLIP_NOTIFY).to_be_bytes());
         caps_msg.extend_from_slice(&(1024 * 1024_u32).to_be_bytes());
         let mut reply = Vec::new();
-        assert_eq!(cb.process_server_msg(&mut Cursor::new(caps_msg), &mut reply).unwrap(), None);
+        assert_eq!(
+            cb.process_server_msg(&mut Cursor::new(caps_msg), &mut reply)
+                .unwrap(),
+            None
+        );
 
         // Client replies with its own CLIP_CAPS message.
         assert_eq!(&reply[..4], &[6, 0, 0, 0]);
@@ -274,7 +301,9 @@ mod tests {
         assert_eq!(pkt[0], 6);
 
         let mut reply2 = Vec::new();
-        let received = cb.process_server_msg(&mut Cursor::new(&pkt[1..]), &mut reply2).unwrap();
+        let received = cb
+            .process_server_msg(&mut Cursor::new(&pkt[1..]), &mut reply2)
+            .unwrap();
         assert_eq!(received.as_deref(), Some(sample));
     }
 
@@ -290,20 +319,33 @@ mod tests {
         notify.extend_from_slice(&(-4_i32).to_be_bytes());
         notify.extend_from_slice(&(CLIP_NOTIFY | CLIP_UTF8).to_be_bytes());
         let mut reply = Vec::new();
-        assert_eq!(cb.process_server_msg(&mut Cursor::new(notify), &mut reply).unwrap(), None);
+        assert_eq!(
+            cb.process_server_msg(&mut Cursor::new(notify), &mut reply)
+                .unwrap(),
+            None
+        );
         assert_eq!(&reply[..4], &[6, 0, 0, 0]);
         assert_eq!(i32::from_be_bytes(reply[4..8].try_into().unwrap()), -4);
-        assert_eq!(u32::from_be_bytes(reply[8..12].try_into().unwrap()), CLIP_REQUEST | CLIP_UTF8);
+        assert_eq!(
+            u32::from_be_bytes(reply[8..12].try_into().unwrap()),
+            CLIP_REQUEST | CLIP_UTF8
+        );
 
         // Server sends CLIP_REQUEST | CLIP_UTF8 -> client replies with CLIP_PROVIDE | CLIP_UTF8.
         let mut req = vec![0, 0, 0];
         req.extend_from_slice(&(-4_i32).to_be_bytes());
         req.extend_from_slice(&(CLIP_REQUEST | CLIP_UTF8).to_be_bytes());
         reply.clear();
-        assert_eq!(cb.process_server_msg(&mut Cursor::new(req), &mut reply).unwrap(), None);
+        assert_eq!(
+            cb.process_server_msg(&mut Cursor::new(req), &mut reply)
+                .unwrap(),
+            None
+        );
         let mut dummy = Vec::new();
         assert_eq!(
-            cb.process_server_msg(&mut Cursor::new(&reply[1..]), &mut dummy).unwrap().as_deref(),
+            cb.process_server_msg(&mut Cursor::new(&reply[1..]), &mut dummy)
+                .unwrap()
+                .as_deref(),
             Some("Guardado")
         );
     }

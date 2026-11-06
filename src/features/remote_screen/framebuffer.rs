@@ -97,12 +97,17 @@ impl Framebuffer {
 
     /// The region as RGBA, ready for a texture.
     pub fn rgba(&self, [x0, y0, x1, y1]: [usize; 4]) -> Vec<u8> {
-        self.get(x0, y0, x1 - x0, y1 - y0).chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], 255]).collect()
+        self.get(x0, y0, x1 - x0, y1 - y0)
+            .chunks_exact(4)
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect()
     }
 
     /// Downscales the screen into an aspect-preserving RGBA thumbnail of at most `max_w × max_h`.
     pub fn thumbnail(&self, max_w: usize, max_h: usize) -> (u16, u16, Vec<u8>) {
-        let scale = (max_w as f64 / self.width as f64).min(max_h as f64 / self.height as f64).min(1.0);
+        let scale = (max_w as f64 / self.width as f64)
+            .min(max_h as f64 / self.height as f64)
+            .min(1.0);
         let tw = ((self.width as f64 * scale).round() as usize).max(1);
         let th = ((self.height as f64 * scale).round() as usize).max(1);
         let mut rgba = Vec::with_capacity(tw * th * 4);

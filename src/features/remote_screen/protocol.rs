@@ -5,9 +5,9 @@ use std::sync::Mutex;
 
 use flate2::Decompress;
 
-use super::{hextile, tight, zrle, Cursor, Framebuffer};
+use super::{Cursor, Framebuffer, hextile, tight, zrle};
 use crate::session::Outbound;
-use crate::shared::wire::{invalid, read_bytes, read_u16, read_u32, read_u8};
+use crate::shared::wire::{invalid, read_bytes, read_u8, read_u16, read_u32};
 
 const ENC_RAW: i32 = 0;
 const ENC_COPY_RECT: i32 = 1;
@@ -26,7 +26,22 @@ const ENC_JPEG_QUALITY_8: i32 = -24;
 pub fn negotiate(s: &mut impl Write, extra: &[i32]) -> io::Result<()> {
     #[rustfmt::skip]
     s.write_all(&[0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])?;
-    let encodings = [&[ENC_TIGHT, ENC_ZRLE, ENC_ZLIB, ENC_HEXTILE, ENC_COPY_RECT, ENC_RAW, ENC_LAST_RECT, ENC_DESKTOP_SIZE, ENC_CURSOR, ENC_JPEG_QUALITY_8][..], extra].concat();
+    let encodings = [
+        &[
+            ENC_TIGHT,
+            ENC_ZRLE,
+            ENC_ZLIB,
+            ENC_HEXTILE,
+            ENC_COPY_RECT,
+            ENC_RAW,
+            ENC_LAST_RECT,
+            ENC_DESKTOP_SIZE,
+            ENC_CURSOR,
+            ENC_JPEG_QUALITY_8,
+        ][..],
+        extra,
+    ]
+    .concat();
     let mut m = vec![2, 0];
     m.extend_from_slice(&(encodings.len() as u16).to_be_bytes());
     for e in encodings {
@@ -35,7 +50,11 @@ pub fn negotiate(s: &mut impl Write, extra: &[i32]) -> io::Result<()> {
     s.write_all(&m)
 }
 
-pub fn request_update(out: &Outbound, incremental: bool, screen: &Mutex<Framebuffer>) -> io::Result<()> {
+pub fn request_update(
+    out: &Outbound,
+    incremental: bool,
+    screen: &Mutex<Framebuffer>,
+) -> io::Result<()> {
     let (w, h) = screen.lock().unwrap().size();
     let mut m = vec![3, incremental as u8, 0, 0, 0, 0];
     m.extend_from_slice(&w.to_be_bytes());
@@ -52,7 +71,11 @@ pub struct Decoder {
 
 impl Default for Decoder {
     fn default() -> Self {
-        Self { zrle: Decompress::new(true), zlib: Decompress::new(true), tight: tight::Tight::default() }
+        Self {
+            zrle: Decompress::new(true),
+            zlib: Decompress::new(true),
+            tight: tight::Tight::default(),
+        }
     }
 }
 
@@ -66,7 +89,11 @@ fn read_zlib(s: &mut impl Read, z: &mut Decompress, max: usize) -> io::Result<Ve
 }
 
 /// Reads a FramebufferUpdate body (after the message-type byte) into `screen`.
-pub fn read_update(s: &mut impl Read, screen: &Mutex<Framebuffer>, decoder: &mut Decoder) -> io::Result<()> {
+pub fn read_update(
+    s: &mut impl Read,
+    screen: &Mutex<Framebuffer>,
+    decoder: &mut Decoder,
+) -> io::Result<()> {
     read_u8(s)?;
     // With LastRect, servers may send 0xFFFF and end the update with a LastRect rectangle.
     let rects = read_u16(s)?;
@@ -82,7 +109,9 @@ pub fn read_update(s: &mut impl Read, screen: &Mutex<Framebuffer>, decoder: &mut
                 let (pixels, mask) = (read_bytes(s, pixel_bytes)?, read_bytes(s, mask_bytes)?);
                 screen.lock().unwrap().cursor = Some(Cursor::new((x, y), [w, h], &pixels, &mask));
             }
-            _ if !screen.lock().unwrap().contains(x, y, w, h) => return Err(invalid("rectangle outside screen")),
+            _ if !screen.lock().unwrap().contains(x, y, w, h) => {
+                return Err(invalid("rectangle outside screen"));
+            }
             ENC_RAW => {
                 let data = read_bytes(s, w * h * 4)?;
                 screen.lock().unwrap().put(x, y, w, h, &data);
@@ -154,7 +183,12 @@ mod tests {
     fn last_rect_ends_open_ended_update() {
         let screen = Mutex::new(Framebuffer::new(1, 1).unwrap());
         let mut msg = vec![0, 0xFF, 0xFF];
-        msg.extend([0, 0, 0, 0, 0, 1, 0, 1].iter().chain(&ENC_RAW.to_be_bytes()).chain(&[7, 7, 7, 0]));
+        msg.extend(
+            [0, 0, 0, 0, 0, 1, 0, 1]
+                .iter()
+                .chain(&ENC_RAW.to_be_bytes())
+                .chain(&[7, 7, 7, 0]),
+        );
         msg.extend([0; 8].iter().chain(&ENC_LAST_RECT.to_be_bytes()));
         read_update(&mut &msg[..], &screen, &mut Decoder::default()).unwrap();
         assert_eq!(screen.lock().unwrap().pixels, [7, 7, 7, 0]);
