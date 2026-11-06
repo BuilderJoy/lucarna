@@ -310,10 +310,10 @@ impl FilesView {
                     egui::Button::new(upload_label).small(),
                 )
                 .on_hover_text(tip);
-            if btn.clicked() {
-                if let Some(p) = &self.selected_local {
-                    upload = Some(p.clone());
-                }
+            if btn.clicked()
+                && let Some(p) = &self.selected_local
+            {
+                upload = Some(p.clone());
             }
         });
         ui.add(
