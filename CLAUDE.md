@@ -59,6 +59,10 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for humans, with diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); keep it in sync when modules, threads or the message dispatch change.
 
+## Project memory (Engram)
+
+Decisions of this project go to Engram under the project **`rustvnc`** (detected from the git remote; the repository was named that before it became Lucarna, so keep using it to stay with the saved history). Save with `mem_save` right after a decision, a fix with its root cause, or a convention, using one stable `topic_key` per subject so later saves update the same note instead of adding copies: `lucarna/ui-redesign`, `lucarna/host-security`, `lucarna/i18n-ux`, `lucarna/releases`. Content in the form **What / Why / Where / Learned**. Close a session with `mem_session_summary`. Do not store secrets, PINs or passwords. `mem_doctor` reports the store healthy for this project.
+
 ## Packaging and releases
 
 `packaging/` holds the per-platform recipes (`macos/bundle.sh`, `windows/lucarna.iss`, `linux/lucarna.desktop`, cargo-deb metadata in `Cargo.toml`); `.github/workflows/packages.yml` builds all three on every PR. To release: bump `version` in `Cargo.toml` on a branch, merge into `develop`, PR `develop` → `main`, then tag `main` with `vX.Y.Z` and push the tag; the workflow publishes the latest GitHub release with the installers, opening with `packaging/release-notes.md` (download links and install steps, `{VERSION}` is replaced) followed by the generated changelog. Stay on 0.x until the app is tested against real UltraVNC servers.
