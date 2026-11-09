@@ -1411,6 +1411,8 @@ fn code_card(ui: &mut Ui, title: &str, value: &str, color: Color32, refresh: Opt
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
+                // The PIN card has a button in this row; both cards keep the same height.
+                ui.set_min_height(30.0);
                 ui.label(
                     RichText::new(title.to_uppercase())
                         .size(12.0)

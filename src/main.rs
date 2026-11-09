@@ -21,7 +21,8 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1024.0, 768.0])
+            .with_inner_size([1280.0, 820.0])
+            .with_min_inner_size([900.0, 600.0])
             // Matches StartupWMClass in packaging/linux/lucarna.desktop, so the desktop shows our icon.
             .with_app_id("lucarna")
             .with_icon(eframe::icon_data::from_png_bytes(LOGO_PNG).expect("valid logo.png")),

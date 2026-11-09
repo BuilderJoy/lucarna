@@ -453,20 +453,24 @@ impl Dashboard {
                 return;
             }
 
+            let search_w = (ui.available_width() - 470.0).clamp(160.0, 520.0);
+            // The long hint only when it fits; the key hint on the right needs room too.
+            let hint = if search_w > 420.0 {
+                tr("{}  Search connections, labels or addresses")
+            } else {
+                tr("{}  Search")
+            };
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.omni)
-                    .hint_text(fill(
-                        tr("{}  Search connections, labels or addresses"),
-                        &[&(char::from(Icon::Search))],
-                    ))
-                    .desired_width((ui.available_width() - 470.0).clamp(160.0, 520.0))
+                    .hint_text(fill(hint, &[&(char::from(Icon::Search))]))
+                    .desired_width(search_w)
                     .margin(egui::vec2(12.0, 10.0)),
             );
             if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)) {
                 resp.request_focus();
             }
             if self.omni.is_empty() {
-                if resp.rect.width() > 240.0 {
+                if resp.rect.width() > 420.0 {
                     ui.painter().text(
                         resp.rect.right_center() - egui::vec2(14.0, 0.0),
                         egui::Align2::RIGHT_CENTER,
@@ -1799,7 +1803,7 @@ impl Dashboard {
             return None;
         }
         let mut request = None;
-        let mut keep_open = self.editor.open;
+        let pal = theme::palette(ctx);
         let title = if self.editor.editing.is_some() {
             tr("Connection Properties")
         } else {
@@ -1807,30 +1811,48 @@ impl Dashboard {
         };
         let known_labels: Vec<String> = self.all_labels().into_iter().map(|(l, _)| l).collect();
 
+        // A stable id keeps the window where it is; `Id::unique` would make a new window every frame.
         egui::Window::new(title)
-            .id(Id::unique("connection_properties_window"))
-            .open(&mut keep_open)
+            .id(Id::NULL.with("connection_properties_window"))
+            .title_bar(false)
+            .frame(
+                egui::Frame::window(&ctx.global_style())
+                    .fill(pal.card)
+                    .inner_margin(egui::Margin::ZERO)
+                    .corner_radius(CornerRadius::same(16)),
+            )
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .collapsible(false)
             .resizable(false)
-            .default_width(420.0)
             .order(Order::Foreground)
             .show(ctx, |ui| {
-                ui.set_min_width(400.0);
-                ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut self.editor.tab,
-                        PropertiesTab::General,
-                        fill(tr("{} General"), &[&(char::from(Icon::SlidersHorizontal))]),
-                    );
-                    ui.selectable_value(
-                        &mut self.editor.tab,
-                        PropertiesTab::Options,
-                        fill(tr("{} Options & Display"), &[&(char::from(Icon::Monitor))]),
-                    );
-                });
-                ui.separator();
-                ui.add_space(6.0);
+                if theme::window_header(ui, Icon::SlidersHorizontal, title, |_| {}) {
+                    self.editor.open = false;
+                }
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::symmetric(24, 16))
+                    .show(ui, |ui| {
+                        ui.set_min_width(440.0);
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut self.editor.tab,
+                                PropertiesTab::General,
+                                fill(tr("{} General"), &[&(char::from(Icon::SlidersHorizontal))]),
+                            );
+                            ui.selectable_value(
+                                &mut self.editor.tab,
+                                PropertiesTab::Options,
+                                fill(tr("{} Options & Display"), &[&(char::from(Icon::Monitor))]),
+                            );
+                        });
+                        ui.separator();
+                        ui.add_space(6.0);
 
+                        let max_h = (ctx.content_rect().height() - 260.0).max(200.0);
+                        egui::ScrollArea::vertical()
+                    .max_height(max_h)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
                 match self.editor.tab {
                     PropertiesTab::General => {
                         let field = |ui: &mut Ui, label: &str, text: &mut String, hint: &str| {
@@ -2038,109 +2060,106 @@ impl Dashboard {
                         }
                     }
                 }
-
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                // An invalid SSH field blocks saving: it must never turn into a silent unencrypted connection.
-                let target = ServerAddress::parse(&self.editor.address)
-                    .filter(|_| self.editor.ssh_problem().is_none());
-                let mut should_close = false;
-
-                if let Some(rx) = &self.editor.test_rx
-                    && let Ok(res) = rx.try_recv()
-                {
-                    self.editor.test_result = Some(res);
-                    self.editor.test_rx = None;
-                }
-
-                if self.editor.test_rx.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(RichText::new(tr("Testing connection…")).italics());
                     });
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(100));
-                    ui.add_space(4.0);
-                } else if let Some(res) = &self.editor.test_result {
-                    match res {
-                        Ok(msg) => {
-                            ui.label(
-                                RichText::new(format!("✔ {msg}"))
-                                    .color(theme::palette(ui.ctx()).success),
-                            );
-                        }
-                        Err(err) => {
-                            ui.label(
-                                RichText::new(format!("✖ {err}"))
-                                    .color(theme::palette(ui.ctx()).danger),
-                            );
-                        }
-                    }
-                    ui.add_space(4.0);
-                }
 
-                ui.horizontal(|ui| {
-                    let connect_btn = theme::primary(tr("Save & Connect"));
-                    if ui.add_enabled(target.is_some(), connect_btn).clicked()
-                        && let Some(t) = target.clone()
-                    {
-                        let opts = self.editor.options.clone();
-                        let creds = Credentials {
-                            user: self.editor.user.trim().into(),
-                            password: self.editor.password.clone(),
-                            pin: String::new(),
-                        };
-                        self.save_editor(t.clone());
-                        request = Some(ConnectRequest {
-                            repeater: ServerAddress::parse(&self.editor.repeater),
-                            ssh: self.editor.ssh_spec(),
-                            address: t,
-                            creds,
-                            options: opts,
-                        });
-                        should_close = true;
-                    }
-                    if ui
-                        .add_enabled(target.is_some(), egui::Button::new(tr("Save")))
-                        .clicked()
-                        && let Some(t) = target.clone()
-                    {
-                        self.save_editor(t);
-                        should_close = true;
-                    }
-                    let testing = self.editor.test_rx.is_some();
-                    let test_btn = egui::Button::new(tr("Test Connection"));
-                    if ui
-                        .add_enabled(target.is_some() && !testing, test_btn)
-                        .clicked()
-                        && let Some(t) = target.clone()
-                    {
-                        self.test_connection(t);
-                    }
-                    if let Some(idx) = self.editor.editing
-                        && ui.button(tr("Delete")).clicked()
-                    {
-                        self.delete_connection(idx);
-                        should_close = true;
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(tr("Cancel")).clicked()
-                            || ui.input(|i| i.key_pressed(Key::Escape))
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        // An invalid SSH field blocks saving: it must never turn into a silent unencrypted connection.
+                        let target = ServerAddress::parse(&self.editor.address)
+                            .filter(|_| self.editor.ssh_problem().is_none());
+                        let mut should_close = false;
+
+                        if let Some(rx) = &self.editor.test_rx
+                            && let Ok(res) = rx.try_recv()
                         {
-                            should_close = true;
+                            self.editor.test_result = Some(res);
+                            self.editor.test_rx = None;
+                        }
+
+                        if self.editor.test_rx.is_some() {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new(tr("Testing connection…")).italics());
+                            });
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(100));
+                            ui.add_space(4.0);
+                        } else if let Some(res) = &self.editor.test_result {
+                            match res {
+                                Ok(msg) => {
+                                    ui.label(
+                                        RichText::new(format!("✔ {msg}"))
+                                            .color(theme::palette(ui.ctx()).success),
+                                    );
+                                }
+                                Err(err) => {
+                                    ui.label(
+                                        RichText::new(format!("✖ {err}"))
+                                            .color(theme::palette(ui.ctx()).danger),
+                                    );
+                                }
+                            }
+                            ui.add_space(4.0);
+                        }
+                        ui.horizontal(|ui| {
+                            let connect_btn = theme::primary(tr("Save & Connect"));
+                            if ui.add_enabled(target.is_some(), connect_btn).clicked()
+                                && let Some(t) = target.clone()
+                            {
+                                let opts = self.editor.options.clone();
+                                let creds = Credentials {
+                                    user: self.editor.user.trim().into(),
+                                    password: self.editor.password.clone(),
+                                    pin: String::new(),
+                                };
+                                self.save_editor(t.clone());
+                                request = Some(ConnectRequest {
+                                    repeater: ServerAddress::parse(&self.editor.repeater),
+                                    ssh: self.editor.ssh_spec(),
+                                    address: t,
+                                    creds,
+                                    options: opts,
+                                });
+                                should_close = true;
+                            }
+                            if ui
+                                .add_enabled(target.is_some(), egui::Button::new(tr("Save")))
+                                .clicked()
+                                && let Some(t) = target.clone()
+                            {
+                                self.save_editor(t);
+                                should_close = true;
+                            }
+                            let testing = self.editor.test_rx.is_some();
+                            let test_btn = egui::Button::new(tr("Test Connection"));
+                            if ui
+                                .add_enabled(target.is_some() && !testing, test_btn)
+                                .clicked()
+                                && let Some(t) = target.clone()
+                            {
+                                self.test_connection(t);
+                            }
+                            if let Some(idx) = self.editor.editing
+                                && ui.button(tr("Delete")).clicked()
+                            {
+                                self.delete_connection(idx);
+                                should_close = true;
+                            }
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.button(tr("Cancel")).clicked()
+                                    || ui.input(|i| i.key_pressed(Key::Escape))
+                                {
+                                    should_close = true;
+                                }
+                            });
+                        });
+                        if should_close {
+                            self.editor.open = false;
                         }
                     });
-                });
-                if should_close {
-                    self.editor.open = false;
-                }
             });
-
-        if !keep_open {
-            self.editor.open = false;
-        }
         request
     }
 

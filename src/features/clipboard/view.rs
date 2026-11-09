@@ -78,6 +78,8 @@ impl ClipboardView {
             .title_bar(false)
             .frame(frame)
             .resizable(true)
+            // Opens at the right, clear of the session toolbar it was opened from.
+            .default_pos(egui::pos2(ctx.content_rect().right() - 480.0, 150.0))
             .default_size([440.0, 620.0])
             .min_size([340.0, 420.0])
             .show(ctx, |ui| {

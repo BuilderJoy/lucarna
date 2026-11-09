@@ -65,7 +65,7 @@ pub const LIGHT: Palette = Palette {
     text3: Color32::from_rgb(0x64, 0x74, 0x8b),
     accent_text: Color32::from_rgb(0x9a, 0x5b, 0x00),
     accent_soft: Color32::from_rgb(0xff, 0xf5, 0xdb),
-    input_bg: Color32::from_rgb(0xf8, 0xfa, 0xfc),
+    input_bg: Color32::from_rgb(0xf1, 0xf5, 0xf9),
     success: Color32::from_rgb(0x16, 0xa3, 0x4a),
     danger: Color32::from_rgb(0xdc, 0x26, 0x26),
     danger_soft: Color32::from_rgb(0xfe, 0xf2, 0xf2),
@@ -81,7 +81,19 @@ pub fn palette(ctx: &egui::Context) -> &'static Palette {
 
 /// Lucide icon font plus light and dark visuals. Leaves the theme preference alone,
 /// so the choice made with [`toggle`] survives restarts through egui's persisted memory.
+/// First start only: a little larger than egui's default. After that the zoom belongs to the user
+/// (Ctrl/Cmd and + or -, remembered by egui), so we never override it again.
+const DEFAULT_ZOOM: f32 = 1.15;
+
 pub fn apply(ctx: &egui::Context) {
+    let id = egui::Id::NULL.with("lucarna_default_zoom_applied");
+    if !ctx
+        .data_mut(|d| d.get_persisted::<bool>(id))
+        .unwrap_or(false)
+    {
+        ctx.set_zoom_factor(DEFAULT_ZOOM);
+        ctx.data_mut(|d| d.insert_persisted(id, true));
+    }
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "lucide".into(),

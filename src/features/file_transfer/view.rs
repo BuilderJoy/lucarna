@@ -413,7 +413,7 @@ impl FilesView {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 if let Some(parent) = self.local_dir.parent().filter(|p| *p != self.local_dir) {
-                    let (resp, name, _) = table_row(ui, &local_cols, false, true);
+                    let (resp, name, _) = table_row(ui, &local_cols, false, true, ROW_H);
                     cell(ui, name, false, |ui| {
                         name_label(ui, Icon::CornerLeftUp, "..", false)
                     });
@@ -426,7 +426,7 @@ impl FilesView {
                 }
                 for e in &self.local_entries {
                     let selected = !e.is_dir && self.selected_local.as_ref() == Some(&e.path);
-                    let (resp, name, cols) = table_row(ui, &local_cols, selected, true);
+                    let (resp, name, cols) = table_row(ui, &local_cols, selected, true, ROW_H);
                     let icon = if e.is_dir { Icon::Folder } else { Icon::File };
                     cell(ui, name, false, |ui| name_label(ui, icon, &e.name, false));
                     if e.is_dir {
@@ -582,7 +582,7 @@ impl FilesView {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for e in &self.entries {
                     let is_up = e.is_dir && e.name == "..";
-                    let (resp, name, cols) = table_row(ui, &remote_cols, false, true);
+                    let (resp, name, cols) = table_row(ui, &remote_cols, false, true, ROW_H);
                     let icon = if is_up {
                         Icon::CornerLeftUp
                     } else if e.is_dir {
@@ -823,8 +823,8 @@ const PAD: f32 = 8.0;
 const GAP: f32 = 8.0;
 const LOCAL_SIZE_W: f32 = 64.0;
 const LOCAL_ACT_W: f32 = 28.0;
-const REMOTE_SIZE_W: f32 = 64.0;
-const REMOTE_DATE_W: f32 = 112.0;
+const REMOTE_SIZE_W: f32 = 78.0;
+const REMOTE_DATE_W: f32 = 150.0;
 const REMOTE_ACT_W: f32 = 92.0;
 
 /// Allocates one table row and returns its response, the (flexible) name
@@ -835,13 +835,14 @@ fn table_row(
     fixed: &[f32],
     selected: bool,
     interactive: bool,
+    height: f32,
 ) -> (egui::Response, egui::Rect, Vec<egui::Rect>) {
     let sense = if interactive {
         egui::Sense::click()
     } else {
         egui::Sense::hover()
     };
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), sense);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
     if selected {
         ui.painter().rect_filled(
             rect,
@@ -879,7 +880,7 @@ fn cell(ui: &mut egui::Ui, rect: egui::Rect, right: bool, add: impl FnOnce(&mut 
 }
 
 fn table_header<const N: usize>(ui: &mut egui::Ui, fixed: &[f32], titles: [&str; N]) {
-    let (_, name, cols) = table_row(ui, fixed, false, false);
+    let (_, name, cols) = table_row(ui, fixed, false, false, 26.0);
     let title = |ui: &mut egui::Ui, t: &str| {
         let c = theme::palette(ui.ctx()).text3;
         ui.add(

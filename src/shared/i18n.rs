@@ -266,6 +266,7 @@ static ES: &[(&str, &str)] = &[
         "Desconectar a la otra persona y dejar de compartir",
     ),
     ("Dismiss message", "Descartar mensaje"),
+    ("{}  Search", "{}  Buscar"),
     (
         "Ready. Nothing is shared until you start.",
         "Listo. No se comparte nada hasta que empieces.",
