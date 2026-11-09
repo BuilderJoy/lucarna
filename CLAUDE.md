@@ -93,6 +93,10 @@ Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on 
 
 `site/` is a static site (plain HTML and CSS, no build step, no external requests) published at https://builderjoy.github.io/lucarna/ by `.github/workflows/pages.yml`, which deploys on every push to `develop` that touches `site/`. Keep its claims in line with the README and `docs/ROADMAP.md`: do not list a feature as working before it is merged and tested.
 
+### Sharing this computer (host) rules
+
+Every connection to the host waits for **Allow / Deny** (`HostConfig::gate`, asked after the PIN is right and before ServerInit; no answer in 60 s is a no). The PIN has 6 digits, PBKDF2 uses 100 000 iterations and the PIN is new after every visit and every refused connection (`HostView::set_pin`, shared with the host thread through `pin_shared`). Handshakes time out after 10 s, sharing that nobody used stops after 15 minutes, and a strip across the top of the main window (`show_strip`) shows the state even where "always on top" is ignored. File transfer is **off** unless the person sharing turns it on (`HostConfig::allow_files`), and then only `D:` Downloads and `S:` `~/Lucarna Share` are exposed, never the home folder. The classic-password mode generates a random password. Known limit: the PIN is short, so a recorded E2EE handshake can be attacked offline; the real fix is a PAKE, not more iterations.
+
 ### Security rule
 
 Treat the server as untrusted: validate every size, length and rectangle before allocating or indexing (see `MAX_DIM`, `MAX_TEXT`, `read_string` max, `Framebuffer::contains` checks).

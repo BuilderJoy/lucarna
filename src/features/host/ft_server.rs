@@ -58,6 +58,9 @@ const BLOCKED_NAMES: &[&str] = &[
     "system32",
 ];
 
+/// Folder created in the home directory for files the person sharing wants to hand over.
+pub const SHARE_FOLDER: &str = "Lucarna Share";
+
 /// Maps single-letter virtual drives (`H:`, `M:`, `D:`, `V:`) to sandboxed host directories.
 #[derive(Clone, Debug)]
 pub struct VirtualDrives {
@@ -88,30 +91,18 @@ impl VirtualDrives {
 
     /// Discovers standard user-space studio folders (`H:` Home, `M:` Music, `D:` Downloads, `V:` Volumes).
     pub fn discover_user_drives() -> Self {
+        // Two folders and nothing else: the person sharing can read what is in them, and the viewer can
+        // only write there. The home folder is never shared: a file dropped in `~/Library/LaunchAgents`
+        // or `~/Desktop` would run or be opened later without anyone asking.
         let mut candidates = Vec::new();
         if let Some(home) = std::env::home_dir() {
-            let music = home.join("Music");
-            if music.is_dir() {
-                candidates.push(('M', music));
-            }
             let downloads = home.join("Downloads");
-            let desktop = home.join("Desktop");
             if downloads.is_dir() {
                 candidates.push(('D', downloads));
-            } else if desktop.is_dir() {
-                candidates.push(('D', desktop));
             }
-            candidates.push(('H', home));
-        }
-        #[cfg(target_os = "macos")]
-        if Path::new("/Volumes").is_dir() {
-            candidates.push(('V', PathBuf::from("/Volumes")));
-        }
-        #[cfg(target_os = "linux")]
-        for vol in ["/media", "/mnt"] {
-            if Path::new(vol).is_dir() {
-                candidates.push(('V', PathBuf::from(vol)));
-                break;
+            let share = home.join(SHARE_FOLDER);
+            if std::fs::create_dir_all(&share).is_ok() {
+                candidates.push(('S', share));
             }
         }
         Self::with_roots(candidates)

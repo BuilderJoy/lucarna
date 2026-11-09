@@ -14,7 +14,12 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::shared::wire::invalid;
 
 pub const MAX_PIN_FAILURES: u32 = 3;
-pub const PBKDF2_ITERATIONS: u32 = 20_000; // Snappy for interactive assistance while providing high resistance
+/// Cost of testing one PIN guess. The PIN is short, so this (and its length) is what slows an attacker who has
+/// recorded a handshake and tries every PIN offline; see `docs/` for why a PAKE would be the real fix.
+pub const PBKDF2_ITERATIONS: u32 = 100_000;
+
+/// Digits in the E2EE PIN.
+pub const PIN_DIGITS: usize = 6;
 pub const E2EE_MAGIC: &[u8; 8] = b"LUCE2E01";
 
 /// Constant-time slice comparison.
@@ -383,12 +388,22 @@ pub fn generate_session_code() -> String {
     val.to_string()
 }
 
-/// Generates a random 4-digit numeric PIN.
+/// Generates a random 6-digit numeric PIN (never starts with 0).
 pub fn generate_pin() -> String {
-    let mut b = [0u8; 2];
+    let mut b = [0u8; 4];
     let _ = getrandom::fill(&mut b);
-    let val = (u16::from_le_bytes(b) % 9000) + 1000;
+    let val = (u32::from_le_bytes(b) % 900_000) + 100_000;
     val.to_string()
+}
+
+/// Random password for the classic (unencrypted) mode, so no host ever runs with a well-known one.
+pub fn generate_password() -> String {
+    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut b = [0u8; 10];
+    let _ = getrandom::fill(&mut b);
+    b.iter()
+        .map(|x| ALPHABET[*x as usize % ALPHABET.len()] as char)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -896,6 +911,19 @@ mod tests {
         assert_eq!(&host_read_buf, b"Hello back to Host!");
 
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn pins_have_six_digits_and_passwords_are_random() {
+        for _ in 0..50 {
+            let pin = generate_pin();
+            assert_eq!(pin.len(), PIN_DIGITS);
+            assert!(pin.chars().all(|c| c.is_ascii_digit()) && !pin.starts_with('0'));
+        }
+        let (a, b) = (generate_password(), generate_password());
+        assert_eq!(a.len(), 10);
+        assert_ne!(a, b);
+        assert_ne!(a, "studio");
     }
 
     #[test]

@@ -138,11 +138,16 @@ pub fn switch(ui: &mut egui::Ui) {
         (Lang::Es, "ES".to_string(), "Español"),
     ];
     if theme::segmented(ui, &mut current, &items) {
-        set_lang(current);
-        ui.ctx().data_mut(|d| {
-            d.insert_persisted(egui::Id::NULL.with(STORE_KEY), current.code().to_string());
-        });
+        choose(ui.ctx(), current);
     }
+}
+
+/// Makes `lang` current and remembers it.
+pub fn choose(ctx: &egui::Context, lang: Lang) {
+    set_lang(lang);
+    ctx.data_mut(|d| {
+        d.insert_persisted(egui::Id::NULL.with(STORE_KEY), lang.code().to_string());
+    });
 }
 
 pub const STORE_KEY: &str = "lucarna_lang";
@@ -266,6 +271,49 @@ static ES: &[(&str, &str)] = &[
         "Desconectar a la otra persona y dejar de compartir",
     ),
     ("Dismiss message", "Descartar mensaje"),
+    (
+        "Generated new session code {} and 6-digit E2EE PIN.",
+        "Se generó un código de sesión nuevo {} y un PIN E2EE de 6 dígitos.",
+    ),
+    ("The PIN was changed.", "Se cambió el PIN."),
+    ("{} asks to connect.", "{} pide conectarse."),
+    (
+        "Connection from {} was not allowed.",
+        "No se permitió la conexión de {}.",
+    ),
+    (
+        "Sharing stopped: nobody connected in 15 minutes.",
+        "Se dejó de compartir: nadie se conectó en 15 minutos.",
+    ),
+    ("{} wants to connect", "{} quiere conectarse"),
+    (
+        "The PIN was right. Allow only someone you expect.",
+        "El PIN era correcto. Permite solo a alguien que esperas.",
+    ),
+    ("No files", "Sin archivos"),
+    ("Allow", "Permitir"),
+    ("Deny", "Denegar"),
+    (
+        "Refused automatically in {} s.",
+        "Se rechaza automáticamente en {} s.",
+    ),
+    (
+        "You are sharing this computer. Nobody has connected yet.",
+        "Estás compartiendo este equipo. Nadie se ha conectado aún.",
+    ),
+    (
+        "Off. Nothing can be sent or fetched.",
+        "Desactivado. No se puede enviar ni traer nada.",
+    ),
+    ("Off", "Desactivado"),
+    (
+        "Not encrypted: anyone on the network can read the screen. Use it only on a network you trust.",
+        "Sin cifrar: cualquiera en la red puede ver la pantalla. Úsalo solo en una red de confianza.",
+    ),
+    (
+        "Anyone on your network can reach this port. They still need the PIN and your OK.",
+        "Cualquiera en tu red puede llegar a este puerto. Aun así necesita el PIN y tu permiso.",
+    ),
     ("{}  Search", "{}  Buscar"),
     (
         "Ready. Nothing is shared until you start.",

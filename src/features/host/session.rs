@@ -134,13 +134,27 @@ fn deflate_sync(z: &mut Compress, input: &[u8]) -> io::Result<Vec<u8>> {
     }
 }
 
+/// Asked once the viewer has authenticated and before it sees anything: `false` closes the connection.
+/// The UI uses it to put "Allow / Deny" in front of the person who is sharing.
+#[derive(Clone)]
+pub struct Gate(pub std::sync::Arc<dyn Fn() -> bool + Send + Sync>);
+
+impl std::fmt::Debug for Gate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Gate")
+    }
+}
+
 /// Configuration for an embedded RFB Host session.
 #[derive(Clone, Debug)]
 pub struct HostConfig {
     pub desktop_name: String,
     pub password: String,
     pub view_only: bool,
+    /// Whether the viewer may use file transfer at all. Off unless the person sharing allowed it.
+    pub allow_files: bool,
     pub fixed_challenge: Option<[u8; 16]>,
+    pub gate: Option<Gate>,
 }
 
 impl Default for HostConfig {
@@ -149,7 +163,9 @@ impl Default for HostConfig {
             desktop_name: "Lucarna Studio Host".into(),
             password: String::new(),
             view_only: false,
+            allow_files: false,
             fixed_challenge: None,
+            gate: None,
         }
     }
 }
@@ -243,6 +259,16 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
 
         // ClientInit (shared flag).
         let _shared = read_u8(s)?;
+
+        // Authenticated, but nothing is shown until the person sharing says yes.
+        if let Some(gate) = &self.config.gate
+            && !(gate.0)()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "connection not allowed by the person sharing",
+            ));
+        }
 
         // Capture initial frame to advertise accurate desktop geometry in ServerInit.
         let initial = self.capturer.capture()?;
@@ -414,10 +440,17 @@ fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
 /// Runs a complete user-space RFB 3.8 Host session over `stream` using the OS screen capturer and input injector.
 pub fn serve_stream(config: HostConfig, stream: &mut (impl Read + Write)) -> io::Result<()> {
     let view_only = config.view_only;
-    let mut host = HostSession::new(
+    // No shared folders at all unless file transfer was allowed.
+    let drives = if config.allow_files {
+        VirtualDrives::default()
+    } else {
+        VirtualDrives::with_roots(Vec::new())
+    };
+    let mut host = HostSession::with_drives(
         config,
         SystemCapturer::new((1280, 720)),
         SystemInputInjector::new(view_only),
+        drives,
     );
     host.handshake(stream)?;
     loop {
@@ -463,7 +496,8 @@ pub fn cli_host() -> Option<i32> {
     }
 
     let mut bind_addr = String::from("127.0.0.1:5950");
-    let mut password = String::from("studio");
+    let mut password = crate::shared::crypto::generate_password();
+    let mut allow_files = false;
     let mut pin = String::new();
     let mut repeater_addr = String::new();
     let mut session_code = String::new();
@@ -505,6 +539,7 @@ pub fn cli_host() -> Option<i32> {
                 }
             }
             "--view-only" => view_only = true,
+            "--allow-files" => allow_files = true,
             _ => {}
         }
         i += 1;
@@ -530,7 +565,9 @@ pub fn cli_host() -> Option<i32> {
             desktop_name: "Lucarna QuickSupport Host".into(),
             password: String::new(),
             view_only,
+            allow_files,
             fixed_challenge: None,
+            gate: None,
         };
         let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
         while !limiter.is_locked() {
@@ -616,7 +653,9 @@ pub fn cli_host() -> Option<i32> {
             String::new()
         },
         view_only,
+        allow_files,
         fixed_challenge: None,
+        gate: None,
     };
     let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
 
@@ -740,6 +779,72 @@ mod tests {
         assert_eq!(screen.lock().unwrap().pixels, frame.pixels);
     }
 
+    fn gated(
+        password: &str,
+        allow: bool,
+        calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    ) -> HostConfig {
+        HostConfig {
+            desktop_name: "Gate".into(),
+            password: password.into(),
+            view_only: false,
+            allow_files: false,
+            fixed_challenge: None,
+            gate: Some(Gate(std::sync::Arc::new(move || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                allow
+            }))),
+        }
+    }
+
+    #[test]
+    fn a_denied_connection_is_closed_before_any_screen_is_sent() {
+        let (mut server_stream, mut client) = pipe_pair();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let cfg = gated("", false, calls.clone());
+        let server = thread::spawn(move || {
+            let mut host = HostSession::new(
+                cfg,
+                SyntheticCapturer::new(vec![Frame::solid(16, 16, [0, 0, 0, 0])]),
+                RecordingInjector::new(false),
+            );
+            host.handshake(&mut server_stream).unwrap_err().kind()
+        });
+        let creds = Credentials {
+            user: String::new(),
+            password: String::new(),
+            pin: String::new(),
+        };
+        // The viewer never gets a ServerInit.
+        assert!(handshake::perform(&mut client, &creds).is_err());
+        assert_eq!(server.join().unwrap(), io::ErrorKind::PermissionDenied);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn an_allowed_connection_gets_its_screen_and_is_asked_once() {
+        let (mut server_stream, mut client) = pipe_pair();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let cfg = gated("", true, calls.clone());
+        let server = thread::spawn(move || {
+            let mut host = HostSession::new(
+                cfg,
+                SyntheticCapturer::new(vec![Frame::solid(16, 16, [0, 0, 0, 0])]),
+                RecordingInjector::new(false),
+            );
+            host.handshake(&mut server_stream).unwrap();
+        });
+        let creds = Credentials {
+            user: String::new(),
+            password: String::new(),
+            pin: String::new(),
+        };
+        let init = handshake::perform(&mut client, &creds).unwrap();
+        assert_eq!((init.width, init.height), (16, 16));
+        server.join().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn viewer_and_host_complete_full_rfb_session_over_stream() {
         let (mut server_stream, mut client) = pipe_pair();
@@ -758,7 +863,9 @@ mod tests {
                 desktop_name: "Radio Studio A".into(),
                 password: "djpin".into(),
                 view_only: false,
+                allow_files: true,
                 fixed_challenge: Some(*b"0123456789abcdef"),
+                gate: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1.clone(), f1, f2]);
             let injector = RecordingInjector::new(false);
@@ -859,7 +966,9 @@ mod tests {
                 desktop_name: "Encrypted Studio".into(),
                 password: String::new(),
                 view_only: false,
+                allow_files: true,
                 fixed_challenge: None,
+                gate: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1]);
             let injector = RecordingInjector::new(false);

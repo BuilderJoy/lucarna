@@ -414,6 +414,10 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.poll_events(&ctx);
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        // Whenever this computer is shared, a strip says so at the very top, whatever else is on screen.
+        if !fullscreen {
+            self.dashboard.host_view.show_strip(ui);
+        }
         if !fullscreen && !self.tabs.is_empty() {
             self.tab_strip(ui);
         }

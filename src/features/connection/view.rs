@@ -422,9 +422,16 @@ impl Dashboard {
             })
             .id();
 
+        // Room left to right decides what shows words: first the wordmark and the button text go, then the
+        // language switch moves into the settings menu.
+        let total_w = ui.available_width();
+        let compact = total_w < 1000.0;
+        let tight = total_w < 860.0;
         ui.horizontal(|ui| {
             ui.add(egui::Image::new((logo_id, egui::vec2(34.0, 34.0))).corner_radius(9));
-            ui.label(RichText::new(tr("Lucarna")).size(18.0).strong());
+            if !compact {
+                ui.label(RichText::new(tr("Lucarna")).size(18.0).strong());
+            }
             ui.add_space(12.0);
             let sharing = self.host_view.is_running();
             let items = [
@@ -453,7 +460,14 @@ impl Dashboard {
                 return;
             }
 
-            let search_w = (ui.available_width() - 470.0).clamp(160.0, 520.0);
+            let reserved = if tight {
+                250.0
+            } else if compact {
+                340.0
+            } else {
+                470.0
+            };
+            let search_w = (ui.available_width() - reserved).clamp(120.0, 520.0);
             // The long hint only when it fits; the key hint on the right needs room too.
             let hint = if search_w > 420.0 {
                 tr("{}  Search connections, labels or addresses")
@@ -492,15 +506,14 @@ impl Dashboard {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let new_text = if compact {
+                    char::from(Icon::Plus).to_string()
+                } else {
+                    fill(tr("{}  New connection"), &[&(char::from(Icon::Plus))])
+                };
                 if ui
-                    .add(
-                        theme::primary(fill(
-                            tr("{}  New connection"),
-                            &[&(char::from(Icon::Plus))],
-                        ))
-                        .min_size(egui::vec2(0.0, 40.0)),
-                    )
-                    .on_hover_text(tr("⌘N / Ctrl+N"))
+                    .add(theme::primary(new_text).min_size(egui::vec2(40.0, 40.0)))
+                    .on_hover_text(format!("{}  ⌘N / Ctrl+N", tr("New connection")))
                     .clicked()
                 {
                     self.open_new_connection(None);
@@ -512,6 +525,21 @@ impl Dashboard {
                     {
                         self.modal = Some(Modal::NewLabel(String::new()));
                         ui.close();
+                    }
+                    if tight {
+                        ui.separator();
+                        for (lang, name) in [
+                            (crate::shared::i18n::Lang::En, "English"),
+                            (crate::shared::i18n::Lang::Es, "Español"),
+                        ] {
+                            if ui
+                                .selectable_label(crate::shared::i18n::lang() == lang, name)
+                                .clicked()
+                            {
+                                crate::shared::i18n::choose(ui.ctx(), lang);
+                                ui.close();
+                            }
+                        }
                     }
                     ui.separator();
                     if ui
@@ -544,7 +572,9 @@ impl Dashboard {
                 .response
                 .on_hover_text(tr("Address book actions"));
                 theme::switch(ui);
-                crate::shared::i18n::switch(ui);
+                if !tight {
+                    crate::shared::i18n::switch(ui);
+                }
             });
         });
     }
@@ -557,7 +587,11 @@ impl Dashboard {
             .frame(egui::Frame::NONE)
             .resizable(false)
             .show(ui, |ui| Self::device_card(ui, mode, sharing, host));
-        self.sidebar_lists(ui);
+        // In a short window the lists scroll instead of running under the card.
+        egui::ScrollArea::vertical()
+            .id_salt("sidebar_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.sidebar_lists(ui));
     }
 
     /// Entry point of Studio / QuickSupport mode.
@@ -591,14 +625,17 @@ impl Dashboard {
                                 ui.label(RichText::new(text).size(11.0).color(color));
                             });
                         });
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(tr(
-                                "Let someone connect to this computer with Studio Host.",
-                            ))
-                            .size(12.0)
-                            .color(p.text2),
-                        );
+                        // The explanation goes first when height is short.
+                        if ui.ctx().content_rect().height() >= 720.0 {
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(tr(
+                                    "Let someone connect to this computer with Studio Host.",
+                                ))
+                                .size(12.0)
+                                .color(p.text2),
+                            );
+                        }
                         ui.add_space(8.0);
                         // The code and PIN are the first thing you see: read them out, or copy the invitation.
                         egui::Frame::NONE
@@ -971,9 +1008,16 @@ impl Dashboard {
             .inner_margin(egui::Margin::symmetric(24, 20))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
+                // Title beside the field when there is room, above it when there is not.
+                let wide = ui.available_width() >= 780.0;
+                let layout = if wide {
+                    Layout::left_to_right(Align::Min)
+                } else {
+                    Layout::top_down(Align::Min)
+                };
+                ui.with_layout(layout, |ui| {
                     ui.vertical(|ui| {
-                        ui.set_width(220.0);
+                        ui.set_width(if wide { 220.0 } else { ui.available_width() });
                         ui.label(RichText::new(tr("Connect to a device")).size(18.0).strong());
                         ui.label(
                             RichText::new(tr("Address, user@host or repeater ID"))
@@ -1358,10 +1402,15 @@ impl Dashboard {
         self.paint_desktop_preview(ui, prev_rect, &c);
 
         let text_x = prev_rect.right() + 12.0;
+        // Wide rows show words and labels on the right; narrow ones keep icons only, so the text on the
+        // left never runs under the buttons.
+        let wide = rect.width() >= 760.0;
+        let controls_w = if wide { 380.0 } else { 150.0 };
+        let room = (rect.right() - controls_w - text_x - 12.0).max(40.0);
         ui.painter().text(
             Pos2::new(text_x, rect.top() + 11.0),
             egui::Align2::LEFT_TOP,
-            &c.name,
+            truncate_str(&c.name, (room / 8.0) as usize),
             FontId::proportional(14.5),
             p.text,
         );
@@ -1373,31 +1422,46 @@ impl Dashboard {
         ui.painter().text(
             Pos2::new(text_x, rect.top() + 31.0),
             egui::Align2::LEFT_TOP,
-            who,
+            truncate_str(&who, (room / 7.0) as usize),
             FontId::monospace(11.5),
             p.text2,
         );
 
         // Right-side controls inside the row.
         let controls_rect =
-            Rect::from_min_max(Pos2::new(rect.right() - 280.0, rect.top()), rect.max);
+            Rect::from_min_max(Pos2::new(rect.right() - controls_w, rect.top()), rect.max);
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(controls_rect)
                 .layout(Layout::right_to_left(Align::Center)),
         );
         child_ui.add_space(10.0);
-        if child_ui
-            .button(fill(
+        let properties = if wide {
+            fill(
                 tr("{} Properties"),
                 &[&(char::from(Icon::SlidersHorizontal))],
-            ))
+            )
+        } else {
+            char::from(Icon::SlidersHorizontal).to_string()
+        };
+        if child_ui
+            .button(properties)
+            .on_hover_text(tr("Properties"))
             .clicked()
         {
             action = Some(TileAction::Properties(idx));
         }
-        let connect_btn = theme::primary(fill(tr("{} Connect"), &[&(char::from(Icon::Play))]));
-        if child_ui.add(connect_btn).clicked() {
+        let connect_text = if wide {
+            fill(tr("{} Connect"), &[&(char::from(Icon::Play))])
+        } else {
+            char::from(Icon::Play).to_string()
+        };
+        let connect_btn = theme::primary(connect_text);
+        if child_ui
+            .add(connect_btn)
+            .on_hover_text(tr("Connect"))
+            .clicked()
+        {
             action = Some(TileAction::Connect(idx, None));
         }
         if child_ui
@@ -1407,7 +1471,7 @@ impl Dashboard {
         {
             action = Some(TileAction::ToggleFavorite(idx));
         }
-        for label in c.labels.iter().rev() {
+        for label in c.labels.iter().rev().filter(|_| wide) {
             child_ui.label(
                 RichText::new(format!("{} {label}", char::from(Icon::Tag)))
                     .size(11.0)

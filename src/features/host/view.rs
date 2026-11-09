@@ -1,15 +1,16 @@
 //! Studio Host & QuickSupport UI (`src/features/host/view.rs`):
-//! - "Share this computer" control center (6-digit session code + 4-digit E2EE PIN generator)
+//! - "Share this computer" control center (6-digit session code + 6-digit E2EE PIN generator)
 //! - QuickSupport E2EE Viewer connection card (connect via Code + PIN + Repeater Mode II)
 //! - Permanent unhideable active-session security banner with instant red "Terminate Now" button
-//! - Real-time anti-RAT audit log and virtual drive (`M:\`, `D:\`, `H:\`, `V:\`) status inspector
+//! - Real-time anti-RAT audit log, an Allow / Deny prompt for every connection, and file transfer that is
+//!   off unless allowed (then only `D:` Downloads and `S:` Lucarna Share)
 
 use crate::shared::i18n::{fill, tr};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, Sender},
+    mpsc::{self, Receiver, RecvTimeoutError, Sender},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,19 +18,33 @@ use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Order, RichText, 
 use lucide_icons::Icon;
 
 use super::ft_server::VirtualDrives;
-use super::session::{HostConfig, register_repeater_mode_ii, serve_e2ee_stream, serve_stream};
+use super::session::{Gate, HostConfig, register_repeater_mode_ii, serve_stream};
 use crate::features::connection::{ConnectRequest, Credentials, ServerAddress, SessionOptions};
 use crate::shared::crypto::{
-    BruteForceLimiter, format_code, generate_pin, generate_session_code, normalize_code,
+    BruteForceLimiter, PIN_DIGITS, format_code, generate_password, generate_pin,
+    generate_session_code, normalize_code,
 };
 use crate::shared::theme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostStatus {
     Idle,
-    Waiting { endpoint: String, e2ee: bool },
-    Active { peer: String, e2ee: bool },
-    Locked { reason: String },
+    Waiting {
+        endpoint: String,
+        e2ee: bool,
+    },
+    /// Someone got the PIN right and waits for the person sharing to say yes.
+    Pending {
+        peer: String,
+        e2ee: bool,
+    },
+    Active {
+        peer: String,
+        e2ee: bool,
+    },
+    Locked {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +55,15 @@ pub struct AuditEntry {
 }
 
 pub enum HostUiEvent {
+    /// Ask the person sharing; the host thread waits for the answer on `reply`.
+    Consent {
+        peer: String,
+        e2ee: bool,
+        reply: Sender<bool>,
+    },
+    Denied {
+        peer: String,
+    },
     Waiting {
         endpoint: String,
         e2ee: bool,
@@ -95,6 +119,14 @@ pub struct HostView {
     session_started: Option<Instant>,
     last_session: Option<(String, u64)>,
     failed_pins: u32,
+    /// File transfer is off until the person sharing turns it on.
+    pub allow_files: bool,
+    drives_loaded: bool,
+    /// The PIN the host thread checks; changes after every session and every denied connection.
+    pin_shared: Arc<Mutex<String>>,
+    consent_tx: Option<Sender<bool>>,
+    consent_since: Option<Instant>,
+    waiting_since: Option<Instant>,
 
     // Background Host thread control handles
     stop_flag: Arc<AtomicBool>,
@@ -111,11 +143,12 @@ impl Default for HostView {
             repeater_addr: String::from("127.0.0.1:5500"),
             session_code: generate_session_code(),
             pin: generate_pin(),
-            studio_password: String::from("studio"),
+            studio_password: generate_password(),
             view_only: false,
             status: HostStatus::Idle,
             audit_log: Vec::new(),
-            drives: VirtualDrives::default(),
+            // Only built (and the share folder created) once file transfer is turned on.
+            drives: VirtualDrives::with_roots(Vec::new()),
             copied_until: None,
             viewer_target_code: String::new(),
             viewer_pin: String::new(),
@@ -131,6 +164,12 @@ impl Default for HostView {
             session_started: None,
             last_session: None,
             failed_pins: 0,
+            allow_files: false,
+            drives_loaded: false,
+            pin_shared: Arc::new(Mutex::new(String::new())),
+            consent_tx: None,
+            consent_since: None,
+            waiting_since: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
             active_stream: Arc::new(Mutex::new(None)),
             events_rx: None,
@@ -207,19 +246,47 @@ impl HostView {
     pub fn is_running(&self) -> bool {
         matches!(
             self.status,
-            HostStatus::Waiting { .. } | HostStatus::Active { .. }
+            HostStatus::Waiting { .. } | HostStatus::Pending { .. } | HostStatus::Active { .. }
         )
+    }
+
+    /// New PIN, also for the host thread. Done after every session and every refused connection, so a PIN
+    /// that was typed once, read over a shoulder or sent in a chat is never good for a second visit.
+    fn set_pin(&mut self, pin: String) {
+        *self.pin_shared.lock().unwrap() = pin.clone();
+        self.pin = pin;
+    }
+
+    fn rotate_pin(&mut self) {
+        self.set_pin(generate_pin());
+        self.push_audit(tr("The PIN was changed.").into(), false);
+    }
+
+    /// Answer to the "wants to connect" question.
+    pub fn answer_consent(&mut self, allow: bool) {
+        if let Some(tx) = self.consent_tx.take() {
+            let _ = tx.send(allow);
+        }
+        self.consent_since = None;
+    }
+
+    /// Turning file transfer on builds the list of shared folders (and creates the share folder).
+    fn ensure_drives(&mut self) {
+        if !self.drives_loaded {
+            self.drives = VirtualDrives::default();
+            self.drives_loaded = true;
+        }
     }
 
     pub fn regenerate_credentials(&mut self) {
         self.session_code = generate_session_code();
-        self.pin = generate_pin();
+        self.set_pin(generate_pin());
         if matches!(self.status, HostStatus::Locked { .. }) {
             self.status = HostStatus::Idle;
         }
         self.push_audit(
             fill(
-                tr("Generated new session code {} and 4-digit E2EE PIN."),
+                tr("Generated new session code {} and 6-digit E2EE PIN."),
                 &[&(format_code(&self.session_code))],
             ),
             false,
@@ -321,49 +388,45 @@ impl HostView {
         let bind_addr = self.bind_addr.trim().to_string();
         let repeater_addr = self.repeater_addr.trim().to_string();
         let session_code = normalize_code(&self.session_code);
-        let pin = self.pin.trim().to_string();
+        let pin = Arc::clone(&self.pin_shared);
+        *pin.lock().unwrap() = self.pin.trim().to_string();
         let password = if use_e2ee {
             String::new()
         } else {
             self.studio_password.clone()
         };
         let view_only = self.view_only;
+        let allow_files = self.allow_files;
         let ctx = ctx.clone();
+        self.waiting_since = None;
 
         std::thread::spawn(move || {
-            let config = HostConfig {
-                desktop_name: tr("Lucarna Studio Host").into(),
-                password,
-                view_only,
-                fixed_challenge: None,
+            let run = HostRun {
+                config: HostConfig {
+                    desktop_name: tr("Lucarna Studio Host").into(),
+                    password,
+                    view_only,
+                    allow_files,
+                    fixed_challenge: None,
+                    gate: None,
+                },
+                stop_flag,
+                active_stream,
+                pin,
+                tx,
+                ctx,
             };
             if use_repeater {
-                run_repeater_host_loop(
-                    repeater_addr,
-                    session_code,
-                    pin,
-                    config,
-                    stop_flag,
-                    active_stream,
-                    tx,
-                    ctx,
-                );
+                run_repeater_host_loop(repeater_addr, session_code, run);
             } else {
-                run_listener_host_loop(
-                    bind_addr,
-                    use_e2ee,
-                    pin,
-                    config,
-                    stop_flag,
-                    active_stream,
-                    tx,
-                    ctx,
-                );
+                run_listener_host_loop(bind_addr, use_e2ee, run);
             }
         });
     }
 
     pub fn stop_sharing(&mut self) {
+        self.answer_consent(false);
+        self.waiting_since = None;
         self.stop_flag.store(true, Ordering::SeqCst);
         if let Some(stream) = self.active_stream.lock().unwrap().take() {
             let _ = stream.shutdown(Shutdown::Both);
@@ -384,7 +447,28 @@ impl HostView {
         }
         for ev in incoming {
             match ev {
+                HostUiEvent::Consent { peer, e2ee, reply } => {
+                    self.answer_consent(false);
+                    self.consent_tx = Some(reply);
+                    self.consent_since = Some(Instant::now());
+                    self.waiting_since = None;
+                    self.status = HostStatus::Pending {
+                        peer: peer.clone(),
+                        e2ee,
+                    };
+                    self.push_audit(fill(tr("{} asks to connect."), &[&peer]), true);
+                }
+                HostUiEvent::Denied { peer } => {
+                    self.consent_tx = None;
+                    self.consent_since = None;
+                    self.push_audit(
+                        fill(tr("Connection from {} was not allowed."), &[&peer]),
+                        false,
+                    );
+                    self.rotate_pin();
+                }
                 HostUiEvent::Waiting { endpoint, e2ee } => {
+                    self.waiting_since = Some(Instant::now());
                     self.status = HostStatus::Waiting {
                         endpoint: endpoint.clone(),
                         e2ee,
@@ -405,6 +489,9 @@ impl HostView {
                     );
                 }
                 HostUiEvent::Connected { peer, e2ee } => {
+                    self.consent_tx = None;
+                    self.consent_since = None;
+                    self.waiting_since = None;
                     self.session_started = Some(Instant::now());
                     self.status = HostStatus::Active {
                         peer: peer.clone(),
@@ -433,6 +520,7 @@ impl HostView {
                         fill(tr("Session ended with {}: {}"), &[&peer, &reason]),
                         false,
                     );
+                    self.rotate_pin();
                 }
                 HostUiEvent::PinFailed {
                     peer,
@@ -462,6 +550,9 @@ impl HostView {
                     }
                 }
                 HostUiEvent::Stopped(reason) => {
+                    self.consent_tx = None;
+                    self.consent_since = None;
+                    self.waiting_since = None;
                     if !matches!(self.status, HostStatus::Locked { .. }) {
                         self.status = HostStatus::Idle;
                     }
@@ -502,15 +593,30 @@ impl HostView {
             Self::save_pref(ctx, KEY_HOST_CODE, &self.session_code);
             self.saved_code = self.session_code.clone();
         }
+        // Nobody came: stop listening instead of leaving the computer reachable for hours.
+        if matches!(self.status, HostStatus::Waiting { .. })
+            && self.waiting_since.is_some_and(|t| t.elapsed() > WAIT_LIMIT)
+        {
+            self.stop_sharing();
+            self.push_audit(
+                tr("Sharing stopped: nobody connected in 15 minutes.").into(),
+                false,
+            );
+            return;
+        }
         if !self.is_running() {
             return;
         }
+        let pending = matches!(self.status, HostStatus::Pending { .. });
         let (is_active, headline, e2ee) = match &self.status {
             HostStatus::Active { peer, e2ee } => (
                 true,
                 fill(tr("Assistance session active with {}"), &[&peer]),
                 *e2ee,
             ),
+            HostStatus::Pending { peer, e2ee } => {
+                (false, fill(tr("{} wants to connect"), &[&peer]), *e2ee)
+            }
             HostStatus::Waiting { endpoint, e2ee } => (
                 false,
                 fill(tr("Sharing this computer · waiting on {}"), &[&endpoint]),
@@ -518,16 +624,20 @@ impl HostView {
             ),
             _ => return,
         };
-        let sub = format!(
-            "{} · {}",
-            if e2ee {
-                tr("Encrypted end to end")
-            } else {
-                tr("Not encrypted")
-            },
-            self.elapsed_label()
-                .unwrap_or_else(|| tr("nobody connected yet").into())
-        );
+        let sub = if pending {
+            tr("The PIN was right. Allow only someone you expect.").to_string()
+        } else {
+            format!(
+                "{} · {}",
+                if e2ee {
+                    tr("Encrypted end to end")
+                } else {
+                    tr("Not encrypted")
+                },
+                self.elapsed_label()
+                    .unwrap_or_else(|| tr("nobody connected yet").into())
+            )
+        };
         let border = if is_active {
             Color32::from_rgb(0xf8, 0x71, 0x71)
         } else {
@@ -543,7 +653,14 @@ impl HostView {
                     tr("Control")
                 },
             ),
-            (Icon::Folder, tr("Files")),
+            (
+                Icon::Folder,
+                if self.allow_files {
+                    tr("Files")
+                } else {
+                    tr("No files")
+                },
+            ),
         ];
         let width = 780.0;
         let mut builder = egui::ViewportBuilder::default()
@@ -557,6 +674,7 @@ impl HostView {
             builder = builder.with_position([(mon.x - width) / 2.0, 40.0]);
         }
         let mut stop = false;
+        let mut answer: Option<bool> = None;
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("lucarna_host_banner"),
             builder,
@@ -586,6 +704,26 @@ impl HostView {
                                 ui.label(RichText::new(&sub).size(12.0).color(dark.text2));
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if pending {
+                                    if ui
+                                        .add(
+                                            theme::primary(tr("Allow"))
+                                                .min_size(egui::vec2(90.0, 40.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        answer = Some(true);
+                                    }
+                                    let deny = egui::Button::new(
+                                        RichText::new(tr("Deny")).strong().color(Color32::WHITE),
+                                    )
+                                    .fill(Color32::from_rgb(0xdc, 0x26, 0x26))
+                                    .min_size(egui::vec2(90.0, 40.0));
+                                    if ui.add(deny).clicked() {
+                                        answer = Some(false);
+                                    }
+                                    return;
+                                }
                                 let label = if is_active {
                                     tr("End session now")
                                 } else {
@@ -615,6 +753,9 @@ impl HostView {
                     });
             },
         );
+        if let Some(allow) = answer {
+            self.answer_consent(allow);
+        }
         if stop {
             self.stop_sharing();
         }
@@ -630,6 +771,7 @@ impl HostView {
         match &self.status {
             HostStatus::Idle => Stage::Idle,
             HostStatus::Waiting { .. } => Stage::Waiting,
+            HostStatus::Pending { .. } => Stage::Pending,
             HostStatus::Active { .. } => Stage::Active,
             HostStatus::Locked { .. } => Stage::Locked,
         }
@@ -639,7 +781,6 @@ impl HostView {
     pub fn show_page(&mut self, ui: &mut Ui) {
         self.poll_events();
         self.load_prefs(&ui.ctx().clone());
-        let p = theme::palette(ui.ctx());
         let stage = self.stage();
         if stage == Stage::Active {
             ui.ctx().request_repaint_after(Duration::from_secs(1));
@@ -648,47 +789,67 @@ impl HostView {
             .id_salt("share_page")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let narrow_page = ui.available_width() < 760.0;
                 egui::Frame::NONE
-                    .inner_margin(egui::Margin::symmetric(48, 32))
+                    .inner_margin(if narrow_page {
+                        egui::Margin::symmetric(16, 20)
+                    } else {
+                        egui::Margin::symmetric(48, 32)
+                    })
                     .show(ui, |ui| {
-                        let side_w = 360.0;
-                        let main_w = (ui.available_width() - side_w - 24.0).clamp(420.0, 780.0);
-                        ui.horizontal_top(|ui| {
-                            ui.vertical(|ui| {
-                                ui.set_width(main_w);
-                                egui::Frame::NONE
-                                    .fill(p.card)
-                                    .stroke(Stroke::new(1.0, p.border))
-                                    .corner_radius(CornerRadius::same(18))
-                                    .show(ui, |ui| {
-                                        ui.set_width(main_w);
-                                        if stage != Stage::Locked {
-                                            self.stepper(ui, stage);
-                                            ui.add(egui::Separator::default().spacing(0.0));
-                                        }
-                                        egui::Frame::NONE
-                                            .inner_margin(egui::Margin::symmetric(40, 32))
-                                            .show(ui, |ui| {
-                                                ui.set_width(main_w - 80.0);
-                                                match stage {
-                                                    Stage::Idle => self.idle_view(ui),
-                                                    Stage::Waiting => self.waiting_view(ui),
-                                                    Stage::Active => self.active_view(ui),
-                                                    Stage::Locked => self.locked_view(ui),
-                                                }
-                                            });
-                                    });
+                        let avail = ui.available_width();
+                        // Two columns when there is room, one under the other when there is not.
+                        if avail >= 900.0 {
+                            let side_w = 360.0;
+                            let main_w = (avail - side_w - 24.0).clamp(420.0, 780.0);
+                            ui.horizontal_top(|ui| {
+                                ui.vertical(|ui| self.share_main(ui, main_w, stage));
+                                ui.add_space(24.0);
+                                ui.vertical(|ui| self.share_side(ui, side_w));
                             });
-                            ui.add_space(24.0);
-                            ui.vertical(|ui| {
-                                ui.set_width(side_w);
-                                self.permissions_card(ui);
-                                ui.add_space(16.0);
-                                safety_card(ui);
-                            });
-                        });
+                        } else {
+                            self.share_main(ui, avail, stage);
+                            ui.add_space(16.0);
+                            self.share_side(ui, avail);
+                        }
                     });
             });
+    }
+
+    fn share_main(&mut self, ui: &mut Ui, main_w: f32, stage: Stage) {
+        let p = theme::palette(ui.ctx());
+        ui.set_width(main_w);
+        egui::Frame::NONE
+            .fill(p.card)
+            .stroke(Stroke::new(1.0, p.border))
+            .corner_radius(CornerRadius::same(18))
+            .show(ui, |ui| {
+                ui.set_width(main_w);
+                if stage != Stage::Locked {
+                    self.stepper(ui, stage);
+                    ui.add(egui::Separator::default().spacing(0.0));
+                }
+                let pad = if main_w < 560.0 { 20 } else { 40 };
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::symmetric(pad, 28))
+                    .show(ui, |ui| {
+                        ui.set_width(main_w - 2.0 * f32::from(pad));
+                        match stage {
+                            Stage::Idle => self.idle_view(ui),
+                            Stage::Waiting => self.waiting_view(ui),
+                            Stage::Pending => self.pending_view(ui),
+                            Stage::Active => self.active_view(ui),
+                            Stage::Locked => self.locked_view(ui),
+                        }
+                    });
+            });
+    }
+
+    fn share_side(&mut self, ui: &mut Ui, side_w: f32) {
+        ui.set_width(side_w);
+        self.permissions_card(ui);
+        ui.add_space(16.0);
+        safety_card(ui);
     }
 
     fn stepper(&self, ui: &mut Ui, stage: Stage) {
@@ -696,6 +857,7 @@ impl HostView {
         let current = match stage {
             Stage::Idle => -1,
             Stage::Waiting => 0,
+            Stage::Pending => 1,
             Stage::Active => 2,
             Stage::Locked => -1,
         };
@@ -703,6 +865,9 @@ impl HostView {
             .inner_margin(egui::Margin::symmetric(28, 16))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                // Narrow card: only the current step keeps its name, and the lines get shorter.
+                let compact = ui.available_width() < 600.0;
+                let line_w = if compact { 22.0 } else { 56.0 };
                 ui.horizontal(|ui| {
                     let names = [tr("Waiting"), tr("Connecting"), tr("Active"), tr("Ended")];
                     for (i, name) in names.iter().enumerate() {
@@ -731,19 +896,17 @@ impl HostView {
                             egui::FontId::proportional(12.0),
                             fg,
                         );
-                        ui.label(
-                            RichText::new(*name)
-                                .size(13.0)
-                                .strong()
-                                .color(if done || now { p.text } else { p.text3 }),
-                        );
-                        if i < 3 {
-                            let w = ((ui.available_width() - (3 - i) as f32 * 120.0) / 1.0)
-                                .clamp(16.0, 400.0);
-                            let (r, _) = ui.allocate_exact_size(
-                                egui::vec2(w.min(90.0), 2.0),
-                                egui::Sense::hover(),
+                        if !compact || now {
+                            ui.label(
+                                RichText::new(*name)
+                                    .size(13.0)
+                                    .strong()
+                                    .color(if done || now { p.text } else { p.text3 }),
                             );
+                        }
+                        if i < 3 {
+                            let (r, _) = ui
+                                .allocate_exact_size(egui::vec2(line_w, 2.0), egui::Sense::hover());
                             ui.painter().rect_filled(
                                 r,
                                 1.0,
@@ -876,6 +1039,15 @@ impl HostView {
                 .margin(egui::vec2(14.0, 11.0))
                 .desired_width(f32::INFINITY),
         );
+        if !self.use_repeater && self.bind_addr.trim().starts_with("0.0.0.0") {
+            ui.label(
+                RichText::new(tr(
+                    "Anyone on your network can reach this port. They still need the PIN and your OK.",
+                ))
+                .size(12.0)
+                .color(p.text3),
+            );
+        }
         if !self.use_repeater {
             ui.add_space(6.0);
             ui.checkbox(
@@ -890,10 +1062,184 @@ impl HostView {
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut self.studio_password)
-                        .password(true)
+                        .font(egui::FontId::monospace(14.0))
                         .desired_width(f32::INFINITY),
                 );
+                ui.label(
+                    RichText::new(tr(
+                        "Not encrypted: anyone on the network can read the screen. Use it only on a network you trust.",
+                    ))
+                    .size(12.0)
+                    .color(p.danger),
+                );
             }
+        }
+    }
+
+    /// Somebody typed the right PIN and is waiting: nothing is shared until the person here says yes.
+    fn pending_view(&mut self, ui: &mut Ui) {
+        let p = theme::palette(ui.ctx());
+        let (peer, e2ee) = match &self.status {
+            HostStatus::Pending { peer, e2ee } => (peer.clone(), *e2ee),
+            _ => (String::new(), false),
+        };
+        let left = CONSENT_TIMEOUT
+            .as_secs()
+            .saturating_sub(self.consent_since.map_or(0, |t| t.elapsed().as_secs()));
+        ui.ctx().request_repaint_after(Duration::from_secs(1));
+        ui.vertical_centered(|ui| {
+            ui.add_space(6.0);
+            icon_tile(ui, Icon::ShieldAlert, 64.0);
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(fill(tr("{} wants to connect"), &[&peer]))
+                    .size(26.0)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(tr("The PIN was right. Allow only someone you expect."))
+                    .size(14.0)
+                    .color(p.text2),
+            );
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                ui.add_space(((ui.available_width() - 360.0) / 2.0).max(0.0));
+                theme::tag(
+                    ui,
+                    if e2ee { Icon::Lock } else { Icon::LockOpen },
+                    if e2ee {
+                        tr("Encrypted end to end")
+                    } else {
+                        tr("Not encrypted")
+                    },
+                    if e2ee { p.success } else { p.danger },
+                    if e2ee {
+                        p.success.gamma_multiply(0.16)
+                    } else {
+                        p.danger_soft
+                    },
+                );
+                theme::tag(
+                    ui,
+                    Icon::MousePointer2,
+                    if self.view_only {
+                        tr("View only")
+                    } else {
+                        tr("Control")
+                    },
+                    p.text2,
+                    p.elevated,
+                );
+                theme::tag(
+                    ui,
+                    Icon::Folder,
+                    if self.allow_files {
+                        tr("Files")
+                    } else {
+                        tr("No files")
+                    },
+                    p.text2,
+                    p.elevated,
+                );
+            });
+            ui.add_space(20.0);
+            ui.horizontal(|ui| {
+                ui.add_space(((ui.available_width() - 330.0) / 2.0).max(0.0));
+                if ui
+                    .add(theme::primary(tr("Allow")).min_size(egui::vec2(160.0, 50.0)))
+                    .clicked()
+                {
+                    self.answer_consent(true);
+                }
+                if ui
+                    .add(theme::danger(ui, tr("Deny")).min_size(egui::vec2(160.0, 50.0)))
+                    .clicked()
+                {
+                    self.answer_consent(false);
+                }
+            });
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(fill(tr("Refused automatically in {} s."), &[&left]))
+                    .size(12.0)
+                    .color(p.text3),
+            );
+        });
+    }
+
+    /// A strip across the top of the main window while this computer is shared. The banner window is an
+    /// extra: some window managers ignore "always on top", this strip cannot be ignored.
+    pub fn show_strip(&mut self, ui: &mut Ui) {
+        if !self.is_running() {
+            return;
+        }
+        let pending = matches!(self.status, HostStatus::Pending { .. });
+        let active = matches!(self.status, HostStatus::Active { .. });
+        let (text, fill_color) = match &self.status {
+            HostStatus::Pending { peer, .. } => (
+                fill(tr("{} wants to connect"), &[&peer]),
+                Color32::from_rgb(0x8a, 0x5a, 0x00),
+            ),
+            HostStatus::Active { peer, .. } => (
+                fill(tr("Assistance session active with {}"), &[&peer]),
+                Color32::from_rgb(0xa3, 0x1d, 0x1d),
+            ),
+            _ => (
+                tr("You are sharing this computer. Nobody has connected yet.").to_string(),
+                Color32::from_rgb(0x5a, 0x45, 0x10),
+            ),
+        };
+        let mut answer = None;
+        let mut stop = false;
+        egui::Panel::top("sharing_strip")
+            .frame(
+                egui::Frame::NONE
+                    .fill(fill_color)
+                    .inner_margin(egui::Margin::symmetric(16, 6)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{}  {text}", char::from(Icon::ShieldAlert)))
+                            .strong()
+                            .color(Color32::WHITE),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if pending {
+                            if ui.add(theme::primary(tr("Allow"))).clicked() {
+                                answer = Some(true);
+                            }
+                            if ui
+                                .add(egui::Button::new(
+                                    RichText::new(tr("Deny")).strong().color(Color32::WHITE),
+                                ))
+                                .clicked()
+                            {
+                                answer = Some(false);
+                            }
+                        } else if ui
+                            .add(egui::Button::new(
+                                RichText::new(if active {
+                                    tr("End session now")
+                                } else {
+                                    tr("Stop sharing")
+                                })
+                                .strong()
+                                .color(Color32::WHITE),
+                            ))
+                            .clicked()
+                        {
+                            stop = true;
+                        }
+                    });
+                });
+            });
+        if let Some(allow) = answer {
+            self.answer_consent(allow);
+        }
+        if stop {
+            self.stop_sharing();
         }
     }
 
@@ -1036,7 +1382,11 @@ impl HostView {
                 (
                     Icon::Folder,
                     tr("Files").to_string(),
-                    fill(tr("{} shared folders"), &[&(self.drives.roots().len())]),
+                    if self.allow_files {
+                        fill(tr("{} shared folders"), &[&(self.drives.roots().len())])
+                    } else {
+                        tr("Off").to_string()
+                    },
                 ),
             ] {
                 egui::Frame::NONE
@@ -1173,36 +1523,50 @@ impl HostView {
             ) {
                 self.view_only = !control;
             }
-            let mut files = true;
-            perm_row(
+            let mut files = self.allow_files;
+            if perm_row(
                 ui,
                 Icon::Folder,
                 tr("Transfer files"),
-                tr("Only these folders"),
+                if self.allow_files {
+                    tr("Only these folders")
+                } else {
+                    tr("Off. Nothing can be sent or fetched.")
+                },
                 &mut files,
-                false,
-            );
-            ui.horizontal_wrapped(|ui| {
-                ui.add_space(30.0);
-                for (letter, path) in self.drives.roots() {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| tr("Volumes").into());
-                    egui::Frame::NONE
-                        .fill(p.elevated)
-                        .corner_radius(CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 3))
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(format!("{letter}: {name}"))
-                                    .size(11.0)
-                                    .strong()
-                                    .color(p.text2),
-                            );
-                        });
+                !running,
+            ) {
+                self.allow_files = files;
+                if files {
+                    self.ensure_drives();
                 }
-            });
+            }
+            if self.allow_files {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(30.0);
+                    for (letter, path) in self.drives.roots() {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        egui::Frame::NONE
+                            .fill(p.elevated)
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(egui::Margin::symmetric(8, 3))
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("{letter}: {name}"))
+                                            .size(11.0)
+                                            .strong()
+                                            .color(p.text2),
+                                    )
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                                );
+                            });
+                    }
+                });
+            }
         });
     }
 
@@ -1310,7 +1674,7 @@ impl HostView {
                             ui,
                             "join_pin",
                             &mut self.viewer_pin,
-                            4,
+                            PIN_DIGITS,
                             !self.show_pin,
                             false,
                         );
@@ -1382,6 +1746,7 @@ impl HostView {
 enum Stage {
     Idle,
     Waiting,
+    Pending,
     Active,
     Locked,
 }
@@ -1615,180 +1980,252 @@ fn digit_boxes(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_listener_host_loop(
-    bind_addr: String,
-    use_e2ee: bool,
-    pin: String,
+/// A peer has this long to finish the PIN handshake before we hang up on it, so one connection that says
+/// nothing cannot keep the listener busy.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the person sharing has to answer "wants to connect"; silence is a no.
+pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Sharing that nobody used stops by itself after this long.
+const WAIT_LIMIT: Duration = Duration::from_secs(15 * 60);
+
+/// What the host thread needs, in one piece.
+#[derive(Clone)]
+struct HostRun {
     config: HostConfig,
     stop_flag: Arc<AtomicBool>,
     active_stream: Arc<Mutex<Option<TcpStream>>>,
+    pin: Arc<Mutex<String>>,
     tx: Sender<HostUiEvent>,
     ctx: egui::Context,
-) {
+}
+
+impl HostRun {
+    fn stopped(&self) -> bool {
+        self.stop_flag.load(Ordering::SeqCst)
+    }
+
+    fn notify(&self, event: HostUiEvent) {
+        let _ = self.tx.send(event);
+        self.ctx.request_repaint();
+    }
+
+    fn current_pin(&self) -> String {
+        self.pin.lock().unwrap().clone()
+    }
+
+    /// Asks the person sharing whether `peer` may in. `socket` has its timeouts removed once they say yes.
+    fn gate(&self, peer: &str, e2ee: bool, socket: Option<TcpStream>) -> Gate {
+        let (run, peer) = (self.clone(), peer.to_string());
+        Gate(Arc::new(move || {
+            let allowed = ask_consent(&run, &peer, e2ee);
+            if allowed {
+                if let Some(s) = &socket {
+                    let _ = s.set_read_timeout(None);
+                    let _ = s.set_write_timeout(None);
+                }
+                run.notify(HostUiEvent::Connected {
+                    peer: peer.clone(),
+                    e2ee,
+                });
+            }
+            allowed
+        }))
+    }
+
+    /// Tells the UI how a connection ended.
+    fn finish(&self, peer: String, result: std::io::Result<()>) {
+        match result {
+            Ok(()) => self.notify(HostUiEvent::Disconnected {
+                peer,
+                reason: tr("Client closed session").into(),
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                self.notify(HostUiEvent::Denied { peer });
+            }
+            Err(e) => self.notify(HostUiEvent::Disconnected {
+                peer,
+                reason: e.to_string(),
+            }),
+        }
+    }
+}
+
+/// Puts the question in front of the person sharing and waits for the answer. No answer in a minute, or
+/// stopping the share, counts as no.
+fn ask_consent(run: &HostRun, peer: &str, e2ee: bool) -> bool {
+    let (reply, answer) = mpsc::channel();
+    run.notify(HostUiEvent::Consent {
+        peer: peer.to_string(),
+        e2ee,
+        reply,
+    });
+    let started = Instant::now();
+    while started.elapsed() < CONSENT_TIMEOUT && !run.stopped() {
+        match answer.recv_timeout(Duration::from_millis(200)) {
+            Ok(allowed) => return allowed,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return false,
+        }
+    }
+    false
+}
+
+fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
     let listener = match TcpListener::bind(&bind_addr) {
         Ok(l) => l,
         Err(e) => {
-            let _ = tx.send(HostUiEvent::Stopped(fill(
+            run.notify(HostUiEvent::Stopped(fill(
                 tr("Failed to bind Host port {}: {}"),
                 &[&bind_addr, &e],
             )));
-            ctx.request_repaint();
             return;
         }
     };
     let _ = listener.set_nonblocking(true);
-    let _ = tx.send(HostUiEvent::Waiting {
+    run.notify(HostUiEvent::Waiting {
         endpoint: bind_addr.clone(),
         e2ee: use_e2ee,
     });
-    ctx.request_repaint();
 
     let mut limiter = BruteForceLimiter::new();
-
-    while !stop_flag.load(Ordering::SeqCst) && !limiter.is_locked() {
+    while !run.stopped() && !limiter.is_locked() {
         match listener.accept() {
             Ok((mut stream, peer_addr)) => {
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_nodelay(true);
+                // Until somebody says yes, a peer that stalls is cut off (the gate lifts this).
+                let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+                let _ = stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
                 let peer = peer_addr.to_string();
                 if let Ok(cloned) = stream.try_clone() {
-                    *active_stream.lock().unwrap() = Some(cloned);
+                    *run.active_stream.lock().unwrap() = Some(cloned);
                 }
+                let socket = stream.try_clone().ok();
 
-                let res = if use_e2ee {
+                let result = if use_e2ee {
+                    let before = limiter.failures;
                     match crate::shared::crypto::host_e2ee_handshake(
                         &mut stream,
-                        &pin,
+                        &run.current_pin(),
                         &mut limiter,
                     ) {
                         Ok(keys) => {
-                            let _ = tx.send(HostUiEvent::Connected {
-                                peer: peer.clone(),
-                                e2ee: true,
-                            });
-                            ctx.request_repaint();
+                            let mut config = run.config.clone();
+                            config.gate = Some(run.gate(&peer, true, socket));
                             let mut e2ee =
                                 crate::shared::crypto::E2eeStream::new(&mut stream, keys);
-                            serve_stream(config.clone(), &mut e2ee)
+                            let result = serve_stream(config, &mut e2ee);
+                            limiter = BruteForceLimiter::new();
+                            result
                         }
                         Err(e) => {
-                            let _ = tx.send(HostUiEvent::PinFailed {
-                                peer: peer.clone(),
-                                attempts: limiter.failures,
-                                locked: limiter.is_locked(),
-                            });
-                            ctx.request_repaint();
+                            if limiter.failures > before {
+                                run.notify(HostUiEvent::PinFailed {
+                                    peer: peer.clone(),
+                                    attempts: limiter.failures,
+                                    locked: limiter.is_locked(),
+                                });
+                            }
                             Err(e)
                         }
                     }
                 } else {
-                    let _ = tx.send(HostUiEvent::Connected {
-                        peer: peer.clone(),
-                        e2ee: false,
-                    });
-                    ctx.request_repaint();
-                    serve_stream(config.clone(), &mut stream)
+                    let mut config = run.config.clone();
+                    config.gate = Some(run.gate(&peer, false, socket));
+                    serve_stream(config, &mut stream)
                 };
 
-                *active_stream.lock().unwrap() = None;
-                if let Err(e) = res {
-                    let _ = tx.send(HostUiEvent::Disconnected {
-                        peer,
-                        reason: e.to_string(),
-                    });
-                } else {
-                    let _ = tx.send(HostUiEvent::Disconnected {
-                        peer,
-                        reason: tr("Client closed session").into(),
-                    });
+                *run.active_stream.lock().unwrap() = None;
+                // A bad PIN already got its own alert; everything else is reported as the end of a visit.
+                let bad_pin =
+                    limiter.failures > 0 && result.is_err() && use_e2ee && limiter.is_locked();
+                if !bad_pin {
+                    run.finish(peer, result);
                 }
-                if !stop_flag.load(Ordering::SeqCst) && !limiter.is_locked() {
-                    let _ = tx.send(HostUiEvent::Waiting {
+                if !run.stopped() && !limiter.is_locked() {
+                    run.notify(HostUiEvent::Waiting {
                         endpoint: bind_addr.clone(),
                         e2ee: use_e2ee,
                     });
                 }
-                ctx.request_repaint();
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(80));
             }
             Err(e) => {
-                let _ = tx.send(HostUiEvent::Stopped(fill(tr("Accept error: {}"), &[&e])));
-                ctx.request_repaint();
+                run.notify(HostUiEvent::Stopped(fill(tr("Accept error: {}"), &[&e])));
                 return;
             }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_repeater_host_loop(
-    repeater_addr: String,
-    session_code: String,
-    pin: String,
-    config: HostConfig,
-    stop_flag: Arc<AtomicBool>,
-    active_stream: Arc<Mutex<Option<TcpStream>>>,
-    tx: Sender<HostUiEvent>,
-    ctx: egui::Context,
-) {
+fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: HostRun) {
     let mut limiter = BruteForceLimiter::new();
-    while !stop_flag.load(Ordering::SeqCst) && !limiter.is_locked() {
+    while !run.stopped() && !limiter.is_locked() {
         let mut stream = match TcpStream::connect(&repeater_addr) {
             Ok(s) => s,
             Err(e) => {
-                let _ = tx.send(HostUiEvent::Stopped(fill(
+                run.notify(HostUiEvent::Stopped(fill(
                     tr("Failed to reach repeater {}: {}"),
                     &[&repeater_addr, &e],
                 )));
-                ctx.request_repaint();
                 return;
             }
         };
         let _ = stream.set_nodelay(true);
         if let Err(e) = register_repeater_mode_ii(&mut stream, &session_code) {
-            let _ = tx.send(HostUiEvent::Stopped(fill(
+            run.notify(HostUiEvent::Stopped(fill(
                 tr("Failed to register ID:{} on repeater: {}"),
                 &[&session_code, &e],
             )));
-            ctx.request_repaint();
             return;
         }
         if let Ok(cloned) = stream.try_clone() {
-            *active_stream.lock().unwrap() = Some(cloned);
+            *run.active_stream.lock().unwrap() = Some(cloned);
         }
 
         let endpoint = format!("{repeater_addr} (ID:{session_code})");
-        let _ = tx.send(HostUiEvent::Waiting {
+        run.notify(HostUiEvent::Waiting {
             endpoint: endpoint.clone(),
             e2ee: true,
         });
-        ctx.request_repaint();
 
-        match serve_e2ee_stream(config.clone(), &mut stream, &pin, &mut limiter) {
-            Ok(()) => {
-                *active_stream.lock().unwrap() = None;
-                let _ = tx.send(HostUiEvent::Stopped(
+        // The repeater keeps this socket idle until a viewer is paired, so there is no timeout here; stopping
+        // (or the 15 minute limit) closes the socket and ends the wait.
+        let before = limiter.failures;
+        match crate::shared::crypto::host_e2ee_handshake(
+            &mut stream,
+            &run.current_pin(),
+            &mut limiter,
+        ) {
+            Ok(keys) => {
+                let mut config = run.config.clone();
+                config.gate = Some(run.gate(&endpoint, true, None));
+                let mut e2ee = crate::shared::crypto::E2eeStream::new(&mut stream, keys);
+                let result = serve_stream(config, &mut e2ee);
+                *run.active_stream.lock().unwrap() = None;
+                run.finish(endpoint, result);
+                // One visit per code: the next one needs a new PIN and a fresh start.
+                run.notify(HostUiEvent::Stopped(
                     tr("Repeater E2EE session finished.").into(),
                 ));
-                ctx.request_repaint();
                 return;
             }
             Err(e) => {
-                *active_stream.lock().unwrap() = None;
-                if limiter.failures > 0 {
-                    let _ = tx.send(HostUiEvent::PinFailed {
+                *run.active_stream.lock().unwrap() = None;
+                if limiter.failures > before {
+                    run.notify(HostUiEvent::PinFailed {
                         peer: endpoint,
                         attempts: limiter.failures,
                         locked: limiter.is_locked(),
                     });
+                    if run.stopped() || limiter.is_locked() {
+                        return;
+                    }
                 } else {
-                    let _ = tx.send(HostUiEvent::Stopped(fill(tr("Session closed: {}"), &[&e])));
-                }
-                ctx.request_repaint();
-                if stop_flag.load(Ordering::SeqCst) || limiter.is_locked() {
+                    // Not a wrong PIN: stop for real instead of listening on in the background.
+                    run.notify(HostUiEvent::Stopped(fill(tr("Session closed: {}"), &[&e])));
                     return;
                 }
             }
@@ -1799,6 +2236,80 @@ fn run_repeater_host_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pin_changes_after_every_visit_and_the_host_thread_sees_it() {
+        let mut v = HostView::default();
+        v.set_pin("000000".into());
+        let (tx, rx) = mpsc::channel();
+        v.events_rx = Some(rx);
+        tx.send(HostUiEvent::Disconnected {
+            peer: "10.0.0.2:5000".into(),
+            reason: "done".into(),
+        })
+        .unwrap();
+        v.poll_events();
+        assert_ne!(v.pin, "000000");
+        assert_eq!(v.pin.len(), PIN_DIGITS);
+        assert_eq!(*v.pin_shared.lock().unwrap(), v.pin);
+
+        // A refused connection also burns the PIN.
+        v.set_pin("000000".into());
+        tx.send(HostUiEvent::Denied {
+            peer: "10.0.0.3:5000".into(),
+        })
+        .unwrap();
+        v.poll_events();
+        assert_ne!(*v.pin_shared.lock().unwrap(), "000000");
+    }
+
+    #[test]
+    fn a_connection_waits_for_the_answer_and_no_answer_means_no() {
+        let mut v = HostView::default();
+        let (tx, rx) = mpsc::channel();
+        v.events_rx = Some(rx);
+        let (reply, answer) = mpsc::channel();
+        tx.send(HostUiEvent::Consent {
+            peer: "10.0.0.2:5000".into(),
+            e2ee: true,
+            reply,
+        })
+        .unwrap();
+        v.poll_events();
+        assert!(matches!(v.status, HostStatus::Pending { .. }));
+        assert!(v.is_running());
+        // Nothing was sent to the host thread yet: it keeps waiting.
+        assert!(answer.try_recv().is_err());
+        v.answer_consent(false);
+        assert_eq!(answer.try_recv(), Ok(false));
+    }
+
+    #[test]
+    fn stopping_while_a_connection_waits_refuses_it() {
+        let mut v = HostView::default();
+        let (tx, rx) = mpsc::channel();
+        v.events_rx = Some(rx);
+        let (reply, answer) = mpsc::channel();
+        tx.send(HostUiEvent::Consent {
+            peer: "10.0.0.2:5000".into(),
+            e2ee: true,
+            reply,
+        })
+        .unwrap();
+        v.poll_events();
+        v.stop_sharing();
+        assert_eq!(answer.try_recv(), Ok(false));
+        assert_eq!(v.status, HostStatus::Idle);
+    }
+
+    #[test]
+    fn file_transfer_and_the_classic_password_are_safe_by_default() {
+        let v = HostView::default();
+        assert!(!v.allow_files);
+        assert!(v.drives.roots().is_empty());
+        assert_ne!(v.studio_password, "studio");
+        assert!(v.studio_password.len() >= 10);
+    }
 
     #[test]
     fn parses_an_invitation_in_english_and_in_spanish() {
@@ -1848,7 +2359,7 @@ mod tests {
         view.regenerate_credentials();
         assert_eq!(view.status, HostStatus::Idle);
         assert_eq!(view.session_code.len(), 6);
-        assert_eq!(view.pin.len(), 4);
+        assert_eq!(view.pin.len(), PIN_DIGITS);
         assert!(!view.audit_log.is_empty());
         let _ = old_code;
     }
