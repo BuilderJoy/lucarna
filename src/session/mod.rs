@@ -1,7 +1,7 @@
 //! Session aggregate: one live connection to a VNC server. Owns the socket and
 //! routes each server message to the feature that understands it.
 
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
@@ -13,6 +13,7 @@ use crate::features::file_transfer::{self, DualFiles, FileOps, RemoteFiles};
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::sftp::SftpClient;
 use crate::features::ssh::Tunnel;
+use crate::shared::crypto::{E2eeReader, E2eeStream, E2eeWriter, viewer_e2ee_handshake};
 use crate::shared::wire::{invalid, read_u8};
 
 pub enum Event {
@@ -31,16 +32,59 @@ pub enum Event {
     Closed(String),
 }
 
+enum OutboundSink {
+    Tcp(TcpStream),
+    E2ee(E2eeWriter<TcpStream>),
+}
+
 /// Client-to-server channel, shared by the UI and the reader thread.
-pub struct Outbound(Mutex<TcpStream>);
+pub struct Outbound(Mutex<OutboundSink>);
 
 impl Outbound {
+    pub fn new_tcp(stream: TcpStream) -> Self {
+        Self(Mutex::new(OutboundSink::Tcp(stream)))
+    }
+
+    pub fn new_e2ee(writer: E2eeWriter<TcpStream>) -> Self {
+        Self(Mutex::new(OutboundSink::E2ee(writer)))
+    }
+
     pub fn send(&self, msg: &[u8]) -> io::Result<()> {
-        self.0.lock().unwrap().write_all(msg)
+        let mut sink = self.0.lock().unwrap();
+        match &mut *sink {
+            OutboundSink::Tcp(s) => s.write_all(msg),
+            OutboundSink::E2ee(w) => {
+                w.write_all(msg)?;
+                w.flush()
+            }
+        }
     }
 
     pub fn close(&self) {
-        let _ = self.0.lock().unwrap().shutdown(Shutdown::Both);
+        let mut sink = self.0.lock().unwrap();
+        match &mut *sink {
+            OutboundSink::Tcp(s) => {
+                let _ = s.shutdown(Shutdown::Both);
+            }
+            OutboundSink::E2ee(w) => {
+                let _ = w.flush();
+                let _ = w.get_ref().shutdown(Shutdown::Both);
+            }
+        }
+    }
+}
+
+enum SessionReader {
+    Plain(BufReader<TcpStream>),
+    E2ee(BufReader<E2eeReader<TcpStream>>),
+}
+
+impl Read for SessionReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::E2ee(r) => r.read(buf),
+        }
     }
 }
 
@@ -74,14 +118,28 @@ pub fn run(
         if repeater.is_some() {
             handshake::via_repeater(&mut s, address)?;
         }
-        let init = handshake::perform(&mut s, creds)?;
-        s.set_read_timeout(None)?;
+        let (outbound, mut s, init) = if !creds.pin.is_empty() {
+            let keys = viewer_e2ee_handshake(&mut s, &creds.pin)?;
+            let mut e2ee_stream = E2eeStream::new(s, keys);
+            let init = handshake::perform(&mut e2ee_stream, creds)?;
+            e2ee_stream.get_ref().set_read_timeout(None)?;
+            remote_screen::negotiate(&mut e2ee_stream, &[file_transfer::ENC_PROTOCOL_VERSION])?;
+            let (reader, writer) = e2ee_stream.into_split()?;
+            let outbound = Arc::new(Outbound::new_e2ee(writer));
+            let reader = SessionReader::E2ee(BufReader::with_capacity(1 << 16, reader));
+            (outbound, reader, init)
+        } else {
+            let init = handshake::perform(&mut s, creds)?;
+            s.set_read_timeout(None)?;
+            remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
+            let outbound = Arc::new(Outbound::new_tcp(s.try_clone()?));
+            let reader = SessionReader::Plain(BufReader::with_capacity(1 << 16, s));
+            (outbound, reader, init)
+        };
         let screen = Arc::new(Mutex::new(Framebuffer::new(
             init.width.into(),
             init.height.into(),
         )?));
-        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
-        let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
         remote_screen::request_update(&outbound, false, &screen)?;
         let (tx_files, notify_files) = (tx.clone(), notify.clone());
         let vnc_files = Arc::new(RemoteFiles::new(outbound.clone(), move |u| {
@@ -104,8 +162,6 @@ pub fn run(
             files: files.clone(),
             clipboard: clipboard.clone(),
         });
-        // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
-        let mut s = BufReader::with_capacity(1 << 16, s);
         let mut decoder = remote_screen::Decoder::default();
         let mut receiver = file_transfer::Receiver::default();
 
@@ -200,7 +256,15 @@ pub fn test(
     if repeater.is_some() {
         handshake::via_repeater(&mut s, address).map_err(|e| format!("Repeater error: {e}"))?;
     }
-    match handshake::perform(&mut s, creds) {
+    let init_res = if !creds.pin.is_empty() {
+        let keys =
+            viewer_e2ee_handshake(&mut s, &creds.pin).map_err(|e| format!("E2EE error: {e}"))?;
+        let mut e2ee_stream = E2eeStream::new(s, keys);
+        handshake::perform(&mut e2ee_stream, creds)
+    } else {
+        handshake::perform(&mut s, creds)
+    };
+    match init_res {
         Ok(init) => {
             let ssh_tag = if ssh.is_some() { " (via SSH)" } else { "" };
             Ok(format!(
@@ -238,6 +302,7 @@ mod tests {
             &Credentials {
                 user: String::new(),
                 password: "wrong-pw".into(),
+                pin: String::new(),
             },
             tx,
             || {},
@@ -255,6 +320,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -433,6 +499,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -466,6 +533,7 @@ mod tests {
             let creds = Credentials {
                 user: String::new(),
                 password: password.clone(),
+                pin: String::new(),
             };
             let mut s = connect(&address).unwrap();
             s.set_read_timeout(Some(TIMEOUT)).unwrap();
@@ -478,7 +546,7 @@ mod tests {
             m.extend((encodings.len() as u16).to_be_bytes());
             encodings.iter().for_each(|e| m.extend(e.to_be_bytes()));
             s.write_all(&m).unwrap();
-            let out = Outbound(Mutex::new(s.try_clone().unwrap()));
+            let out = Outbound::new_tcp(s.try_clone().unwrap());
             remote_screen::request_update(&out, false, &screen).unwrap();
             let mut r = BufReader::new(s);
             assert_eq!(read_u8(&mut r).unwrap(), 0, "expected a FramebufferUpdate");
@@ -528,6 +596,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -575,6 +644,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},

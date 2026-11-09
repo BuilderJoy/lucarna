@@ -429,8 +429,33 @@ pub fn serve_stream(config: HostConfig, stream: &mut (impl Read + Write)) -> io:
     }
 }
 
-/// Checks if Lucarna was launched with `--host [bind_addr] [--password <pw>] [--view-only]`
-/// and runs the embedded RFB 3.8 + Native File Transfer Host listener in user space.
+/// Performs the E2EE handshake with PIN authentication and serves the RFB 3.8 Host session inside the AEAD tunnel.
+pub fn serve_e2ee_stream(
+    config: HostConfig,
+    stream: &mut (impl Read + Write),
+    pin: &str,
+    limiter: &mut crate::shared::crypto::BruteForceLimiter,
+) -> io::Result<()> {
+    let keys = crate::shared::crypto::host_e2ee_handshake(stream, pin, limiter)?;
+    let mut e2ee = crate::shared::crypto::E2eeStream::new(stream, keys);
+    serve_stream(config, &mut e2ee)
+}
+
+/// Registers this Host with an UltraVNC Repeater in Mode II using a 250-byte NUL-padded `ID:XXXXXX` header.
+pub fn register_repeater_mode_ii(stream: &mut impl Write, session_code: &str) -> io::Result<()> {
+    let clean = crate::shared::crypto::normalize_code(session_code);
+    if clean.is_empty() || clean.len() > 240 {
+        return Err(invalid("invalid session code for repeater Mode II"));
+    }
+    let id_header = format!("ID:{clean}");
+    let mut msg = [0u8; 250];
+    msg[..id_header.len()].copy_from_slice(id_header.as_bytes());
+    stream.write_all(&msg)?;
+    stream.flush()
+}
+
+/// Checks if Lucarna was launched with `--host [bind_addr] [--password <pw>] [--pin <pin>] [--repeater <addr>] [--code <code>] [--view-only]`
+/// and runs the embedded RFB 3.8 + Native File Transfer + E2EE Host in user space.
 pub fn cli_host() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.iter().any(|a| a == "--host") {
@@ -439,6 +464,9 @@ pub fn cli_host() -> Option<i32> {
 
     let mut bind_addr = String::from("127.0.0.1:5950");
     let mut password = String::from("studio");
+    let mut pin = String::new();
+    let mut repeater_addr = String::new();
+    let mut session_code = String::new();
     let mut view_only = false;
 
     let mut i = 0;
@@ -458,10 +486,87 @@ pub fn cli_host() -> Option<i32> {
                     i += 1;
                 }
             }
+            "--pin" => {
+                if let Some(next) = args.get(i + 1) {
+                    pin = next.clone();
+                    i += 1;
+                }
+            }
+            "--repeater" => {
+                if let Some(next) = args.get(i + 1) {
+                    repeater_addr = next.clone();
+                    i += 1;
+                }
+            }
+            "--code" => {
+                if let Some(next) = args.get(i + 1) {
+                    session_code = crate::shared::crypto::normalize_code(next);
+                    i += 1;
+                }
+            }
             "--view-only" => view_only = true,
             _ => {}
         }
         i += 1;
+    }
+
+    if !repeater_addr.is_empty() {
+        if session_code.is_empty() {
+            session_code = crate::shared::crypto::generate_session_code();
+        }
+        if pin.is_empty() {
+            pin = crate::shared::crypto::generate_pin();
+        }
+        let formatted_code = crate::shared::crypto::format_code(&session_code);
+        println!("================================================================");
+        println!("  Lucarna QuickSupport Host (Fase 3: Repetidor Modo II + E2EE)");
+        println!("================================================================");
+        println!("  Repetidor     : {repeater_addr}");
+        println!("  Código Sesión : {formatted_code} (ID:{session_code})");
+        println!("  PIN E2EE      : {pin} (Bloqueo tras 3 intentos fallidos)");
+        println!("================================================================");
+
+        let config = HostConfig {
+            desktop_name: "Lucarna QuickSupport Host".into(),
+            password: String::new(),
+            view_only,
+            fixed_challenge: None,
+        };
+        let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
+        while !limiter.is_locked() {
+            match std::net::TcpStream::connect(&repeater_addr) {
+                Ok(mut stream) => {
+                    let _ = stream.set_nodelay(true);
+                    if let Err(e) = register_repeater_mode_ii(&mut stream, &session_code) {
+                        eprintln!("[!] Error al registrar ID en repetidor: {e}");
+                        return Some(1);
+                    }
+                    println!(
+                        "[+] Registrado en repetidor como ID:{session_code}. Esperando operador..."
+                    );
+                    match serve_e2ee_stream(config.clone(), &mut stream, &pin, &mut limiter) {
+                        Ok(()) => {
+                            println!("[-] Sesión E2EE finalizada correctamente.");
+                            break;
+                        }
+                        Err(e) => {
+                            eprintln!("[!] Sesión E2EE rechazada o cerrada: {e}");
+                            if limiter.is_locked() {
+                                eprintln!(
+                                    "[X] ALERTA DE SEGURIDAD: 3 intentos de PIN fallidos. Código {formatted_code} revocado."
+                                );
+                                return Some(2);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[!] No se pudo conectar al repetidor {repeater_addr}: {e}");
+                    return Some(1);
+                }
+            }
+        }
+        return Some(0);
     }
 
     let listener = match std::net::TcpListener::bind(&bind_addr) {
@@ -474,17 +579,21 @@ pub fn cli_host() -> Option<i32> {
 
     let drives = VirtualDrives::default();
     println!("================================================================");
-    println!("  Lucarna Studio Host (Fase 1 + Fase 2: RFB 3.8 + Archivos sin SSH)");
+    println!("  Lucarna Studio Host (RFB 3.8 + Archivos sin SSH + E2EE)");
     println!("================================================================");
     println!("  Escuchando en : {bind_addr}");
-    println!(
-        "  Contraseña    : {}",
-        if password.is_empty() {
-            "(sin contraseña)"
-        } else {
-            &password
-        }
-    );
+    if !pin.is_empty() {
+        println!("  Túnel E2EE    : ACTIVO (ChaCha20-Poly1305 + X25519, PIN: {pin})");
+    } else {
+        println!(
+            "  Contraseña    : {}",
+            if password.is_empty() {
+                "(sin contraseña)"
+            } else {
+                &password
+            }
+        );
+    }
     println!(
         "  Modo          : {}",
         if view_only {
@@ -497,17 +606,19 @@ pub fn cli_host() -> Option<i32> {
     for (letter, path) in drives.roots() {
         println!("    {letter}:\\  ->  {}", path.display());
     }
-    println!("----------------------------------------------------------------");
-    println!("  Abre otra terminal y ejecuta: cargo run --release");
-    println!("  Conéctate a {bind_addr} con la contraseña '{password}'.");
     println!("================================================================");
 
     let config = HostConfig {
         desktop_name: "Lucarna Studio Host".into(),
-        password,
+        password: if pin.is_empty() {
+            password
+        } else {
+            String::new()
+        },
         view_only,
         fixed_challenge: None,
     };
+    let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
 
     for incoming in listener.incoming() {
         match incoming {
@@ -518,9 +629,22 @@ pub fn cli_host() -> Option<i32> {
                     .unwrap_or_else(|_| "cliente".into());
                 let _ = stream.set_nodelay(true);
                 println!("[+] Visor conectado desde {peer}");
-                match serve_stream(config.clone(), &mut stream) {
+                let res = if !pin.is_empty() {
+                    serve_e2ee_stream(config.clone(), &mut stream, &pin, &mut limiter)
+                } else {
+                    serve_stream(config.clone(), &mut stream)
+                };
+                match res {
                     Ok(()) => println!("[-] Sesión finalizada con {peer}"),
-                    Err(e) => println!("[!] Sesión cerrada con {peer}: {e}"),
+                    Err(e) => {
+                        println!("[!] Sesión cerrada con {peer}: {e}");
+                        if limiter.is_locked() {
+                            eprintln!(
+                                "[X] 3 intentos de PIN fallidos. Cerrando Host por seguridad."
+                            );
+                            return Some(2);
+                        }
+                    }
                 }
             }
             Err(e) => eprintln!("[!] Error de conexión entrante: {e}"),
@@ -652,6 +776,7 @@ mod tests {
         let creds = Credentials {
             user: String::new(),
             password: "djpin".into(),
+            pin: String::new(),
         };
         let init = handshake::perform(&mut client, &creds).unwrap();
         assert_eq!((init.width, init.height), (128, 64));
@@ -707,5 +832,73 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn e2ee_repeater_mode_ii_session_roundtrip() {
+        let (mut server_stream, mut client) = pipe_pair();
+        let f1 = Frame::solid(64, 64, [20, 40, 60, 0]);
+        let expected_f1 = f1.pixels.clone();
+
+        let server_handle = thread::spawn(move || {
+            // 1. Register Mode II ID on repeater
+            register_repeater_mode_ii(&mut server_stream, "582-914").unwrap();
+
+            // 2. Perform E2EE handshake with PIN "4920"
+            let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
+            let keys = crate::shared::crypto::host_e2ee_handshake(
+                &mut server_stream,
+                "4920",
+                &mut limiter,
+            )
+            .unwrap();
+            let mut e2ee = crate::shared::crypto::E2eeStream::new(server_stream, keys);
+
+            // 3. Serve RFB 3.8 session inside the AEAD tunnel
+            let cfg = HostConfig {
+                desktop_name: "Encrypted Studio".into(),
+                password: String::new(),
+                view_only: false,
+                fixed_challenge: None,
+            };
+            let capturer = SyntheticCapturer::new(vec![f1]);
+            let injector = RecordingInjector::new(false);
+            let mut host = HostSession::new(cfg, capturer, injector);
+
+            host.handshake(&mut e2ee).unwrap();
+            // SetPixelFormat, SetEncodings, FramebufferUpdateRequest
+            for _ in 0..3 {
+                host.step(&mut e2ee).unwrap();
+            }
+        });
+
+        // Verify the repeater sees the 250-byte "ID:582914\0..." registration packet
+        let mut id_packet = [0u8; 250];
+        client.read_exact(&mut id_packet).unwrap();
+        assert_eq!(&id_packet[0..9], b"ID:582914");
+        assert!(id_packet[9..].iter().all(|&b| b == 0));
+
+        // Viewer performs E2EE handshake with matching PIN
+        let v_keys = crate::shared::crypto::viewer_e2ee_handshake(&mut client, "4920").unwrap();
+        let mut v_e2ee = crate::shared::crypto::E2eeStream::new(client, v_keys);
+
+        let creds = Credentials::new("", "").with_pin("4920");
+        let init = handshake::perform(&mut v_e2ee, &creds).unwrap();
+        assert_eq!(init.name, "Encrypted Studio");
+        assert_eq!((init.width, init.height), (64, 64));
+
+        remote_screen::negotiate(&mut v_e2ee, &[ENC_PROTOCOL_VERSION]).unwrap();
+        assert_eq!(read_u8(&mut v_e2ee).unwrap(), 7);
+        let _ = crate::features::file_transfer::read(&mut v_e2ee).unwrap();
+
+        let screen = Mutex::new(Framebuffer::new(64, 64).unwrap());
+        let mut decoder = Decoder::default();
+        v_e2ee.write_all(&[3, 0, 0, 0, 0, 0, 0, 64, 0, 64]).unwrap();
+        v_e2ee.flush().unwrap();
+        assert_eq!(read_u8(&mut v_e2ee).unwrap(), 0);
+        remote_screen::read_update(&mut v_e2ee, &screen, &mut decoder).unwrap();
+        assert_eq!(screen.lock().unwrap().pixels, expected_f1);
+
+        server_handle.join().unwrap();
     }
 }

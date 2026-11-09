@@ -1274,6 +1274,7 @@ impl Dashboard {
                 let creds = Credentials {
                     user: c.user,
                     password: saved::password(&c.address).unwrap_or_default(),
+                    pin: String::new(),
                 };
                 Some(ConnectRequest {
                     repeater: ServerAddress::parse(&c.repeater),
@@ -1525,6 +1526,7 @@ impl Dashboard {
                                 let creds = Credentials {
                                     user: self.editor.user.trim().into(),
                                     password: self.editor.password.clone(),
+                                    pin: String::new(),
                                 };
                                 self.save_editor(target.clone());
                                 request = Some(ConnectRequest {
@@ -1689,6 +1691,7 @@ impl Dashboard {
                         let creds = Credentials {
                             user: self.editor.user.trim().into(),
                             password: self.editor.password.clone(),
+                            pin: String::new(),
                         };
                         self.save_editor(t.clone());
                         request = Some(ConnectRequest {
@@ -2135,6 +2138,7 @@ impl Dashboard {
         let creds = Credentials {
             user: self.editor.user.trim().into(),
             password,
+            pin: String::new(),
         };
         if let Some(target) = &ssh {
             let ssh_pw = if self.editor.ssh_password.is_empty() {
@@ -2245,6 +2249,7 @@ impl Dashboard {
                 creds: Credentials {
                     user: c.user.clone(),
                     password: saved::password(&c.address).unwrap_or_default(),
+                    pin: String::new(),
                 },
                 options: c.options.clone(),
             }
@@ -2255,6 +2260,7 @@ impl Dashboard {
                 creds: Credentials {
                     user: String::new(),
                     password: saved::password(&address).unwrap_or_default(),
+                    pin: String::new(),
                 },
                 address,
                 options: SessionOptions::default(),

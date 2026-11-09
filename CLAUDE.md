@@ -39,6 +39,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 - A feature owns its domain types, wire messages (`protocol.rs`) and UI (`view.rs`). Only what its `mod.rs` re-exports is public; cross-feature use goes through those exports.
 - `shared/wire.rs`: big-endian read helpers and `invalid()` for `io::ErrorKind::InvalidData` errors.
+- `shared/crypto.rs`: End-to-End Encryption (E2EE) over untrusted repeaters using ephemeral X25519 key exchange, PBKDF2-HMAC-SHA256 PIN verification, RFC 8439 ChaCha20-Poly1305 AEAD framing (`E2eeStream`, `E2eeReader`, `E2eeWriter`), and `BruteForceLimiter` (lockout after 3 failed PIN attempts).
 
 ### Threading / data flow
 
