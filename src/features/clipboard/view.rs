@@ -146,7 +146,13 @@ impl ClipboardView {
                             let mut to_copy = None;
 
                             for item in &self.history {
-                                egui::Frame::group(ui.style()).show(ui, |ui| {
+                                let pal = theme::palette(ui.ctx());
+                                egui::Frame::NONE
+                                    .fill(pal.surface)
+                                    .stroke(egui::Stroke::new(1.0, pal.border))
+                                    .corner_radius(egui::CornerRadius::same(10))
+                                    .inner_margin(egui::Margin::symmetric(12, 10))
+                                    .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         let (tag, color) = if item.is_from_server {
                                             ("Remote ➔ Local", theme::palette(ui.ctx()).success)

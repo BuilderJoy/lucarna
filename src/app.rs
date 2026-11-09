@@ -43,14 +43,35 @@ struct LiveSession {
     bar_rect: Option<egui::Rect>,
     /// False until the first FramebufferUpdate lands; a full Raw frame can take seconds on slow links.
     has_frame: bool,
+    /// Whether the session runs through an SSH tunnel (shown as an encryption badge).
+    ssh: bool,
+    fullscreen_on_open: bool,
+    /// Width the centred tool group took last frame, to centre it this frame.
+    tools_w: f32,
+}
+
+/// One open connection: still connecting (`live` is `None`) or running.
+struct Tab {
+    events: mpsc::Receiver<Event>,
+    pending: Option<(ServerAddress, SessionOptions)>,
+    ssh: bool,
+    /// What the tab shows until the server tells us its name.
+    title: String,
+    live: Option<LiveSession>,
+}
+
+enum Outcome {
+    Nothing,
+    Connected,
+    Closed(String),
 }
 
 #[derive(Default)]
 pub struct App {
     dashboard: Dashboard,
-    pending: Option<(ServerAddress, SessionOptions)>,
-    events: Option<mpsc::Receiver<Event>>,
-    live: Option<LiveSession>,
+    tabs: Vec<Tab>,
+    /// Index into `tabs`; `None` shows the Address Book.
+    active: Option<usize>,
 }
 
 impl App {
@@ -67,7 +88,14 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let (address, repeater, creds) = (req.address.clone(), req.repeater, req.creds);
-        self.pending = Some((req.address, req.options));
+        self.tabs.push(Tab {
+            events: rx,
+            pending: Some((req.address.clone(), req.options)),
+            ssh: ssh.is_some(),
+            title: req.address.as_str().to_string(),
+            live: None,
+        });
+        self.active = Some(self.tabs.len() - 1);
         std::thread::spawn(move || {
             session::run(
                 &address,
@@ -78,141 +106,297 @@ impl App {
                 move || ctx.request_repaint(),
             )
         });
-        self.events = Some(rx);
         self.dashboard.status.clear();
     }
 
     fn poll_events(&mut self, ctx: &egui::Context) {
-        let Some(rx) = &self.events else { return };
-        let mut closed = false;
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                Event::Connected {
-                    name,
-                    outbound,
-                    screen,
-                    files,
-                    clipboard,
-                } => {
-                    self.dashboard.status.clear();
-                    let (address, opts) = self.pending.take().unwrap_or_else(|| {
-                        (
-                            ServerAddress::parse("127.0.0.1").unwrap(),
-                            SessionOptions::default(),
-                        )
-                    });
-                    self.dashboard.mark_connected(&address);
-                    if opts.fullscreen {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-                    }
-                    let scale = if opts.scale_1_1 {
-                        Scale::Actual
-                    } else {
-                        Scale::Fit
-                    };
-                    let live = LiveSession {
-                        address,
-                        name,
-                        outbound,
-                        screen,
-                        view: ScreenView::default(),
-                        input: InputForwarder::default(),
-                        files,
-                        files_view: FilesView::default(),
-                        chat: ChatView::default(),
-                        clipboard,
-                        clipboard_view: ClipboardView::default(),
-                        view_only: opts.view_only,
-                        share_clipboard: opts.share_clipboard,
-                        save_preview: opts.save_preview,
-                        last_preview: None,
-                        bell_until: None,
-                        user_disconnected: false,
-                        scale,
-                        bar_rect: None,
-                        has_frame: false,
-                    };
-                    self.live = Some(live);
-                }
-                Event::Bell => {
-                    if let Some(l) = &mut self.live {
-                        l.bell_until = Some(Instant::now() + BELL_FLASH);
-                    }
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
-                        egui::UserAttentionType::Informational,
-                    ));
-                    ctx.request_repaint_after(BELL_FLASH);
-                }
-                Event::Chat(msg) => {
-                    if matches!(msg, Msg::Text(_)) {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
-                            egui::UserAttentionType::Informational,
-                        ));
-                    }
-                    if let Some(l) = &mut self.live {
-                        l.chat.apply(msg);
-                    }
-                }
-                Event::Files(update) => {
-                    if let Some(l) = &mut self.live {
-                        if matches!(
-                            update,
-                            crate::features::file_transfer::Update::Access(false)
-                        ) && l.files.has_sftp()
-                            && !l.files.is_sftp_active()
-                        {
-                            l.files.switch_to_sftp();
-                        } else {
-                            l.files_view.apply(update, &*l.files);
+        let mut closed = Vec::new();
+        for i in 0..self.tabs.len() {
+            let is_active = self.active == Some(i);
+            while let Ok(event) = self.tabs[i].events.try_recv() {
+                match handle_event(
+                    &mut self.dashboard,
+                    &mut self.tabs[i],
+                    ctx,
+                    event,
+                    is_active,
+                ) {
+                    Outcome::Nothing => {}
+                    Outcome::Connected => {
+                        // The user asked for this connection from the Address Book (or is waiting on it).
+                        if self.active.is_none() || is_active {
+                            self.active = Some(i);
+                            if self.tabs[i]
+                                .live
+                                .as_ref()
+                                .is_some_and(|l| l.fullscreen_on_open)
+                            {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                            }
                         }
                     }
-                }
-                Event::ScreenUpdated => {
-                    if let Some(l) = &mut self.live {
-                        l.has_frame = true;
-                        if l.save_preview
-                            && l.last_preview
-                                .is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL)
-                        {
-                            let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
-                            self.dashboard.update_preview(ctx, &l.address, w, h, &rgba);
-                            l.last_preview = Some(Instant::now());
-                        }
+                    Outcome::Closed(reason) => {
+                        closed.push((i, reason));
+                        break;
                     }
-                }
-                Event::ServerClipboard(text) => {
-                    if let Some(l) = self.live.as_mut()
-                        && l.share_clipboard
-                        && !l.view_only
-                    {
-                        ctx.copy_text(text.clone());
-                        l.clipboard_view.push(text, true);
-                    }
-                }
-                Event::Closed(reason) => {
-                    let intentional = self.live.as_ref().is_some_and(|l| l.user_disconnected);
-                    if let Some(l) = self.live.take()
-                        && l.has_frame
-                        && l.save_preview
-                    {
-                        let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
-                        self.dashboard.update_preview(ctx, &l.address, w, h, &rgba);
-                    }
-                    if ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                    }
-                    if intentional {
-                        self.dashboard.status.clear();
-                    } else {
-                        self.dashboard.status = reason;
-                    }
-                    self.pending = None;
-                    closed = true;
                 }
             }
         }
-        if closed {
-            self.events = None;
+        for (i, reason) in closed.into_iter().rev() {
+            // A deliberate disconnect has an empty reason and clears the message.
+            if self.active == Some(i) || !reason.is_empty() {
+                self.dashboard.status = reason;
+            }
+            self.remove_tab(i);
+        }
+    }
+
+    fn remove_tab(&mut self, i: usize) {
+        self.tabs.remove(i);
+        self.active = match self.active {
+            Some(a) if a == i => None,
+            Some(a) if a > i => Some(a - 1),
+            other => other,
+        };
+    }
+
+    /// Browser-style strip: the Address Book, one tab per connection, and a new-connection button.
+    fn tab_strip(&mut self, ui: &mut egui::Ui) {
+        use lucide_icons::Icon;
+        let p = theme::palette(ui.ctx());
+        let (mut select, mut close) = (None, None);
+        let frame = egui::Frame::NONE
+            .fill(p.bg)
+            .inner_margin(egui::Margin::symmetric(12, 6));
+        egui::Panel::top("session_tabs")
+            .frame(frame)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let home = self.active.is_none();
+                    let btn = egui::Button::new(char::from(Icon::LayoutGrid).to_string())
+                        .fill(if home {
+                            p.elevated
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::NONE)
+                        .min_size(egui::vec2(36.0, 32.0));
+                    if ui.add(btn).on_hover_text("Address book").clicked() {
+                        select = Some(None);
+                    }
+                    for (i, t) in self.tabs.iter().enumerate() {
+                        let sel = self.active == Some(i);
+                        let (name, up) = match &t.live {
+                            Some(l) => (l.name.as_str(), l.has_frame),
+                            None => (t.title.as_str(), false),
+                        };
+                        egui::Frame::NONE
+                            .fill(if sel { p.surface } else { Color32::TRANSPARENT })
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                if sel { p.border } else { Color32::TRANSPARENT },
+                            ))
+                            .corner_radius(egui::CornerRadius {
+                                nw: 9,
+                                ne: 9,
+                                sw: 0,
+                                se: 0,
+                            })
+                            .inner_margin(egui::Margin::symmetric(12, 6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    if t.live.is_none() {
+                                        ui.add(egui::Spinner::new().size(12.0));
+                                    } else {
+                                        let dot = if up {
+                                            p.success
+                                        } else {
+                                            ui.visuals().warn_fg_color
+                                        };
+                                        ui.label(RichText::new("●").size(10.0).color(dot));
+                                    }
+                                    let label = egui::Label::new(
+                                        RichText::new(name)
+                                            .color(if sel { p.text } else { p.text2 })
+                                            .strong(),
+                                    )
+                                    .sense(egui::Sense::click());
+                                    if ui.add(label).clicked() {
+                                        select = Some(Some(i));
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Button::new(char::from(Icon::X).to_string())
+                                                .small()
+                                                .frame(false),
+                                        )
+                                        .on_hover_text("Close session")
+                                        .clicked()
+                                    {
+                                        close = Some(i);
+                                    }
+                                });
+                            });
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(char::from(Icon::Plus).to_string())
+                                .fill(Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE)
+                                .min_size(egui::vec2(30.0, 30.0)),
+                        )
+                        .on_hover_text("New connection")
+                        .clicked()
+                    {
+                        select = Some(None);
+                    }
+                });
+            });
+        if let Some(s) = select {
+            self.active = s;
+        }
+        if let Some(i) = close {
+            match self.tabs[i].live.as_mut() {
+                // The session thread answers with `Closed`, which removes the tab.
+                Some(l) => {
+                    l.user_disconnected = true;
+                    l.outbound.close();
+                }
+                None => self.remove_tab(i),
+            }
+        }
+    }
+}
+
+/// Applies one session event to its tab.
+fn handle_event(
+    dashboard: &mut Dashboard,
+    tab: &mut Tab,
+    ctx: &egui::Context,
+    event: Event,
+    is_active: bool,
+) -> Outcome {
+    match event {
+        Event::Connected {
+            name,
+            outbound,
+            screen,
+            files,
+            clipboard,
+        } => {
+            dashboard.status.clear();
+            let (address, opts) = tab.pending.take().unwrap_or_else(|| {
+                (
+                    ServerAddress::parse("127.0.0.1").unwrap(),
+                    SessionOptions::default(),
+                )
+            });
+            dashboard.mark_connected(&address);
+            let scale = if opts.scale_1_1 {
+                Scale::Actual
+            } else {
+                Scale::Fit
+            };
+            tab.live = Some(LiveSession {
+                address,
+                name,
+                outbound,
+                screen,
+                view: ScreenView::default(),
+                input: InputForwarder::default(),
+                files,
+                files_view: FilesView::default(),
+                chat: ChatView::default(),
+                clipboard,
+                clipboard_view: ClipboardView::default(),
+                view_only: opts.view_only,
+                share_clipboard: opts.share_clipboard,
+                save_preview: opts.save_preview,
+                last_preview: None,
+                bell_until: None,
+                user_disconnected: false,
+                scale,
+                bar_rect: None,
+                has_frame: false,
+                ssh: tab.ssh,
+                tools_w: 0.0,
+                fullscreen_on_open: opts.fullscreen,
+            });
+            Outcome::Connected
+        }
+        Event::Bell => {
+            if let Some(l) = &mut tab.live {
+                l.bell_until = Some(Instant::now() + BELL_FLASH);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            ctx.request_repaint_after(BELL_FLASH);
+            Outcome::Nothing
+        }
+        Event::Chat(msg) => {
+            if matches!(msg, Msg::Text(_)) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                    egui::UserAttentionType::Informational,
+                ));
+            }
+            if let Some(l) = &mut tab.live {
+                l.chat.apply(msg);
+            }
+            Outcome::Nothing
+        }
+        Event::Files(update) => {
+            if let Some(l) = &mut tab.live {
+                if matches!(
+                    update,
+                    crate::features::file_transfer::Update::Access(false)
+                ) && l.files.has_sftp()
+                    && !l.files.is_sftp_active()
+                {
+                    l.files.switch_to_sftp();
+                } else {
+                    l.files_view.apply(update, &*l.files);
+                }
+            }
+            Outcome::Nothing
+        }
+        Event::ScreenUpdated => {
+            if let Some(l) = &mut tab.live {
+                l.has_frame = true;
+                if l.save_preview
+                    && l.last_preview
+                        .is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL)
+                {
+                    let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
+                    dashboard.update_preview(ctx, &l.address, w, h, &rgba);
+                    l.last_preview = Some(Instant::now());
+                }
+            }
+            Outcome::Nothing
+        }
+        Event::ServerClipboard(text) => {
+            if let Some(l) = tab.live.as_mut()
+                && l.share_clipboard
+                && !l.view_only
+            {
+                ctx.copy_text(text.clone());
+                l.clipboard_view.push(text, true);
+            }
+            Outcome::Nothing
+        }
+        Event::Closed(reason) => {
+            let intentional = tab.live.as_ref().is_some_and(|l| l.user_disconnected);
+            if let Some(l) = tab.live.take()
+                && l.has_frame
+                && l.save_preview
+            {
+                let (w, h, rgba) = l.screen.lock().unwrap().thumbnail(320, 200);
+                dashboard.update_preview(ctx, &l.address, w, h, &rgba);
+            }
+            if is_active && ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            }
+            Outcome::Closed(if intentional { String::new() } else { reason })
         }
     }
 }
@@ -221,14 +405,20 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_events(&ctx);
-        let Some(live) = &mut self.live else {
-            if let Some(req) = self.dashboard.show(ui, self.events.is_some()) {
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if !fullscreen && !self.tabs.is_empty() {
+            self.tab_strip(ui);
+        }
+        let live_idx = self.active.filter(|&i| self.tabs[i].live.is_some());
+        let Some(live) = live_idx.and_then(|i| self.tabs[i].live.as_mut()) else {
+            // Active but not live means a connection is still being made.
+            let busy = self.active.is_some();
+            if let Some(req) = self.dashboard.show(ui, busy) {
                 self.connect(&ctx, req);
             }
             return;
         };
         // Our own shortcut: consumed before input forwarding so the remote machine never sees it.
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         let toggle = ctx.input_mut(|i| {
             i.consume_key(
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -303,156 +493,245 @@ impl eframe::App for App {
     }
 }
 
+/// One toolbar button; `on` paints it as a toggled-on amber chip. Icon only when `compact`.
+fn tool(
+    ui: &mut egui::Ui,
+    icon: lucide_icons::Icon,
+    label: &str,
+    on: bool,
+    compact: bool,
+    tip: &str,
+) -> bool {
+    let p = theme::palette(ui.ctx());
+    let (fg, fill, stroke) = if on {
+        (
+            p.accent_text,
+            p.accent_soft,
+            egui::Stroke::new(1.0, theme::ACCENT),
+        )
+    } else {
+        (p.text2, Color32::TRANSPARENT, egui::Stroke::NONE)
+    };
+    let text = if compact {
+        RichText::new(char::from(icon).to_string())
+    } else {
+        RichText::new(format!("{} {label}", char::from(icon)))
+    };
+    ui.add(
+        egui::Button::new(text.color(fg))
+            .fill(fill)
+            .stroke(stroke)
+            .min_size(egui::vec2(0.0, 34.0)),
+    )
+    .on_hover_text(if compact {
+        format!("{label}: {tip}")
+    } else {
+        tip.to_string()
+    })
+    .clicked()
+}
+
+/// Left: encryption and resolution. Centre: view and remote tools. Right: Disconnect.
 fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
     use lucide_icons::Icon;
+    let p = theme::palette(ui.ctx());
+    const H: f32 = 38.0;
+    const LEFT_W: f32 = 250.0;
+    const RIGHT_W: f32 = 140.0;
+    let center_w =
+        (ui.available_width() - LEFT_W - RIGHT_W - 2.0 * ui.spacing().item_spacing.x).max(0.0);
+    let compact = center_w < 800.0;
     ui.horizontal(|ui| {
-        let dot = if live.has_frame {
-            theme::palette(ui.ctx()).success
-        } else {
-            ui.visuals().warn_fg_color
-        };
-        ui.label(RichText::new("●").color(dot));
-        ui.label(RichText::new(&live.name).strong());
-        let (w, h) = live.screen.lock().unwrap().size();
-        ui.label(RichText::new(format!("{w}×{h}")).weak());
-        if live.bell_until.is_some_and(|t| Instant::now() < t) {
-            let accent = theme::palette(ui.ctx()).accent_text;
-            ui.label(
-                RichText::new(format!("{} Bell", char::from(Icon::Bell)))
-                    .color(accent)
-                    .strong(),
-            );
-        }
+        ui.allocate_ui_with_layout(
+            egui::vec2(LEFT_W, H),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                let dot = if live.has_frame {
+                    p.success
+                } else {
+                    ui.visuals().warn_fg_color
+                };
+                ui.label(RichText::new("●").size(10.0).color(dot));
+                if live.ssh {
+                    egui::Frame::NONE
+                        .fill(p.success.gamma_multiply(0.16))
+                        .corner_radius(egui::CornerRadius::same(14))
+                        .inner_margin(egui::Margin::symmetric(10, 4))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("{} SSH encrypted", char::from(Icon::Lock)))
+                                    .size(12.0)
+                                    .strong()
+                                    .color(p.success),
+                            );
+                        });
+                }
+                let (w, h) = live.screen.lock().unwrap().size();
+                ui.label(
+                    RichText::new(format!("{w}×{h}"))
+                        .monospace()
+                        .size(12.0)
+                        .color(p.text2),
+                );
+                if live.bell_until.is_some_and(|t| Instant::now() < t) {
+                    ui.label(
+                        RichText::new(format!("{} Bell", char::from(Icon::Bell)))
+                            .color(p.accent_text)
+                            .strong(),
+                    );
+                }
+            },
+        );
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(center_w, H),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.add_space(((center_w - live.tools_w) / 2.0).max(0.0));
+                let used = ui
+                    .horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let scales = [
+                            (Scale::Fit, "Fit".to_string(), "Fit to window"),
+                            (
+                                Scale::Actual,
+                                "1:1".to_string(),
+                                "Actual size (scroll bars)",
+                            ),
+                        ];
+                        theme::segmented(ui, &mut live.scale, &scales);
+                        let (r, _) =
+                            ui.allocate_exact_size(egui::vec2(1.0, 24.0), egui::Sense::hover());
+                        ui.painter().rect_filled(r, 0.0, p.border);
+                        let shortcut = if cfg!(target_os = "macos") {
+                            "⌘⇧F"
+                        } else {
+                            "Ctrl+Shift+F"
+                        };
+                        let fs_icon = if fullscreen {
+                            Icon::Minimize
+                        } else {
+                            Icon::Maximize
+                        };
+                        if tool(ui, fs_icon, "Full screen", fullscreen, compact, shortcut) {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                        }
+                        let keys = if compact {
+                            char::from(Icon::Keyboard).to_string()
+                        } else {
+                            format!("{} Keys", char::from(Icon::Keyboard))
+                        };
+                        ui.menu_button(RichText::new(keys).color(p.text2), |ui| {
+                            ui.set_min_width(175.0);
+                            for (label, keys) in input::SHORTCUTS {
+                                if ui.button(*label).clicked() {
+                                    let _ = input::combo(&live.outbound, keys);
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            ui.label(RichText::new("AltGr / ES symbols").size(11.0).weak());
+                            for row in input::ALTGR_SYMBOLS.chunks(5) {
+                                ui.horizontal(|ui| {
+                                    for &ch in row {
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    RichText::new(ch.to_string()).monospace(),
+                                                )
+                                                .min_size(egui::vec2(28.0, 24.0)),
+                                            )
+                                            .on_hover_text(format!(
+                                                "Send '{ch}' to remote computer"
+                                            ))
+                                            .clicked()
+                                        {
+                                            let _ = input::type_char(&live.outbound, ch);
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            }
+                        })
+                        .response
+                        .on_hover_text("Send key combinations and AltGr symbols");
+                        if tool(
+                            ui,
+                            Icon::ShieldAlert,
+                            "Ctrl+Alt+Del",
+                            false,
+                            compact,
+                            "Send Ctrl+Alt+Del to the remote machine",
+                        ) {
+                            let _ = input::ctrl_alt_del(&live.outbound);
+                        }
+                        if tool(
+                            ui,
+                            Icon::Clipboard,
+                            "Clipboard",
+                            live.clipboard_view.open,
+                            compact,
+                            "View and manage synchronized clipboard text",
+                        ) {
+                            live.clipboard_view.open = !live.clipboard_view.open;
+                        }
+                        if tool(
+                            ui,
+                            Icon::MessageCircle,
+                            "Chat",
+                            live.chat.open,
+                            compact,
+                            "Chat with the person at the remote machine",
+                        ) {
+                            live.chat.toggle(&live.outbound);
+                        }
+                        let files = if live.files.is_sftp_active() {
+                            "Files (SFTP)"
+                        } else {
+                            "Files"
+                        };
+                        if tool(
+                            ui,
+                            Icon::Folder,
+                            files,
+                            live.files_view.open,
+                            compact,
+                            "Browse, download and upload files",
+                        ) {
+                            live.files_view.open = !live.files_view.open;
+                        }
+                        if tool(
+                            ui,
+                            Icon::Eye,
+                            "View only",
+                            live.view_only,
+                            compact,
+                            "Don't send keyboard, mouse or clipboard to the server",
+                        ) {
+                            live.view_only = !live.view_only;
+                        }
+                    })
+                    .response
+                    .rect
+                    .width();
+                if (used - live.tools_w).abs() > 0.5 {
+                    live.tools_w = used;
+                    ui.ctx().request_repaint();
+                }
+            },
+        );
+
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
-                .add(theme::danger(
-                    ui,
-                    format!("{} Disconnect", char::from(Icon::LogOut)),
-                ))
+                .add(
+                    theme::danger(ui, format!("{} Disconnect", char::from(Icon::LogOut)))
+                        .min_size(egui::vec2(0.0, 36.0)),
+                )
                 .clicked()
             {
                 live.user_disconnected = true;
                 live.outbound.close();
-            }
-            let files_label = if live.files.is_sftp_active() {
-                format!("{} Files (SFTP)", char::from(Icon::Folder))
-            } else {
-                format!("{} Files", char::from(Icon::Folder))
-            };
-            if ui
-                .selectable_label(live.files_view.open, files_label)
-                .on_hover_text("Browse, download and upload files")
-                .clicked()
-            {
-                live.files_view.open = !live.files_view.open;
-            }
-            if ui
-                .selectable_label(
-                    live.chat.open,
-                    format!("{} Chat", char::from(Icon::MessageCircle)),
-                )
-                .on_hover_text("Chat with the person at the remote machine")
-                .clicked()
-            {
-                live.chat.toggle(&live.outbound);
-            }
-            if ui
-                .selectable_label(
-                    live.clipboard_view.open,
-                    format!("{} Clipboard", char::from(Icon::Clipboard)),
-                )
-                .on_hover_text("View and manage synchronized clipboard text")
-                .clicked()
-            {
-                live.clipboard_view.open = !live.clipboard_view.open;
-            }
-            ui.menu_button(format!("{} Keys", char::from(Icon::Keyboard)), |ui| {
-                ui.set_min_width(175.0);
-                for (label, keys) in input::SHORTCUTS {
-                    if ui.button(*label).clicked() {
-                        let _ = input::combo(&live.outbound, keys);
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                ui.label(RichText::new("AltGr / ES symbols").size(11.0).weak());
-                for row in input::ALTGR_SYMBOLS.chunks(5) {
-                    ui.horizontal(|ui| {
-                        for &ch in row {
-                            if ui
-                                .add(
-                                    egui::Button::new(RichText::new(ch.to_string()).monospace())
-                                        .min_size(egui::vec2(28.0, 24.0)),
-                                )
-                                .on_hover_text(format!("Send '{ch}' to remote computer"))
-                                .clicked()
-                            {
-                                let _ = input::type_char(&live.outbound, ch);
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-            })
-            .response
-            .on_hover_text("Send key combinations and AltGr symbols");
-            if ui
-                .button(format!("{} Ctrl+Alt+Del", char::from(Icon::ShieldAlert)))
-                .on_hover_text("Send Ctrl+Alt+Del to the remote machine")
-                .clicked()
-            {
-                let _ = input::ctrl_alt_del(&live.outbound);
-            }
-            ui.separator();
-            let shortcut = if cfg!(target_os = "macos") {
-                "⌘⇧F"
-            } else {
-                "Ctrl+Shift+F"
-            };
-            let fs_icon = char::from(if fullscreen {
-                Icon::Minimize
-            } else {
-                Icon::Maximize
-            });
-            if ui
-                .selectable_label(fullscreen, format!("{fs_icon} Full screen"))
-                .on_hover_text(shortcut)
-                .clicked()
-            {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-            }
-            // Segmented Fit | 1:1 control; drawn left to right inside this right-to-left bar.
-            egui::Frame::NONE
-                .fill(theme::palette(ui.ctx()).elevated)
-                .corner_radius(egui::CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(3))
-                .show(ui, |ui| {
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        for (label, scale, tip) in [
-                            ("Fit", Scale::Fit, "Fit to window"),
-                            ("1:1", Scale::Actual, "Actual size (scroll bars)"),
-                        ] {
-                            if ui
-                                .selectable_label(live.scale == scale, label)
-                                .on_hover_text(tip)
-                                .clicked()
-                            {
-                                live.scale = scale;
-                            }
-                        }
-                    });
-                });
-            if ui
-                .selectable_label(
-                    live.view_only,
-                    format!("{} View only", char::from(Icon::Eye)),
-                )
-                .on_hover_text("Don't send keyboard, mouse or clipboard to the server")
-                .clicked()
-            {
-                live.view_only = !live.view_only;
             }
         });
     });

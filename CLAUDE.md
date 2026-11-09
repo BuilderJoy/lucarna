@@ -67,9 +67,11 @@ Planned work and its order: [docs/ROADMAP.md](docs/ROADMAP.md). Architecture for
 
 `features/chat/`: TextChat (message 11), `session::run` forwards `Event::Chat`, `ChatView` is the window. The server can open it, so `app.rs` also includes `chat.rect` in the pointer-blocking list. Repeater: `ConnectRequest.repeater` → `session::run(.., repeater, ..)` dials the repeater and calls `handshake::via_repeater(address)` before `handshake::perform`. With a repeater, `address` is the target (`host:port` or `ID:1234`), not what we dial. Latin-1 helpers live in `shared/wire.rs` (`from_latin1`, `to_latin1`).
 
-### Session bar
+### Session bar and tabs
 
-`app.rs::bar_contents` draws the bar: View only, Fit/1:1 (`remote_screen::Scale`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Chat, Files, Disconnect. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server, and `egui_wants_keyboard_input()` stops keyboard events while typing in our own UI text inputs.
+`App` holds `tabs: Vec<Tab>` and `active: Option<usize>` (`None` = Address Book); each `Tab` owns its event receiver and, once connected, a `LiveSession`. `poll_events` drains every tab through `handle_event`; `Closed` removes the tab. A connecting tab shows the Address Book as busy. `tab_strip` draws the browser-style strip (Address Book, tabs with close, +). Only the active tab shows its windows and receives input.
+
+`app.rs::bar_contents` draws the bar in three zones: SSH-encrypted badge and resolution on the left; Fit/1:1 (`theme::segmented`), Full screen (⌘⇧F, consumed in `ui()` before `input.forward`), Keys menu (`input::SHORTCUTS`), Ctrl+Alt+Del, Clipboard, Chat, Files, View only in the centre (icon-only when narrower than 800 px); Disconnect on the right. In full screen the bar is an overlay `Area`; `bar_rect` and the files window rect stop pointer events reaching the server, and `egui_wants_keyboard_input()` stops keyboard events while typing in our own UI text inputs.
 
 ### File transfer (UltraVNC, message type 7)
 
