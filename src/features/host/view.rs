@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Order, RichText, Stroke, Ui};
 use lucide_icons::Icon;
 
-use super::ft_server::VirtualDrives;
+use super::ft_server::{FileEvent, FileHook, VirtualDrives, is_risky};
 use super::session::{Gate, HostConfig, register_repeater_mode_ii, serve_stream};
 use crate::features::connection::{ConnectRequest, Credentials, ServerAddress, SessionOptions};
 use crate::shared::crypto::{
@@ -55,6 +55,7 @@ pub struct AuditEntry {
 }
 
 pub enum HostUiEvent {
+    File(FileEvent),
     /// Ask the person sharing; the host thread waits for the answer on `reply`.
     Consent {
         peer: String,
@@ -409,6 +410,13 @@ impl HostView {
                     allow_files,
                     fixed_challenge: None,
                     gate: None,
+                    on_file: Some(FileHook(Arc::new({
+                        let (tx, ctx) = (tx.clone(), ctx.clone());
+                        move |e| {
+                            let _ = tx.send(HostUiEvent::File(e));
+                            ctx.request_repaint();
+                        }
+                    }))),
                 },
                 stop_flag,
                 active_stream,
@@ -457,6 +465,33 @@ impl HostView {
                         e2ee,
                     };
                     self.push_audit(fill(tr("{} asks to connect."), &[&peer]), true);
+                }
+                HostUiEvent::File(event) => {
+                    let (text, alert) = match event {
+                        FileEvent::Received { name, size } => {
+                            let risky = is_risky(&name);
+                            let base = fill(tr("Received {} ({})"), &[&name, &human_bytes(size)]);
+                            if risky {
+                                (
+                                    format!(
+                                        "{base}. {}",
+                                        tr(
+                                            "It runs code if you open it. Open it only if you expected it."
+                                        )
+                                    ),
+                                    true,
+                                )
+                            } else {
+                                (base, false)
+                            }
+                        }
+                        FileEvent::Sent { name, size } => (
+                            fill(tr("Sent {} ({})"), &[&name, &human_bytes(size)]),
+                            false,
+                        ),
+                        FileEvent::Deleted { name } => (fill(tr("Deleted {}"), &[&name]), true),
+                    };
+                    self.push_audit(text, alert);
                 }
                 HostUiEvent::Denied { peer } => {
                     self.consent_tx = None;
@@ -1749,6 +1784,22 @@ enum Stage {
     Pending,
     Active,
     Locked,
+}
+
+/// `3.2 MB`, for the activity list.
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 fn icon_tile(ui: &mut Ui, icon: Icon, size: f32) {

@@ -45,6 +45,37 @@ const MAX_DATA: usize = MAX_BLOCK + 1024;
 /// a cap one offer could fill the disk of the person sharing.
 pub const MAX_UPLOAD_FILE: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_UPLOAD_SESSION: u64 = 8 * 1024 * 1024 * 1024;
+
+/// What the person sharing is told about, as it happens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileEvent {
+    Received { name: String, size: u64 },
+    Sent { name: String, size: u64 },
+    Deleted { name: String },
+}
+
+/// Receives [`FileEvent`]s from the file transfer server.
+#[derive(Clone)]
+pub struct FileHook(pub std::sync::Arc<dyn Fn(FileEvent) + Send + Sync>);
+
+impl std::fmt::Debug for FileHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FileHook")
+    }
+}
+
+/// Files that run code when opened. Not blocked (installers are a normal thing to send) but flagged.
+pub fn is_risky(name: &str) -> bool {
+    const RISKY: &[&str] = &[
+        "exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "vbe", "js", "jse", "wsf", "hta",
+        "jar", "sh", "command", "app", "pkg", "dmg", "lnk", "scpt", "workflow", "reg", "appimage",
+        "deb", "rpm", "apk", "py", "dll",
+    ];
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| RISKY.contains(&e.to_ascii_lowercase().as_str()))
+}
 const ERROR: u32 = 0xFFFF_FFFF;
 const FILETIME_UNIX_DIFF_SECS: u64 = 11_644_473_600;
 
@@ -223,6 +254,7 @@ struct PendingDownload {
     file: File,
     total: u64,
     compress: bool,
+    name: String,
 }
 
 struct ActiveUpload {
@@ -246,9 +278,16 @@ pub struct FtServer {
     pending_download: Option<PendingDownload>,
     active_upload: Option<ActiveUpload>,
     uploaded: u64,
+    pub hook: Option<FileHook>,
 }
 
 impl FtServer {
+    fn emit(&self, event: FileEvent) {
+        if let Some(h) = &self.hook {
+            (h.0)(event);
+        }
+    }
+
     pub fn new(drives: VirtualDrives, read_only: bool) -> Self {
         Self {
             drives,
@@ -256,6 +295,7 @@ impl FtServer {
             pending_download: None,
             active_upload: None,
             uploaded: 0,
+            hook: None,
         }
     }
 
@@ -399,15 +439,16 @@ impl FtServer {
                 if !meta.is_file() {
                     return Err(invalid("not a regular file"));
                 }
-                Ok((file, meta.len()))
+                Ok((file, meta.len(), file_label(&path)))
             });
 
         match opened {
-            Ok((file, total)) => {
+            Ok((file, total, name)) => {
                 self.pending_download = Some(PendingDownload {
                     file,
                     total,
                     compress,
+                    name,
                 });
                 let mut m = wire_msg(FILE_HEADER, 0, total as u32, raw_path);
                 m.extend_from_slice(&((total >> 32) as u32).to_be_bytes());
@@ -428,7 +469,7 @@ impl FtServer {
         let Some(dl) = self.pending_download.take() else {
             return Ok(());
         };
-        let mut reader = dl.file.take(dl.total);
+        let mut reader = (&dl.file).take(dl.total);
         let mut buf = vec![0u8; SERVER_BLOCK_SIZE];
         loop {
             let n = reader.read(&mut buf)?;
@@ -444,7 +485,12 @@ impl FtServer {
             s.write_all(&pkt)?;
         }
         s.write_all(&wire_msg(END_OF_FILE, 0, 0, &[]))?;
-        s.flush()
+        s.flush()?;
+        self.emit(FileEvent::Sent {
+            name: dl.name,
+            size: dl.total,
+        });
+        Ok(())
     }
 
     fn handle_upload_offer(
@@ -554,7 +600,12 @@ impl FtServer {
         }
         up.file.sync_all()?;
         self.uploaded = self.uploaded.saturating_add(up.total);
-        fs::rename(&up.part_path, &up.dest_path)
+        fs::rename(&up.part_path, &up.dest_path)?;
+        self.emit(FileEvent::Received {
+            name: file_label(&up.dest_path),
+            size: up.total,
+        });
+        Ok(())
     }
 
     fn handle_command(
@@ -574,6 +625,7 @@ impl FtServer {
                 (A_DIR_CREATE, res)
             }
             C_FILE_DELETE => {
+                let mut deleted: Option<String> = None;
                 let res = if self.read_only {
                     Err(invalid("read-only mode"))
                 } else {
@@ -583,13 +635,18 @@ impl FtServer {
                             if target == root {
                                 return Err(invalid("cannot delete virtual drive root"));
                             }
-                            if target.is_dir() {
-                                fs::remove_dir(target)
+                            let name = file_label(&target);
+                            let removed = if target.is_dir() {
+                                fs::remove_dir(&target)
                             } else {
-                                fs::remove_file(target)
-                            }
+                                fs::remove_file(&target)
+                            };
+                            removed.map(|()| deleted = Some(name))
                         })
                 };
+                if let Some(name) = deleted {
+                    self.emit(FileEvent::Deleted { name });
+                }
                 (A_FILE_DELETE, res)
             }
             C_FILE_RENAME => {
@@ -654,6 +711,12 @@ fn format_virtual_dir(drive: char, root: &Path, target: &Path) -> String {
         }
     }
     out
+}
+
+fn file_label(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// `report.pdf` taken: `report (1).pdf`, `report (2).pdf`, and so on.
@@ -795,6 +858,44 @@ mod tests {
         // The limit for one file is exact.
         assert!(offer(&mut server, b"M:\\ok.bin", MAX_UPLOAD_FILE));
         assert!(!offer(&mut server, b"M:\\over.bin", MAX_UPLOAD_FILE + 1));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn risky_names_are_flagged_by_extension_only() {
+        for n in ["setup.EXE", "run.sh", "x.app", "a.ps1", "inst.dmg"] {
+            assert!(is_risky(n), "{n}");
+        }
+        for n in ["song.wav", "notes.txt", "exe", "archive.zip", "report.pdf"] {
+            assert!(!is_risky(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn the_person_sharing_is_told_about_received_and_deleted_files() {
+        let (base, drives) = temp_sandbox("events");
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut server = FtServer::new(drives, false);
+        let sink = seen.clone();
+        server.hook = Some(FileHook(std::sync::Arc::new(move |e| {
+            sink.lock().unwrap().push(e)
+        })));
+        assert!(offer(&mut server, b"M:\\setup.exe", 3));
+        let mut io = crate::shared::wire::Duplex::new({
+            let mut v = Vec::new();
+            v.extend_from_slice(&wire_msg(FILE_PACKET, 0, 3, b"abc")[1..]);
+            v.extend_from_slice(&wire_msg(END_OF_FILE, 0, 0, &[])[1..]);
+            v
+        });
+        server.handle_message(&mut io).unwrap();
+        server.handle_message(&mut io).unwrap();
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[FileEvent::Received {
+                name: "setup.exe".into(),
+                size: 3
+            }]
+        );
         let _ = fs::remove_dir_all(&base);
     }
 

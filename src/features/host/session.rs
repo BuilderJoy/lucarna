@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 use flate2::{Compress, Compression, FlushCompress};
 
 use super::capture::{DamageTracker, DirtyRect, ScreenCapturer, SystemCapturer, TILE_SIZE};
-use super::ft_server::{FtServer, VirtualDrives};
+use super::ft_server::{FileHook, FtServer, VirtualDrives};
 use super::input_inject::{HostInputEvent, InputInjector, SystemInputInjector};
 use crate::features::connection::vnc_response;
 use crate::features::file_transfer::ENC_PROTOCOL_VERSION;
@@ -155,6 +155,8 @@ pub struct HostConfig {
     pub allow_files: bool,
     pub fixed_challenge: Option<[u8; 16]>,
     pub gate: Option<Gate>,
+    /// Told about files that arrive, leave or are deleted.
+    pub on_file: Option<FileHook>,
 }
 
 impl Default for HostConfig {
@@ -166,6 +168,7 @@ impl Default for HostConfig {
             allow_files: false,
             fixed_challenge: None,
             gate: None,
+            on_file: None,
         }
     }
 }
@@ -196,11 +199,13 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
         drives: VirtualDrives,
     ) -> Self {
         let read_only = config.view_only;
+        let mut ft_server = FtServer::new(drives, read_only);
+        ft_server.hook = config.on_file.clone();
         Self {
             config,
             capturer,
             injector,
-            ft_server: FtServer::new(drives, read_only),
+            ft_server,
             damage: DamageTracker::new(),
             zrle: ZrleEncoder::new(),
             use_zrle: false,
@@ -568,6 +573,7 @@ pub fn cli_host() -> Option<i32> {
             allow_files,
             fixed_challenge: None,
             gate: None,
+            on_file: None,
         };
         let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
         while !limiter.is_locked() {
@@ -656,6 +662,7 @@ pub fn cli_host() -> Option<i32> {
         allow_files,
         fixed_challenge: None,
         gate: None,
+        on_file: None,
     };
     let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
 
@@ -790,6 +797,7 @@ mod tests {
             view_only: false,
             allow_files: false,
             fixed_challenge: None,
+            on_file: None,
             gate: Some(Gate(std::sync::Arc::new(move || {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 allow
@@ -866,6 +874,7 @@ mod tests {
                 allow_files: true,
                 fixed_challenge: Some(*b"0123456789abcdef"),
                 gate: None,
+                on_file: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1.clone(), f1, f2]);
             let injector = RecordingInjector::new(false);
@@ -969,6 +978,7 @@ mod tests {
                 allow_files: true,
                 fixed_challenge: None,
                 gate: None,
+                on_file: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1]);
             let injector = RecordingInjector::new(false);

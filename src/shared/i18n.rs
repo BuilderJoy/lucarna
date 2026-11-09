@@ -271,6 +271,13 @@ static ES: &[(&str, &str)] = &[
         "Desconectar a la otra persona y dejar de compartir",
     ),
     ("Dismiss message", "Descartar mensaje"),
+    ("Received {} ({})", "Recibido {} ({})"),
+    ("Sent {} ({})", "Enviado {} ({})"),
+    ("Deleted {}", "Eliminado {}"),
+    (
+        "It runs code if you open it. Open it only if you expected it.",
+        "Ejecuta código si lo abres. Ábrelo solo si lo esperabas.",
+    ),
     (
         "Generated new session code {} and 6-digit E2EE PIN.",
         "Se generó un código de sesión nuevo {} y un PIN E2EE de 6 dígitos.",
