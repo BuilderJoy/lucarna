@@ -189,6 +189,7 @@ impl InputInjector for RecordingInjector {
 pub struct SystemInputInjector {
     pub view_only: bool,
     pub guard: LocalActivityGuard,
+    last_buttons: PointerButtons,
 }
 
 impl SystemInputInjector {
@@ -196,6 +197,7 @@ impl SystemInputInjector {
         Self {
             view_only,
             guard: LocalActivityGuard::default(),
+            last_buttons: PointerButtons::default(),
         }
     }
 }
@@ -208,7 +210,9 @@ impl InputInjector for SystemInputInjector {
         match event {
             HostInputEvent::Pointer { buttons, x, y } => {
                 let b = PointerButtons::from_mask(buttons);
-                inject_os_pointer(x, y, b);
+                let prev = self.last_buttons;
+                self.last_buttons = b;
+                inject_os_pointer(x, y, prev, b);
             }
             HostInputEvent::Key { down, keysym } => {
                 if let Some(key) = NativeKey::from_keysym(keysym) {
@@ -220,13 +224,26 @@ impl InputInjector for SystemInputInjector {
     }
 }
 
-fn inject_os_pointer(x: u16, y: u16, buttons: PointerButtons) {
+fn inject_os_pointer(x: u16, y: u16, prev: PointerButtons, buttons: PointerButtons) {
     #[cfg(target_os = "linux")]
     {
         use std::process::Command;
         let _ = Command::new("xdotool")
             .args(["mousemove", &x.to_string(), &y.to_string()])
             .status();
+        for (btn_num, was_down, is_down) in [
+            ("1", prev.left, buttons.left),
+            ("2", prev.middle, buttons.middle),
+            ("3", prev.right, buttons.right),
+        ] {
+            if is_down && !was_down {
+                let _ = Command::new("xdotool")
+                    .args(["mousedown", btn_num])
+                    .status();
+            } else if !is_down && was_down {
+                let _ = Command::new("xdotool").args(["mouseup", btn_num]).status();
+            }
+        }
         if buttons.wheel_up {
             let _ = Command::new("xdotool").args(["click", "4"]).status();
         }
@@ -234,19 +251,44 @@ fn inject_os_pointer(x: u16, y: u16, buttons: PointerButtons) {
             let _ = Command::new("xdotool").args(["click", "5"]).status();
         }
     }
-    let _ = (x, y, buttons);
+    let _ = (x, y, prev, buttons);
 }
 
 fn inject_os_key(down: bool, key: NativeKey) {
     #[cfg(target_os = "linux")]
     {
         use std::process::Command;
-        if let NativeKey::Char(c) = key
-            && down
-        {
-            let _ = Command::new("xdotool")
-                .args(["type", "--", &c.to_string()])
-                .status();
+        if !down {
+            return;
+        }
+        match key {
+            NativeKey::Char(c) => {
+                let _ = Command::new("xdotool")
+                    .args(["type", "--delay", "0", "--", &c.to_string()])
+                    .status();
+            }
+            other => {
+                let sym = match other {
+                    NativeKey::Backspace => Some("BackSpace"),
+                    NativeKey::Tab => Some("Tab"),
+                    NativeKey::Enter => Some("Return"),
+                    NativeKey::Escape => Some("Escape"),
+                    NativeKey::Delete => Some("Delete"),
+                    NativeKey::Insert => Some("Insert"),
+                    NativeKey::Home => Some("Home"),
+                    NativeKey::End => Some("End"),
+                    NativeKey::PageUp => Some("Prior"),
+                    NativeKey::PageDown => Some("Next"),
+                    NativeKey::ArrowLeft => Some("Left"),
+                    NativeKey::ArrowUp => Some("Up"),
+                    NativeKey::ArrowRight => Some("Right"),
+                    NativeKey::ArrowDown => Some("Down"),
+                    _ => None,
+                };
+                if let Some(s) = sym {
+                    let _ = Command::new("xdotool").args(["key", s]).status();
+                }
+            }
         }
     }
     let _ = (down, key);

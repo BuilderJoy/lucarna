@@ -22,6 +22,11 @@ ssh-keygen -t ed25519 -N "" -f ~/.ssh/lucarna_test && ssh-add ~/.ssh/lucarna_tes
 docker build -t lucarna-ssh-server -f tests/server/Dockerfile.ssh tests/server
 docker run -d --rm --name lucarna-ssh -p 2223:22 -e AUTHORIZED_KEY="$(cat ~/.ssh/lucarna_test.pub)" lucarna-ssh-server
 SSH_TEST_TARGET=lucarna@127.0.0.1:2223 VNC_TEST_PASSWORD=secret cargo test -- --ignored live_ssh live_sftp
+
+# Live Lucarna Studio Host (Phase 1 + Phase 2: no x11vnc, no sshd, port 5950):
+docker build -t lucarna-host-server -f tests/server/Dockerfile.host .
+docker run -d --rm --name lucarna-host -p 5950:5900 -e VNC_PASSWORD=studio lucarna-host-server
+VNC_HOST_TEST_ADDR=127.0.0.1:5950 VNC_TEST_PASSWORD=studio cargo test -- --ignored live_host
 ```
 
 VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server". From a terminal, adding a blank line to `Cargo.toml` and then `git checkout Cargo.toml` forces a workspace reload and a fresh check (touching `.rs` files does not).
@@ -88,4 +93,4 @@ Treat the server as untrusted: validate every size, length and rectangle before 
 
 ### Embedded RFB Host (`features/host`)
 
-`features/host/` implements the user-space RFB 3.8 server engine for Studio & QuickSupport Mode: `capture.rs` (`Frame`, `DamageTracker` on a 64×64 tile grid with horizontal coalescing, `ScreenCapturer`), `input_inject.rs` (`NativeKey` X11 keysym decoder, `LocalActivityGuard` enforcing 2s physical mouse priority, `InputInjector`), and `session.rs` (`ZrleEncoder` with session-persistent zlib stream, `HostSession` handshake and message dispatch for `SetPixelFormat`, `SetEncodings`, `FramebufferUpdateRequest`, `KeyEvent`, `PointerEvent`, `ClientCutText`).
+`features/host/` implements the user-space RFB 3.8 server engine for Studio & QuickSupport Mode: `capture.rs` (`Frame`, `DamageTracker` on a 64×64 tile grid with horizontal coalescing, `ScreenCapturer`), `input_inject.rs` (`NativeKey` X11 keysym decoder, `LocalActivityGuard` enforcing 2s physical mouse priority, `InputInjector`), `ft_server.rs` (`VirtualDrives` mapping `H:`, `M:`, `D:`, `V:` with `std::fs::canonicalize` sandboxing, and `FtServer` handling RFB message type 7 drives, Unicode `WIN32_FIND_DATAW` listings, 32 KiB streaming downloads, atomic `.lucarna-part` uploads and directory/file commands without SSH), and `session.rs` (`ZrleEncoder` with session-persistent zlib stream, `HostSession` handshake and message dispatch for `SetPixelFormat`, `SetEncodings`, `FramebufferUpdateRequest`, `KeyEvent`, `PointerEvent`, `ClientCutText`, and `FileTransfer` msg 7).

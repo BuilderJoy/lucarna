@@ -5,8 +5,10 @@ use std::io::{self, Read, Write};
 use flate2::{Compress, Compression, FlushCompress};
 
 use super::capture::{DamageTracker, DirtyRect, ScreenCapturer, SystemCapturer, TILE_SIZE};
+use super::ft_server::{FtServer, VirtualDrives};
 use super::input_inject::{HostInputEvent, InputInjector, SystemInputInjector};
 use crate::features::connection::vnc_response;
+use crate::features::file_transfer::ENC_PROTOCOL_VERSION;
 use crate::shared::wire::{from_latin1, invalid, read_bytes, read_u8, read_u16, read_u32};
 
 const SEC_NONE: u8 = 1;
@@ -157,6 +159,7 @@ pub struct HostSession<C: ScreenCapturer, I: InputInjector> {
     config: HostConfig,
     pub capturer: C,
     pub injector: I,
+    pub ft_server: FtServer,
     damage: DamageTracker,
     zrle: ZrleEncoder,
     use_zrle: bool,
@@ -167,10 +170,21 @@ pub struct HostSession<C: ScreenCapturer, I: InputInjector> {
 
 impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
     pub fn new(config: HostConfig, capturer: C, injector: I) -> Self {
+        Self::with_drives(config, capturer, injector, VirtualDrives::default())
+    }
+
+    pub fn with_drives(
+        config: HostConfig,
+        capturer: C,
+        injector: I,
+        drives: VirtualDrives,
+    ) -> Self {
+        let read_only = config.view_only;
         Self {
             config,
             capturer,
             injector,
+            ft_server: FtServer::new(drives, read_only),
             damage: DamageTracker::new(),
             zrle: ZrleEncoder::new(),
             use_zrle: false,
@@ -265,12 +279,17 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
                 }
                 self.use_zrle = false;
                 self.supports_desktop_size = false;
+                let mut wants_ft_v4 = false;
                 for _ in 0..count {
                     match read_u32(s)? as i32 {
                         ENC_ZRLE => self.use_zrle = true,
                         ENC_DESKTOP_SIZE => self.supports_desktop_size = true,
+                        ENC_PROTOCOL_VERSION => wants_ft_v4 = true,
                         _ => {}
                     }
+                }
+                if wants_ft_v4 {
+                    self.ft_server.send_protocol_version(s)?;
                 }
                 Ok(())
             }
@@ -315,6 +334,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
                 self.client_clipboard = Some(from_latin1(&bytes));
                 Ok(())
             }
+            7 => self.ft_server.handle_message(s),
             msg => Err(invalid(format!("unsupported client message type {msg}"))),
         }
     }
@@ -326,8 +346,9 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
 
         let mut rects = self.damage.diff(&frame);
         // RFB requires every FramebufferUpdateRequest to eventually receive a response;
-        // if nothing changed, send a 1×1 top-left refresh so lock-step viewers keep polling.
+        // if nothing changed, pace at ~60 Hz and send a 1×1 top-left refresh so lock-step viewers keep polling.
         if rects.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(16));
             rects.push(DirtyRect {
                 x: 0,
                 y: 0,
@@ -406,6 +427,106 @@ pub fn serve_stream(config: HostConfig, stream: &mut (impl Read + Write)) -> io:
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Checks if Lucarna was launched with `--host [bind_addr] [--password <pw>] [--view-only]`
+/// and runs the embedded RFB 3.8 + Native File Transfer Host listener in user space.
+pub fn cli_host() -> Option<i32> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.iter().any(|a| a == "--host") {
+        return None;
+    }
+
+    let mut bind_addr = String::from("127.0.0.1:5950");
+    let mut password = String::from("studio");
+    let mut view_only = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--host" => {
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with("--")
+                {
+                    bind_addr = next.clone();
+                    i += 1;
+                }
+            }
+            "--password" => {
+                if let Some(next) = args.get(i + 1) {
+                    password = next.clone();
+                    i += 1;
+                }
+            }
+            "--view-only" => view_only = true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let listener = match std::net::TcpListener::bind(&bind_addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Error al abrir el puerto Host en {bind_addr}: {e}");
+            return Some(1);
+        }
+    };
+
+    let drives = VirtualDrives::default();
+    println!("================================================================");
+    println!("  Lucarna Studio Host (Fase 1 + Fase 2: RFB 3.8 + Archivos sin SSH)");
+    println!("================================================================");
+    println!("  Escuchando en : {bind_addr}");
+    println!(
+        "  Contraseña    : {}",
+        if password.is_empty() {
+            "(sin contraseña)"
+        } else {
+            &password
+        }
+    );
+    println!(
+        "  Modo          : {}",
+        if view_only {
+            "Solo lectura / Solo ver"
+        } else {
+            "Control interactivo + Transferencia de archivos"
+        }
+    );
+    println!("  Unidades Virtuales Compartidas (Sandbox canonicalize):");
+    for (letter, path) in drives.roots() {
+        println!("    {letter}:\\  ->  {}", path.display());
+    }
+    println!("----------------------------------------------------------------");
+    println!("  Abre otra terminal y ejecuta: cargo run --release");
+    println!("  Conéctate a {bind_addr} con la contraseña '{password}'.");
+    println!("================================================================");
+
+    let config = HostConfig {
+        desktop_name: "Lucarna Studio Host".into(),
+        password,
+        view_only,
+        fixed_challenge: None,
+    };
+
+    for incoming in listener.incoming() {
+        match incoming {
+            Ok(mut stream) => {
+                let peer = stream
+                    .peer_addr()
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|_| "cliente".into());
+                let _ = stream.set_nodelay(true);
+                println!("[+] Visor conectado desde {peer}");
+                match serve_stream(config.clone(), &mut stream) {
+                    Ok(()) => println!("[-] Sesión finalizada con {peer}"),
+                    Err(e) => println!("[!] Sesión cerrada con {peer}: {e}"),
+                }
+            }
+            Err(e) => eprintln!("[!] Error de conexión entrante: {e}"),
+        }
+    }
+    Some(0)
 }
 
 #[cfg(test)]
@@ -536,7 +657,16 @@ mod tests {
         assert_eq!((init.width, init.height), (128, 64));
         assert_eq!(init.name, "Radio Studio A");
 
-        remote_screen::negotiate(&mut client, &[]).unwrap();
+        remote_screen::negotiate(&mut client, &[ENC_PROTOCOL_VERSION]).unwrap();
+        // Host immediately answers ENC_PROTOCOL_VERSION with FT ProtocolVersion v4 (32 KiB blocks).
+        assert_eq!(read_u8(&mut client).unwrap(), 7);
+        assert_eq!(
+            crate::features::file_transfer::read(&mut client).unwrap(),
+            crate::features::file_transfer::Msg::ProtocolVersion {
+                version: 4,
+                block_size: 32768,
+            }
+        );
 
         let screen = Mutex::new(Framebuffer::new(128, 64).unwrap());
         let mut decoder = Decoder::default();

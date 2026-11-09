@@ -3,6 +3,9 @@
 use std::io;
 use std::process::Command;
 
+use zune_jpeg::JpegDecoder;
+use zune_jpeg::zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions};
+
 use crate::shared::wire::invalid;
 
 pub const TILE_SIZE: u16 = 64;
@@ -235,31 +238,50 @@ impl ScreenCapturer for SyntheticCapturer {
 }
 
 /// User-space OS screen capturer (no root/SYSTEM service required).
-/// Uses native user-session tools to grab an uncompressed PPM/BMP snapshot when hardware buffers aren't bound.
+/// Uses native user-session tools to grab a snapshot, falling back to an animated Studio VU-meter pattern
+/// if screen-recording permission has not been granted yet.
 pub struct SystemCapturer {
     fallback_size: (u16, u16),
+    tick: u16,
 }
 
 impl Default for SystemCapturer {
     fn default() -> Self {
-        Self {
-            fallback_size: (1280, 720),
-        }
+        Self::new((1280, 720))
     }
 }
 
 impl SystemCapturer {
     pub fn new(fallback_size: (u16, u16)) -> Self {
-        Self { fallback_size }
+        Self {
+            fallback_size,
+            tick: 0,
+        }
+    }
+
+    fn studio_test_frame(&mut self) -> Frame {
+        let (w, h) = self.fallback_size;
+        let mut frame = Frame::solid(w, h, [28, 22, 20, 0]);
+        self.tick = self.tick.wrapping_add(8);
+        let bar_w = (self.tick % (w.saturating_sub(128).max(64))) + 32;
+        for y in 64..128.min(h) {
+            for x in 64..(64 + bar_w).min(w) {
+                // Green-to-amber VU meter bar in BGRX.
+                let color = if x < w / 2 {
+                    [80, 210, 60, 0]
+                } else {
+                    [40, 170, 245, 0]
+                };
+                frame.set_pixel(x, y, color);
+            }
+        }
+        frame
     }
 }
 
 impl ScreenCapturer for SystemCapturer {
     fn capture(&mut self) -> io::Result<Frame> {
-        capture_os_screen().or_else(|_| {
-            let (w, h) = self.fallback_size;
-            Ok(Frame::solid(w, h, [24, 24, 28, 0]))
-        })
+        capture_os_screen().or_else(|_| Ok(self.studio_test_frame()))
     }
 }
 
@@ -324,15 +346,15 @@ fn capture_os_screen() -> io::Result<Frame> {
     }
     #[cfg(target_os = "macos")]
     {
-        let tmp = std::env::temp_dir().join(format!("lucarna-cap-{}.ppm", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("lucarna-cap-{}.jpg", std::process::id()));
         let status = Command::new("screencapture")
-            .args(["-x", "-m", "-t", "ppm"])
+            .args(["-x", "-m", "-t", "jpg"])
             .arg(&tmp)
             .status()?;
         if status.success() {
             let bytes = std::fs::read(&tmp)?;
             let _ = std::fs::remove_file(&tmp);
-            if let Ok(frame) = parse_ppm_p6(&bytes) {
+            if let Ok(frame) = decode_jpeg_frame(&bytes) {
                 return Ok(frame);
             }
         }
@@ -341,6 +363,33 @@ fn capture_os_screen() -> io::Result<Frame> {
         io::ErrorKind::Unsupported,
         "OS capture tool unavailable",
     ))
+}
+
+fn decode_jpeg_frame(data: &[u8]) -> io::Result<Frame> {
+    let options = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGB)
+        .set_max_width(usize::from(MAX_DIM))
+        .set_max_height(usize::from(MAX_DIM));
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options);
+    let rgb = decoder
+        .decode()
+        .map_err(|e| invalid(format!("JPEG capture decode error: {e:?}")))?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| invalid("JPEG capture missing header info"))?;
+    let (w, h) = (usize::from(info.width), usize::from(info.height));
+    // Downscale Retina 2x captures above 1600px wide by 2× for snappy interactive framing.
+    let step = if w > 1600 { 2 } else { 1 };
+    let (out_w, out_h) = (w / step, h / step);
+    let mut pixels = Vec::with_capacity(out_w * out_h * 4);
+    for y in 0..out_h {
+        let row = (y * step) * w * 3;
+        for x in 0..out_w {
+            let i = row + (x * step) * 3;
+            pixels.extend_from_slice(&[rgb[i + 2], rgb[i + 1], rgb[i], 0]);
+        }
+    }
+    Frame::new(out_w as u16, out_h as u16, pixels)
 }
 
 #[cfg(test)]

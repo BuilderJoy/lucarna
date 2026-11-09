@@ -15,6 +15,10 @@ fn main() -> eframe::Result {
     if let Some(code) = features::ssh::askpass() {
         std::process::exit(code);
     }
+    // `--host [addr] [--password <pw>]` runs the embedded RFB 3.8 + Native File Transfer Host.
+    if let Some(code) = features::host::cli_host() {
+        std::process::exit(code);
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])

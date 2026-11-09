@@ -553,4 +553,196 @@ mod tests {
         }
         outbound.close();
     }
+
+    /// End-to-end live test against the containerized Lucarna Studio Host (`tests/server/Dockerfile.host`).
+    /// Validates Phase 1 (RFB 3.8 handshake, 64×64 dirty-tile ZRLE screen capture, X11 keyboard/mouse injection)
+    /// and Phase 2 (Virtual Drives `M:\`, `D:\`, `H:\`, Unicode listings, upload, rename, download, delete without SSH).
+    #[test]
+    #[ignore = "needs a live Lucarna Host container (Dockerfile.host)"]
+    fn live_host() {
+        let addr_str = std::env::var("VNC_HOST_TEST_ADDR")
+            .or_else(|_| std::env::var("VNC_TEST_ADDR"))
+            .unwrap_or_else(|_| "127.0.0.1:5950".into());
+        let address = ServerAddress::parse(&addr_str).unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap_or_else(|_| "studio".into());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            run(
+                &address,
+                None,
+                None,
+                &Credentials {
+                    user: String::new(),
+                    password,
+                },
+                tx,
+                || {},
+            )
+        });
+
+        let Event::Connected {
+            outbound,
+            screen,
+            files,
+            ..
+        } = rx.recv_timeout(Duration::from_secs(15)).expect("connected")
+        else {
+            panic!("failed to connect to Lucarna Studio Host")
+        };
+
+        // 1. Verify initial screen capture arrives over ZRLE and is non-blank.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left).expect("initial ScreenUpdated") {
+                Event::ScreenUpdated => break,
+                Event::Closed(r) => panic!("closed: {r}"),
+                _ => {}
+            }
+        }
+        assert!(
+            screen.lock().unwrap().pixels.iter().any(|&b| b != 0),
+            "captured studio host screen must not be blank"
+        );
+
+        let next_files = || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                match rx.recv_timeout(left).expect("file transfer event") {
+                    Event::Files(u) => break u,
+                    Event::Closed(r) => panic!("closed during FT: {r}"),
+                    _ => {}
+                }
+            }
+        };
+
+        // 2. Open File Transfer and verify Virtual Drives M:\, D:\, H:\.
+        files.open();
+        assert!(matches!(next_files(), file_transfer::Update::Access(true)));
+        let file_transfer::Update::Drives(drives) = next_files() else {
+            panic!("expected virtual drives list")
+        };
+        assert!(
+            drives.iter().any(|(d, _)| d == "M:\\"),
+            "M:\\ Music drive missing: {drives:?}"
+        );
+        assert!(
+            drives.iter().any(|(d, _)| d == "D:\\"),
+            "D:\\ Downloads drive missing: {drives:?}"
+        );
+        assert!(
+            drives.iter().any(|(d, _)| d == "H:\\"),
+            "H:\\ Home drive missing: {drives:?}"
+        );
+
+        // 3. List M:\Jingles\ and download `cuna_apertura.wav`.
+        files.list("M:\\Jingles\\");
+        let file_transfer::Update::Listing { entries, .. } = next_files() else {
+            panic!("expected M:\\Jingles\\ listing")
+        };
+        assert!(entries.iter().any(|e| e.name == "cuna_apertura.wav"));
+
+        let tmp = std::env::temp_dir().join(format!("lucarna-live-host-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        files.download("M:\\Jingles\\cuna_apertura.wav", &tmp);
+        let cuna_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of cuna_apertura.wav failed: {u:?}"),
+            }
+        };
+        let cuna_bytes = std::fs::read(&cuna_dest).unwrap();
+        assert!(cuna_bytes.starts_with(b"RIFF____WAVEfmt"));
+
+        // 4. Create dir, upload multi-block audio file, rename, download back, and delete.
+        files.delete("M:\\Jingles\\LiveTest\\pista_final.wav");
+        files.delete("M:\\Jingles\\LiveTest");
+        let _ = next_files();
+        let _ = next_files();
+
+        files.create_dir("M:\\Jingles\\LiveTest");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        let local_src = tmp.join("nueva_pista.wav");
+        let payload: Vec<u8> = (0..50_000u32)
+            .map(|i| (i.wrapping_mul(73) & 0xff) as u8)
+            .collect();
+        std::fs::write(&local_src, &payload).unwrap();
+        files.upload(&local_src, "M:\\Jingles\\LiveTest\\");
+        loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Uploaded(name) => {
+                    assert_eq!(name, "nueva_pista.wav");
+                    break;
+                }
+                u => panic!("upload failed: {u:?}"),
+            }
+        }
+
+        files.rename(
+            "M:\\Jingles\\LiveTest\\nueva_pista.wav",
+            "M:\\Jingles\\LiveTest\\pista_final.wav",
+        );
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        files.download("M:\\Jingles\\LiveTest\\pista_final.wav", &tmp);
+        let final_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of pista_final.wav failed: {u:?}"),
+            }
+        };
+        assert_eq!(std::fs::read(&final_dest).unwrap(), payload);
+
+        files.delete("M:\\Jingles\\LiveTest\\pista_final.wav");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+        files.delete("M:\\Jingles\\LiveTest");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        // 5. Phase 1 Input Injection: click inside xterm, type "STUDIO_LIVE_OK" + Enter,
+        // and verify the container's studio_console.sh wrote it to D:\teclas_recibidas.txt.
+        outbound.send(&[5, 1, 1, 0x90, 1, 0x2c]).unwrap(); // Pointer click at (400, 300)
+        outbound.send(&[5, 0, 1, 0x90, 1, 0x2c]).unwrap();
+        for ch in "STUDIO_LIVE_OK".chars() {
+            crate::features::input::type_char(&outbound, ch).unwrap();
+        }
+        // Send Enter (0xff0d).
+        outbound.send(&[4, 1, 0, 0, 0, 0, 0xff, 0x0d]).unwrap();
+        outbound.send(&[4, 0, 0, 0, 0, 0, 0xff, 0x0d]).unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+
+        files.download("D:\\teclas_recibidas.txt", &tmp);
+        let keys_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of D:\\teclas_recibidas.txt failed: {u:?}"),
+            }
+        };
+        let keys_log = std::fs::read_to_string(&keys_dest).unwrap();
+        assert!(
+            keys_log.contains("STUDIO_LIVE_OK"),
+            "expected typed text in D:\\teclas_recibidas.txt, got: {keys_log:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        outbound.close();
+    }
 }
