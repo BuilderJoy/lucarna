@@ -135,8 +135,8 @@ impl FilesView {
         let mut builder = egui::ViewportBuilder::default()
             .with_title("Files - Lucarna")
             .with_app_id("lucarna-files")
-            .with_inner_size([960.0, 580.0])
-            .with_min_inner_size([680.0, 380.0]);
+            .with_inner_size([1000.0, 720.0])
+            .with_min_inner_size([720.0, 480.0]);
 
         if let Ok(icon) = eframe::icon_data::from_png_bytes(crate::LOGO_PNG) {
             builder = builder.with_icon(icon);
@@ -159,37 +159,63 @@ impl FilesView {
                     self.start_next_upload(files);
                 }
             }
-            let frame = egui::Frame::NONE
-                .fill(theme::palette(ctx).bg)
-                .inner_margin(egui::Margin::same(12));
+            let frame = egui::Frame::NONE.fill(theme::palette(ctx).bg);
             egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                 self.contents(ui, files);
             });
+            if !self.open {
+                open = false;
+            }
         });
         self.open = open;
         self.rect = None;
     }
 
     fn contents(&mut self, ui: &mut egui::Ui, files: &dyn FileOps) {
+        let p = theme::palette(ui.ctx());
+        if theme::window_header(ui, Icon::Folder, "Files", |ui| {
+            theme::tag(
+                ui,
+                Icon::Network,
+                "UltraVNC file transfer",
+                p.text2,
+                p.elevated,
+            );
+        }) {
+            self.open = false;
+        }
+        let note = |ui: &mut egui::Ui, text: RichText| {
+            ui.add_space(24.0);
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.label(text);
+            });
+        };
         let waited = self.waiting_since.map(|t| t.elapsed());
         if waited.is_some_and(|w| w > PATIENCE) {
-            ui.label(
-                RichText::new("No answer from the server. File transfer may be disabled in its UltraVNC settings.")
-                    .color(ui.visuals().warn_fg_color),
+            note(
+                ui,
+                RichText::new(
+                    "No answer from the server. File transfer may be disabled in its UltraVNC settings.",
+                )
+                .color(ui.visuals().warn_fg_color),
             );
             return;
         }
         match self.access {
             None => {
                 ui.ctx().request_repaint_after(Duration::from_millis(500));
+                ui.add_space(24.0);
                 ui.horizontal(|ui| {
+                    ui.add_space(16.0);
                     ui.spinner();
                     ui.label("Asking the server for file transfer…");
                 });
                 return;
             }
             Some(false) => {
-                ui.label(
+                note(
+                    ui,
                     RichText::new("The server refused file transfer.")
                         .color(ui.visuals().warn_fg_color),
                 );
@@ -198,75 +224,112 @@ impl FilesView {
             Some(true) => {}
         }
 
-        let busy = self.progress.is_some();
-        let can_upload = !busy && !self.path.is_empty();
-
-        let pane_height = (ui.available_height() - 112.0).max(160.0);
-        ui.columns(2, |cols| {
-            card(&mut cols[0], |ui| self.local_pane(ui, files, pane_height));
-            card(&mut cols[1], |ui| self.remote_pane(ui, files, pane_height));
-        });
-
-        ui.add_space(4.0);
-        if let Some((name, done, total)) = &self.progress {
-            let queued = self.upload_queue.len();
-            let suffix = if queued > 0 {
-                format!(" (+{queued} queued)")
-            } else {
-                String::new()
-            };
-            ui.horizontal(|ui| {
-                let fraction = if *total == 0 {
-                    1.0
-                } else {
-                    *done as f32 / *total as f32
-                };
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .text(format!(
-                            "{name}  {} / {}{suffix}",
-                            human_size(*done),
-                            human_size(*total)
-                        ))
-                        .desired_width(ui.available_width() - 80.0),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(theme::danger(ui, "Cancel")).clicked() {
-                        self.upload_queue.clear();
-                        files.cancel();
-                    }
+        egui::Panel::bottom("files_transfers")
+            .frame(egui::Frame::NONE.fill(p.surface))
+            .resizable(false)
+            .show(ui, |ui| {
+                ui.add(egui::Separator::default().spacing(0.0));
+                self.transfers(ui, files);
+            });
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                let pane_height = (ui.available_height() - 8.0).max(200.0);
+                ui.columns(2, |cols| {
+                    card(&mut cols[0], |ui| self.local_pane(ui, files, pane_height));
+                    card(&mut cols[1], |ui| self.remote_pane(ui, files, pane_height));
                 });
             });
-        } else if !self.status.is_empty() {
-            ui.label(&self.status);
-        } else if let Some(selected) = self.selected_local.clone() {
-            let name = selected
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("file")
-                .to_string();
-            let mut do_upload = false;
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("Selected: {name}")).strong());
-                if ui
-                    .add_enabled(
-                        can_upload,
-                        theme::primary(format!("{} Upload to Remote", char::from(Icon::Upload)))
-                            .small(),
-                    )
-                    .clicked()
-                {
-                    do_upload = true;
+    }
+
+    /// Bottom strip: the running transfer as a card, or a hint when idle.
+    fn transfers(&mut self, ui: &mut egui::Ui, files: &dyn FileOps) {
+        let p = theme::palette(ui.ctx());
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(16, 12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Transfers").size(13.0).strong());
+                    let active = usize::from(self.progress.is_some());
+                    theme::count_pill(ui, active + self.upload_queue.len());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new("Drop files on this window to upload")
+                                .size(12.0)
+                                .color(p.text3),
+                        );
+                    });
+                });
+                ui.add_space(8.0);
+                if let Some((name, done, total)) = self.progress.clone() {
+                    let queued = self.upload_queue.len();
+                    egui::Frame::NONE
+                        .fill(p.card)
+                        .stroke(egui::Stroke::new(1.0, p.border))
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .inner_margin(egui::Margin::symmetric(12, 10))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(char::from(Icon::ArrowUpDown).to_string())
+                                        .color(p.accent_text),
+                                );
+                                ui.vertical(|ui| {
+                                    ui.set_width((ui.available_width() - 90.0).max(120.0));
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(&name).size(12.0).strong());
+                                        ui.with_layout(
+                                            Layout::right_to_left(Align::Center),
+                                            |ui| {
+                                                let q = if queued > 0 {
+                                                    format!(" · +{queued} queued")
+                                                } else {
+                                                    String::new()
+                                                };
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{} / {}{q}",
+                                                        human_size(done),
+                                                        human_size(total)
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(p.text2),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    let fraction = if total == 0 {
+                                        1.0
+                                    } else {
+                                        done as f32 / total as f32
+                                    };
+                                    ui.add(
+                                        egui::ProgressBar::new(fraction)
+                                            .desired_height(6.0)
+                                            .corner_radius(egui::CornerRadius::same(3))
+                                            .fill(theme::ACCENT),
+                                    );
+                                });
+                                if ui.add(theme::danger(ui, "Cancel")).clicked() {
+                                    self.upload_queue.clear();
+                                    files.cancel();
+                                }
+                            });
+                        });
+                } else if !self.status.is_empty() {
+                    ui.label(RichText::new(&self.status).color(p.text2));
+                } else {
+                    ui.label(
+                        RichText::new(
+                            "Nothing running. Pick a file on the left and press Upload, or double-click a file to send or fetch it.",
+                        )
+                        .size(12.0)
+                        .color(p.text3),
+                    );
                 }
-                ui.label(RichText::new("or double-click a file / drop files to upload").weak());
             });
-            if do_upload {
-                self.upload_queue.push_back(selected);
-                self.start_next_upload(files);
-            }
-        } else {
-            ui.label(RichText::new("Drop files onto this window, double-click a file, or click Upload to send to remote folder.").weak());
-        }
     }
 
     fn local_pane(&mut self, ui: &mut egui::Ui, files: &dyn FileOps, height: f32) {
@@ -274,68 +337,65 @@ impl FilesView {
         let can_upload = !busy && !self.path.is_empty();
         let mut upload = None;
 
+        ui.horizontal(|ui| {
+            pane_title(ui, Icon::Laptop, "Local");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let sel = self.selected_local.clone();
+                let tip = if sel.is_none() {
+                    "Select a file below to upload (or double-click it)"
+                } else {
+                    "Upload the selected file to the remote folder"
+                };
+                if ui
+                    .add_enabled(
+                        can_upload && sel.is_some(),
+                        theme::primary(format!("{} Upload", char::from(Icon::Upload)))
+                            .min_size(egui::vec2(0.0, 32.0)),
+                    )
+                    .on_hover_text(tip)
+                    .on_disabled_hover_text(tip)
+                    .clicked()
+                {
+                    upload = sel;
+                }
+                if icon_square(ui, Icon::RefreshCw, "Refresh local folder") {
+                    self.refresh_local();
+                }
+            });
+        });
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Local").strong());
-            if ui.small_button("Downloads").clicked() {
-                self.set_local_dir(transfer::downloads_dir());
+            let mut go = None;
+            let downloads = transfer::downloads_dir();
+            if theme::chip(ui, Icon::Download, "Downloads", self.local_dir == downloads).clicked() {
+                go = Some(downloads);
             }
             if let Some(home) = std::env::home_dir() {
                 let desktop = home.join("Desktop");
-                if desktop.is_dir() && ui.small_button("Desktop").clicked() {
-                    self.set_local_dir(desktop);
+                if desktop.is_dir()
+                    && theme::chip(ui, Icon::Monitor, "Desktop", self.local_dir == desktop)
+                        .clicked()
+                {
+                    go = Some(desktop);
                 }
-                if ui.small_button("Home").clicked() {
-                    self.set_local_dir(home);
+                if theme::chip(ui, Icon::House, "Home", self.local_dir == home).clicked() {
+                    go = Some(home);
                 }
             }
-            if ui
-                .small_button(char::from(Icon::RefreshCw).to_string())
-                .on_hover_text("Refresh local folder")
-                .clicked()
-            {
-                self.refresh_local();
-            }
-            ui.separator();
-            let upload_label = match &self.selected_local {
-                Some(p) => {
-                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    format!("{} Upload ({name})", char::from(Icon::Upload))
-                }
-                None => format!("{} Upload", char::from(Icon::Upload)),
-            };
-            let tip = if self.selected_local.is_none() {
-                "Select a file below to upload (or double-click it)"
-            } else {
-                "Upload selected file to active remote folder"
-            };
-            let btn = ui
-                .add_enabled(
-                    can_upload && self.selected_local.is_some(),
-                    theme::primary(upload_label).small(),
-                )
-                .on_hover_text(tip);
-            if btn.clicked()
-                && let Some(p) = &self.selected_local
-            {
-                upload = Some(p.clone());
+            if let Some(dir) = go {
+                self.set_local_dir(dir);
             }
         });
-        ui.add(
-            egui::Label::new(
-                RichText::new(self.local_dir.display().to_string())
-                    .monospace()
-                    .weak(),
-            )
-            .truncate(),
-        );
-        ui.separator();
+        ui.add_space(8.0);
+        path_bar(ui, &self.local_dir.display().to_string());
+        ui.add_space(8.0);
 
         // Sticky column headers
         let local_cols = [LOCAL_SIZE_W, LOCAL_ACT_W];
         table_header(ui, &local_cols, ["Name", "Size", ""]);
 
         let mut go_dir = None;
-        let scroll_h = (height - 96.0).max(80.0);
+        let scroll_h = (height - 214.0).max(80.0);
         egui::ScrollArea::vertical()
             .id_salt("local_scroll")
             .auto_shrink(false)
@@ -391,6 +451,7 @@ impl FilesView {
                     }
                 }
             });
+        pane_footer(ui, &format!("{} items", self.local_entries.len()));
         if let Some(dir) = go_dir {
             self.set_local_dir(dir);
         }
@@ -404,24 +465,55 @@ impl FilesView {
         let busy = self.progress.is_some();
         let has_dir = !self.path.is_empty();
         let mut go = None;
+        ui.horizontal(|ui| {
+            pane_title(ui, Icon::Server, "Remote");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .add_enabled(
+                        !busy && has_dir,
+                        egui::Button::new(format!("{} Folder", char::from(Icon::FolderPlus)))
+                            .min_size(egui::vec2(0.0, 32.0)),
+                    )
+                    .on_hover_text("Create a folder here")
+                    .clicked()
+                {
+                    self.prompt = Some(Prompt::NewFolder(String::new()));
+                }
+                if ui
+                    .add_enabled(
+                        !busy && has_dir,
+                        icon_square_button(Icon::RefreshCw)
+                            .stroke(egui::Stroke::new(1.0, theme::palette(ui.ctx()).border)),
+                    )
+                    .on_hover_text("Refresh remote folder")
+                    .clicked()
+                {
+                    go = Some(self.path.clone());
+                }
+            });
+        });
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Remote").strong());
             for (drive, kind) in &self.drives {
-                let (label, tip) = match kind {
+                let (label, tip, icon) = match kind {
                     'h' => (
                         "Home".to_string(),
                         "Home folder: files you upload land here",
+                        Icon::House,
                     ),
                     'd' => (
                         drive.rsplit('/').next().unwrap_or(drive).to_string(),
                         "Shortcut",
+                        Icon::Folder,
                     ),
-                    'l' if drive == "/" => ("Root /".to_string(), "Filesystem root"),
-                    'l' => (drive.clone(), "Local disk"),
-                    'f' => (drive.clone(), "Removable"),
-                    'c' => (drive.clone(), "CD-ROM"),
-                    'n' => (drive.clone(), "Network"),
-                    _ => (drive.clone(), "Drive"),
+                    'l' if drive == "/" => {
+                        ("Root /".to_string(), "Filesystem root", Icon::HardDrive)
+                    }
+                    'l' => (drive.clone(), "Local disk", Icon::HardDrive),
+                    'f' => (drive.clone(), "Removable", Icon::Usb),
+                    'c' => (drive.clone(), "CD-ROM", Icon::Disc),
+                    'n' => (drive.clone(), "Network", Icon::Network),
+                    _ => (drive.clone(), "Drive", Icon::HardDrive),
                 };
                 let here = self.path.trim_end_matches('/');
                 let active = if drive == "/" {
@@ -431,58 +523,32 @@ impl FilesView {
                 } else {
                     self.path.starts_with(drive.as_str())
                 };
-                if ui
-                    .selectable_label(active, label)
+                if theme::chip(ui, icon, &label, active)
                     .on_hover_text(format!("{tip}\n{drive}"))
                     .clicked()
                 {
                     go = Some(drive.clone());
                 }
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add_enabled(
-                        !busy && has_dir,
-                        egui::Button::new(char::from(Icon::RefreshCw).to_string()).small(),
-                    )
-                    .on_hover_text("Refresh remote folder")
-                    .clicked()
-                {
-                    go = Some(self.path.clone());
-                }
-                if ui
-                    .add_enabled(
-                        !busy && has_dir,
-                        egui::Button::new(format!("{} Folder", char::from(Icon::FolderPlus)))
-                            .small(),
-                    )
-                    .clicked()
-                {
-                    self.prompt = Some(Prompt::NewFolder(String::new()));
-                }
-            });
         });
-        ui.add(
-            egui::Label::new(
-                RichText::new(if self.path.is_empty() {
-                    "Pick a drive"
-                } else {
-                    &self.path
-                })
-                .monospace()
-                .weak(),
-            )
-            .truncate(),
+        ui.add_space(8.0);
+        path_bar(
+            ui,
+            if self.path.is_empty() {
+                "Pick a drive"
+            } else {
+                &self.path
+            },
         );
         self.prompt_bar(ui, files);
-        ui.separator();
+        ui.add_space(8.0);
 
         // Sticky column headers
         let remote_cols = [REMOTE_SIZE_W, REMOTE_DATE_W, REMOTE_ACT_W];
         table_header(ui, &remote_cols, ["Name", "Size", "Modified (UTC)", ""]);
 
         let mut fetch = None;
-        let scroll_h = (height - if self.prompt.is_some() { 122.0 } else { 96.0 }).max(80.0);
+        let scroll_h = (height - if self.prompt.is_some() { 266.0 } else { 214.0 }).max(80.0);
         egui::ScrollArea::vertical()
             .id_salt("remote_scroll")
             .auto_shrink(false)
@@ -566,6 +632,7 @@ impl FilesView {
                     }
                 }
             });
+        pane_footer(ui, &format!("{} items", self.entries.len()));
         if let Some(path) = go {
             self.prompt = None;
             self.request(files, &path);
@@ -723,7 +790,7 @@ fn child(path: &str, name: &str) -> String {
     }
 }
 
-const ROW_H: f32 = 32.0;
+const ROW_H: f32 = 36.0;
 const PAD: f32 = 8.0;
 const GAP: f32 = 8.0;
 const LOCAL_SIZE_W: f32 = 64.0;
@@ -786,14 +853,18 @@ fn cell(ui: &mut egui::Ui, rect: egui::Rect, right: bool, add: impl FnOnce(&mut 
 fn table_header<const N: usize>(ui: &mut egui::Ui, fixed: &[f32], titles: [&str; N]) {
     let (_, name, cols) = table_row(ui, fixed, false, false);
     let title = |ui: &mut egui::Ui, t: &str| {
-        ui.add(egui::Label::new(RichText::new(t).small().strong().weak()).selectable(false));
+        let c = theme::palette(ui.ctx()).text3;
+        ui.add(
+            egui::Label::new(RichText::new(t.to_uppercase()).size(11.0).strong().color(c))
+                .selectable(false),
+        );
     };
     cell(ui, name, false, |ui| title(ui, titles[0]));
     for (i, rect) in cols.iter().enumerate() {
         // The first fixed column is Size, which is right-aligned.
         cell(ui, *rect, i == 0, |ui| title(ui, titles[i + 1]));
     }
-    ui.separator();
+    ui.add(egui::Separator::default().spacing(2.0));
 }
 
 fn name_label(ui: &mut egui::Ui, icon: Icon, name: &str, dim: bool) {
@@ -827,6 +898,54 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, enabled: bool) -> bool 
     ui.add_enabled(enabled, egui::Button::new(text).small().frame(false))
         .on_hover_text(tip)
         .clicked()
+}
+
+fn pane_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
+    let c = theme::palette(ui.ctx()).text2;
+    ui.label(
+        RichText::new(char::from(icon).to_string())
+            .size(15.0)
+            .color(c),
+    );
+    ui.label(RichText::new(title).size(14.0).strong());
+}
+
+fn icon_square_button(icon: Icon) -> egui::Button<'static> {
+    egui::Button::new(char::from(icon).to_string())
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::new(1.0, egui::Color32::TRANSPARENT))
+        .min_size(egui::vec2(32.0, 32.0))
+}
+
+fn icon_square(ui: &mut egui::Ui, icon: Icon, tip: &str) -> bool {
+    let b =
+        icon_square_button(icon).stroke(egui::Stroke::new(1.0, theme::palette(ui.ctx()).border));
+    ui.add(b).on_hover_text(tip).clicked()
+}
+
+/// Read-only path field in monospace.
+fn path_bar(ui: &mut egui::Ui, text: &str) {
+    let p = theme::palette(ui.ctx());
+    egui::Frame::NONE
+        .fill(p.input_bg)
+        .stroke(egui::Stroke::new(1.0, p.border))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(RichText::new(text).monospace().size(12.0).color(p.text2))
+                    .truncate(),
+            );
+        });
+}
+
+fn pane_footer(ui: &mut egui::Ui, text: &str) {
+    let p = theme::palette(ui.ctx());
+    ui.add_space(4.0);
+    ui.add(egui::Separator::default().spacing(0.0));
+    ui.add_space(6.0);
+    ui.label(RichText::new(text).size(12.0).color(p.text3));
 }
 
 fn human_size(n: u64) -> String {

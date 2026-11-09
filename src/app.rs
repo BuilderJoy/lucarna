@@ -494,7 +494,11 @@ impl eframe::App for App {
             });
         live.files_view.show(&ctx, &*live.files);
         live.chat.show(&ctx, &live.outbound);
-        live.clipboard_view.show(&ctx, &live.clipboard);
+        live.clipboard_view.show(
+            &ctx,
+            &live.clipboard,
+            live.share_clipboard && !live.view_only,
+        );
     }
 }
 

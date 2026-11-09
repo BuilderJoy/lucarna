@@ -901,13 +901,19 @@ impl Dashboard {
                         });
                         ui.add_space(4.0);
                         ui.horizontal_wrapped(|ui| {
-                            if widgets::chip(ui, Icon::Lock, "SSH tunnel", self.quick_ssh_on) {
+                            if theme::chip(ui, Icon::Lock, "SSH tunnel", self.quick_ssh_on)
+                                .clicked()
+                            {
                                 self.quick_ssh_on = !self.quick_ssh_on;
                             }
-                            if widgets::chip(ui, Icon::Eye, "View only", self.quick_view_only) {
+                            if theme::chip(ui, Icon::Eye, "View only", self.quick_view_only)
+                                .clicked()
+                            {
                                 self.quick_view_only = !self.quick_view_only;
                             }
-                            if widgets::chip(ui, Icon::Radio, "Via repeater", self.quick_rep_on) {
+                            if theme::chip(ui, Icon::Radio, "Via repeater", self.quick_rep_on)
+                                .clicked()
+                            {
                                 self.quick_rep_on = !self.quick_rep_on;
                             }
                             if self.quick_ssh_on {
@@ -2197,7 +2203,7 @@ impl Dashboard {
                         ("F2", "Rename"),
                     ] {
                         ui.label(RichText::new(what).size(12.0).color(p.text3));
-                        widgets::keycap(ui, key);
+                        theme::keycap(ui, key);
                     }
                     ui.label(
                         RichText::new("Double-click to connect")

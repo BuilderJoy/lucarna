@@ -174,6 +174,111 @@ pub fn danger(ui: &egui::Ui, text: impl Into<String>) -> egui::Button<'static> {
         .stroke(Stroke::new(1.0, p.danger.gamma_multiply(0.6)))
 }
 
+/// Rounded toggle chip (SSH tunnel, Downloads, ...). Returns true when clicked.
+pub fn chip(ui: &mut egui::Ui, icon: lucide_icons::Icon, label: &str, on: bool) -> egui::Response {
+    let p = palette(ui.ctx());
+    let (fg, fill, stroke) = if on {
+        (p.accent_text, p.accent_soft, Stroke::new(1.0, ACCENT))
+    } else {
+        (p.text2, Color32::TRANSPARENT, Stroke::new(1.0, p.border))
+    };
+    let text = RichText::new(format!("{} {label}", char::from(icon)))
+        .size(12.0)
+        .color(fg);
+    ui.add(
+        egui::Button::new(text)
+            .fill(fill)
+            .stroke(stroke)
+            .corner_radius(CornerRadius::same(15))
+            .min_size(egui::vec2(0.0, 28.0)),
+    )
+}
+
+/// Keyboard key hint such as `F2`.
+pub fn keycap(ui: &mut egui::Ui, key: &str) {
+    let p = palette(ui.ctx());
+    egui::Frame::NONE
+        .stroke(Stroke::new(1.0, p.border))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(5, 1))
+        .show(ui, |ui| {
+            ui.label(RichText::new(key).size(11.0).color(p.text3));
+        });
+}
+
+/// Small rounded label with an icon, e.g. "From remote".
+pub fn tag(ui: &mut egui::Ui, icon: lucide_icons::Icon, text: &str, fg: Color32, bg: Color32) {
+    egui::Frame::NONE
+        .fill(bg)
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(8, 3))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(format!("{} {text}", char::from(icon)))
+                    .size(11.0)
+                    .strong()
+                    .color(fg),
+            );
+        });
+}
+
+/// Count shown next to a section title.
+pub fn count_pill(ui: &mut egui::Ui, n: usize) {
+    let p = palette(ui.ctx());
+    egui::Frame::NONE
+        .fill(p.elevated)
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(7, 1))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(n.to_string())
+                    .size(11.0)
+                    .strong()
+                    .color(p.text2),
+            );
+        });
+}
+
+/// Window header: accent icon tile and title on the left, a close button on the right.
+/// Returns true when the close button was clicked.
+pub fn window_header(
+    ui: &mut egui::Ui,
+    icon: lucide_icons::Icon,
+    title: &str,
+    extra: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let p = palette(ui.ctx());
+    let mut close = false;
+    egui::Frame::NONE
+        .fill(p.surface)
+        .inner_margin(Margin::symmetric(16, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                egui::Frame::NONE
+                    .fill(p.accent_soft)
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::same(7))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(char::from(icon).to_string()).color(p.accent_text));
+                    });
+                ui.label(RichText::new(title).size(15.0).strong());
+                extra(ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let x = egui::Button::new(
+                        RichText::new(char::from(lucide_icons::Icon::X).to_string()).color(p.text2),
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE)
+                    .min_size(egui::vec2(32.0, 32.0));
+                    close = ui.add(x).on_hover_text("Close").clicked();
+                });
+            });
+        });
+    ui.add(egui::Separator::default().spacing(0.0));
+    close
+}
+
 /// Segmented control: a track with one raised segment per item. Returns true when the value changed.
 /// Items read in the given order even when the caller sits in a right-to-left layout.
 pub fn segmented<T: PartialEq + Copy>(

@@ -1,8 +1,6 @@
 //! Small painted pieces of the address book: label colours, tile wallpapers, filled star, chips.
 
-use eframe::egui::{self, Color32, CornerRadius, Pos2, RichText, Stroke, epaint::Mesh};
-
-use crate::shared::theme;
+use eframe::egui::{self, Color32, Pos2, epaint::Mesh};
 
 const LABEL_COLORS: [Color32; 8] = [
     Color32::from_rgb(0xf5, 0x9e, 0x0b),
@@ -55,43 +53,6 @@ pub fn star(painter: &egui::Painter, c: Pos2, r: f32, color: Color32) {
         mesh.add_triangle(0, 1 + i, 1 + (i + 1) % 10);
     }
     painter.add(egui::Shape::mesh(mesh));
-}
-
-/// Rounded toggle chip (SSH tunnel, View only, ...). Returns true when clicked.
-pub fn chip(ui: &mut egui::Ui, icon: lucide_icons::Icon, label: &str, on: bool) -> bool {
-    let p = theme::palette(ui.ctx());
-    let (fg, fill, stroke) = if on {
-        (
-            p.accent_text,
-            p.accent_soft,
-            Stroke::new(1.0, theme::ACCENT),
-        )
-    } else {
-        (p.text2, Color32::TRANSPARENT, Stroke::new(1.0, p.border))
-    };
-    let text = RichText::new(format!("{} {label}", char::from(icon)))
-        .size(12.0)
-        .color(fg);
-    ui.add(
-        egui::Button::new(text)
-            .fill(fill)
-            .stroke(stroke)
-            .corner_radius(CornerRadius::same(15))
-            .min_size(egui::vec2(0.0, 28.0)),
-    )
-    .clicked()
-}
-
-/// Keyboard key hint such as `F2`.
-pub fn keycap(ui: &mut egui::Ui, key: &str) {
-    let p = theme::palette(ui.ctx());
-    egui::Frame::NONE
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::symmetric(5, 1))
-        .show(ui, |ui| {
-            ui.label(RichText::new(key).size(11.0).color(p.text3));
-        });
 }
 
 #[cfg(test)]
