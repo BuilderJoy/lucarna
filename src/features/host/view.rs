@@ -86,6 +86,8 @@ pub struct HostView {
     show_pin: bool,
     join_fresh: bool,
     prefs_loaded: bool,
+    /// Last session code written to the saved preferences.
+    saved_code: String,
     /// Set when a pasted invitation filled the dialog, so it can say so.
     pub pasted_invitation: bool,
 
@@ -124,6 +126,7 @@ impl Default for HostView {
             show_pin: false,
             join_fresh: true,
             prefs_loaded: false,
+            saved_code: String::new(),
             pasted_invitation: false,
             session_started: None,
             last_session: None,
@@ -172,10 +175,11 @@ pub fn parse_invitation(text: &str) -> Option<Invitation> {
 
 const KEY_VIEWER_REPEATER: &str = "lucarna_viewer_repeater";
 const KEY_HOST_REPEATER: &str = "lucarna_host_repeater";
+const KEY_HOST_CODE: &str = "lucarna_host_code";
 
 impl HostView {
     /// Repeaters are remembered, so the second time nobody has to type one.
-    fn load_prefs(&mut self, ctx: &egui::Context) {
+    pub fn load_prefs(&mut self, ctx: &egui::Context) {
         if self.prefs_loaded {
             return;
         }
@@ -186,6 +190,13 @@ impl HostView {
         }
         if let Some(r) = get(KEY_HOST_REPEATER) {
             self.repeater_addr = r;
+        }
+        // The code is an address, not a secret, so it stays the same between launches; the PIN does not.
+        if let Some(c) =
+            get(KEY_HOST_CODE).filter(|c| c.len() == 6 && c.chars().all(|d| d.is_ascii_digit()))
+        {
+            self.saved_code = c.clone();
+            self.session_code = c;
         }
     }
 
@@ -486,6 +497,11 @@ impl HostView {
     /// visible over whatever the remote person is doing, with a red button that ends the session at once.
     pub fn show_active_banner(&mut self, ctx: &egui::Context) {
         self.poll_events();
+        self.load_prefs(ctx);
+        if self.saved_code != self.session_code {
+            Self::save_pref(ctx, KEY_HOST_CODE, &self.session_code);
+            self.saved_code = self.session_code.clone();
+        }
         if !self.is_running() {
             return;
         }
@@ -739,74 +755,146 @@ impl HostView {
             });
     }
 
+    /// The session code and the PIN, big, with a button for a new pair. Shown before and while sharing.
+    fn code_cards(&mut self, ui: &mut Ui) {
+        let p = theme::palette(ui.ctx());
+        ui.columns(2, |cols| {
+            code_card(
+                &mut cols[0],
+                tr("Session code"),
+                &format_code(&self.session_code),
+                p.text,
+                None,
+            );
+            let mut refresh = false;
+            code_card(
+                &mut cols[1],
+                tr("PIN"),
+                &self.pin,
+                p.accent_text,
+                Some(&mut refresh),
+            );
+            if refresh {
+                self.regenerate_credentials();
+            }
+        });
+    }
+
+    fn copy_invitation_button(&mut self, ui: &mut Ui, primary: bool, width: f32) {
+        let copied = self.copied_until.is_some_and(|t| Instant::now() < t);
+        let label = if copied {
+            fill(tr("{}  Invitation copied"), &[&(char::from(Icon::Check))])
+        } else {
+            fill(tr("{}  Copy invitation"), &[&(char::from(Icon::Copy))])
+        };
+        let size = egui::vec2(width, 48.0);
+        let clicked = if primary {
+            ui.add(theme::primary(label).min_size(size)).clicked()
+        } else {
+            ui.add(egui::Button::new(label).min_size(size)).clicked()
+        };
+        if clicked {
+            ui.ctx().copy_text(self.format_invitation());
+            self.copied_until = Some(Instant::now() + Duration::from_secs(2));
+        }
+    }
+
+    /// First thing on the page, like any remote-support tool: your code and PIN, ready to read out.
     fn idle_view(&mut self, ui: &mut Ui) {
         let p = theme::palette(ui.ctx());
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            icon_tile(ui, Icon::MonitorUp, 72.0);
-            ui.add_space(14.0);
-            ui.label(RichText::new(tr("Let someone help you")).size(28.0).strong());
-            ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 5.0, p.text3);
             ui.label(
-                RichText::new(
-                    tr("Lucarna creates a one-time code and PIN. Give both to the person you trust. Nothing is shared until you start."),
-                )
-                .size(15.0)
-                .color(p.text2),
+                RichText::new(tr("Ready. Nothing is shared until you start."))
+                    .size(15.0)
+                    .strong(),
             );
-            ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                ui.add_space(((ui.available_width() - 330.0) / 2.0).max(0.0));
-                if theme::chip(ui, Icon::Network, tr("Direct (LAN)"), !self.use_repeater).clicked() {
-                    self.use_repeater = false;
-                }
-                if theme::chip(ui, Icon::Globe, tr("Repeater (through NAT)"), self.use_repeater).clicked() {
-                    self.use_repeater = true;
-                }
-            });
-            ui.add_space(10.0);
-            let (label, field, hint) = if self.use_repeater {
-                (tr("Repeater"), &mut self.repeater_addr, "repeater.example.com:5500")
-            } else {
-                (tr("Listen on"), &mut self.bind_addr, "0.0.0.0:5950")
-            };
-            ui.allocate_ui(egui::vec2(420.0, 70.0), |ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(label).size(12.0).strong().color(p.text2));
-                    ui.add(
-                        egui::TextEdit::singleline(field)
-                            .font(egui::FontId::monospace(14.0))
-                            .hint_text(hint)
-                            .margin(egui::vec2(14.0, 11.0))
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-            });
-            if !self.use_repeater {
-                ui.add_space(6.0);
-                ui.checkbox(
-                    &mut self.use_e2ee_pin,
-                    tr("Require the PIN and encrypt the session (recommended)"),
-                );
-                if !self.use_e2ee_pin {
-                    ui.allocate_ui(egui::vec2(420.0, 56.0), |ui| {
-                        ui.label(RichText::new(tr("Classic VNC password")).size(12.0).color(p.text2));
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.studio_password)
-                                .password(true)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
-                }
-            }
-            ui.add_space(14.0);
-            let go = theme::primary(fill(tr("Wait for connection  {}"), &[&(char::from(Icon::ArrowRight))]))
-                .min_size(egui::vec2(260.0, 52.0));
+        });
+        ui.add_space(18.0);
+        self.code_cards(ui);
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            let go = theme::primary(fill(
+                tr("Start sharing  {}"),
+                &[&(char::from(Icon::ArrowRight))],
+            ))
+            .min_size(egui::vec2((ui.available_width() - 210.0).max(200.0), 48.0));
             if ui.add(go).clicked() {
                 let ctx = ui.ctx().clone();
                 self.start_sharing(&ctx);
             }
+            self.copy_invitation_button(ui, false, 200.0);
         });
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new(tr("The code and PIN only work while you are sharing."))
+                .size(12.0)
+                .color(p.text3),
+        );
+        ui.add_space(18.0);
+        ui.add(egui::Separator::default().spacing(0.0));
+        ui.add_space(14.0);
+        ui.label(RichText::new(tr("How they reach you")).size(13.0).strong());
+        ui.add_space(8.0);
+        self.reach_options(ui);
+    }
+
+    /// Direct (LAN) or through a repeater, and the address that goes with it.
+    fn reach_options(&mut self, ui: &mut Ui) {
+        let p = theme::palette(ui.ctx());
+        ui.horizontal(|ui| {
+            if theme::chip(ui, Icon::Network, tr("Direct (LAN)"), !self.use_repeater).clicked() {
+                self.use_repeater = false;
+            }
+            if theme::chip(
+                ui,
+                Icon::Globe,
+                tr("Repeater (through NAT)"),
+                self.use_repeater,
+            )
+            .clicked()
+            {
+                self.use_repeater = true;
+            }
+        });
+        ui.add_space(10.0);
+        let (label, field, hint) = if self.use_repeater {
+            (
+                tr("Repeater"),
+                &mut self.repeater_addr,
+                "repeater.example.com:5500",
+            )
+        } else {
+            (tr("Listen on"), &mut self.bind_addr, "0.0.0.0:5950")
+        };
+        ui.label(RichText::new(label).size(12.0).strong().color(p.text2));
+        ui.add(
+            egui::TextEdit::singleline(field)
+                .font(egui::FontId::monospace(14.0))
+                .hint_text(hint)
+                .margin(egui::vec2(14.0, 11.0))
+                .desired_width(f32::INFINITY),
+        );
+        if !self.use_repeater {
+            ui.add_space(6.0);
+            ui.checkbox(
+                &mut self.use_e2ee_pin,
+                tr("Require the PIN and encrypt the session (recommended)"),
+            );
+            if !self.use_e2ee_pin {
+                ui.label(
+                    RichText::new(tr("Classic VNC password"))
+                        .size(12.0)
+                        .color(p.text2),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.studio_password)
+                        .password(true)
+                        .desired_width(f32::INFINITY),
+                );
+            }
+        }
     }
 
     fn waiting_view(&mut self, ui: &mut Ui) {
@@ -836,42 +924,11 @@ impl HostView {
             });
         });
         ui.add_space(18.0);
-        ui.columns(2, |cols| {
-            code_card(
-                &mut cols[0],
-                tr("Session code"),
-                &format_code(&self.session_code),
-                p.text,
-                None,
-            );
-            let mut refresh = false;
-            code_card(
-                &mut cols[1],
-                tr("PIN"),
-                &self.pin,
-                p.accent_text,
-                Some(&mut refresh),
-            );
-            if refresh {
-                self.regenerate_credentials();
-            }
-        });
+        self.code_cards(ui);
         ui.add_space(16.0);
         ui.horizontal(|ui| {
-            let copied = self.copied_until.is_some_and(|t| Instant::now() < t);
-            let label = if copied {
-                fill(tr("{}  Invitation copied"), &[&(char::from(Icon::Check))])
-            } else {
-                fill(tr("{}  Copy invitation"), &[&(char::from(Icon::Copy))])
-            };
             let w = (ui.available_width() - 150.0).max(200.0);
-            if ui
-                .add(theme::primary(label).min_size(egui::vec2(w, 48.0)))
-                .clicked()
-            {
-                ui.ctx().copy_text(self.format_invitation());
-                self.copied_until = Some(Instant::now() + Duration::from_secs(2));
-            }
+            self.copy_invitation_button(ui, true, w);
             if ui
                 .add(egui::Button::new(tr("Stop waiting")).min_size(egui::vec2(0.0, 48.0)))
                 .clicked()

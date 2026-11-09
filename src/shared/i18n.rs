@@ -267,6 +267,18 @@ static ES: &[(&str, &str)] = &[
     ),
     ("Dismiss message", "Descartar mensaje"),
     (
+        "Ready. Nothing is shared until you start.",
+        "Listo. No se comparte nada hasta que empieces.",
+    ),
+    ("Start sharing  {}", "Empezar a compartir  {}"),
+    (
+        "The code and PIN only work while you are sharing.",
+        "El código y el PIN solo funcionan mientras compartes.",
+    ),
+    ("How they reach you", "Cómo se conectan contigo"),
+    ("Code", "Código"),
+    ("Copy invitation", "Copiar invitación"),
+    (
         "Ask the other person to copy their invitation, then paste it here with {}. Or type the code and PIN.",
         "Pide a la otra persona que copie su invitación y pégala aquí con {}. O escribe el código y el PIN.",
     ),

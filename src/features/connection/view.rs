@@ -320,6 +320,7 @@ impl Dashboard {
         let ctx = ui.ctx().clone();
         let p = theme::palette(&ctx);
         self.probe(&ctx);
+        self.host_view.load_prefs(&ctx);
         let mut request = None;
 
         // Top omni-bar: logo, quick-connect / search bar, view controls, and + New button.
@@ -547,15 +548,16 @@ impl Dashboard {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let sharing = self.host_view.is_running();
         let mode = &mut self.mode;
+        let host = &self.host_view;
         egui::Panel::bottom("device_card")
             .frame(egui::Frame::NONE)
             .resizable(false)
-            .show(ui, |ui| Self::device_card(ui, mode, sharing));
+            .show(ui, |ui| Self::device_card(ui, mode, sharing, host));
         self.sidebar_lists(ui);
     }
 
     /// Entry point of Studio / QuickSupport mode.
-    fn device_card(ui: &mut egui::Ui, mode: &mut Mode, sharing: bool) {
+    fn device_card(ui: &mut egui::Ui, mode: &mut Mode, sharing: bool, host: &HostView) {
         let p = theme::palette(ui.ctx());
         egui::Frame::NONE
             .fill(p.card)
@@ -593,7 +595,54 @@ impl Dashboard {
                             .size(12.0)
                             .color(p.text2),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(8.0);
+                        // The code and PIN are the first thing you see: read them out, or copy the invitation.
+                        egui::Frame::NONE
+                            .fill(p.input_bg)
+                            .stroke(Stroke::new(1.0, p.border))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::symmetric(10, 6))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                let rows = [
+                                    (
+                                        tr("Code"),
+                                        crate::shared::crypto::format_code(&host.session_code),
+                                        p.text,
+                                    ),
+                                    (tr("PIN"), host.pin.clone(), p.accent_text),
+                                ];
+                                for (i, (label, value, color)) in rows.into_iter().enumerate() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(label).size(11.0).color(p.text3));
+                                        ui.label(
+                                            RichText::new(value)
+                                                .monospace()
+                                                .size(16.0)
+                                                .strong()
+                                                .color(color),
+                                        );
+                                        if i == 0 {
+                                            ui.with_layout(
+                                                Layout::right_to_left(Align::Center),
+                                                |ui| {
+                                                    if ui
+                                                        .small_button(
+                                                            char::from(Icon::Copy).to_string(),
+                                                        )
+                                                        .on_hover_text(tr("Copy invitation"))
+                                                        .clicked()
+                                                    {
+                                                        ui.ctx()
+                                                            .copy_text(host.format_invitation());
+                                                    }
+                                                },
+                                            );
+                                        }
+                                    });
+                                }
+                            });
+                        ui.add_space(8.0);
                         let w = ui.available_width();
                         if ui
                             .add(
