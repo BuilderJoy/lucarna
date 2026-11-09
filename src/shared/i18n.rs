@@ -266,6 +266,14 @@ static ES: &[(&str, &str)] = &[
         "Desconectar a la otra persona y dejar de compartir",
     ),
     ("Dismiss message", "Descartar mensaje"),
+    (
+        "Ask the other person to copy their invitation, then paste it here with {}. Or type the code and PIN.",
+        "Pide a la otra persona que copie su invitación y pégala aquí con {}. O escribe el código y el PIN.",
+    ),
+    (
+        "Invitation read. Check it and press Connect.",
+        "Invitación leída. Revísala y pulsa Conectar.",
+    ),
     ("Duplicate", "Duplicar"),
     (
         "Don't send keyboard, mouse or clipboard to the server",

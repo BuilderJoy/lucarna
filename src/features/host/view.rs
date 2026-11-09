@@ -84,6 +84,10 @@ pub struct HostView {
     pub viewer_direct: String,
     pub join_open: bool,
     show_pin: bool,
+    join_fresh: bool,
+    prefs_loaded: bool,
+    /// Set when a pasted invitation filled the dialog, so it can say so.
+    pub pasted_invitation: bool,
 
     // Session bookkeeping for the Share page
     session_started: Option<Instant>,
@@ -118,6 +122,9 @@ impl Default for HostView {
             viewer_direct: String::new(),
             join_open: false,
             show_pin: false,
+            join_fresh: true,
+            prefs_loaded: false,
+            pasted_invitation: false,
             session_started: None,
             last_session: None,
             failed_pins: 0,
@@ -128,7 +135,64 @@ impl Default for HostView {
     }
 }
 
+/// What a copied invitation carries. Read from either language, so an invitation made on a Spanish
+/// computer works on an English one.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Invitation {
+    pub code: Option<String>,
+    pub pin: Option<String>,
+    pub repeater: Option<String>,
+    pub address: Option<String>,
+}
+
+pub fn parse_invitation(text: &str) -> Option<Invitation> {
+    let mut inv = Invitation::default();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (key, value) = (key.trim().to_lowercase(), value.trim());
+        let digits = |v: &str| {
+            v.split_whitespace()
+                .next()
+                .map(|t| t.chars().filter(char::is_ascii_digit).collect::<String>())
+                .filter(|d| !d.is_empty())
+        };
+        match key.as_str() {
+            "session code" | "código de sesión" | "codigo de sesion" => inv.code = digits(value),
+            "e2ee pin" | "pin e2ee" | "pin" => inv.pin = digits(value),
+            "repeater" | "repetidor" => inv.repeater = Some(value.to_string()),
+            "address" | "dirección" | "direccion" => inv.address = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    (inv.code.is_some() && inv.pin.is_some() || inv.address.is_some() && inv.pin.is_some())
+        .then_some(inv)
+}
+
+const KEY_VIEWER_REPEATER: &str = "lucarna_viewer_repeater";
+const KEY_HOST_REPEATER: &str = "lucarna_host_repeater";
+
 impl HostView {
+    /// Repeaters are remembered, so the second time nobody has to type one.
+    fn load_prefs(&mut self, ctx: &egui::Context) {
+        if self.prefs_loaded {
+            return;
+        }
+        self.prefs_loaded = true;
+        let get = |key: &str| ctx.data_mut(|d| d.get_persisted::<String>(egui::Id::NULL.with(key)));
+        if let Some(r) = get(KEY_VIEWER_REPEATER) {
+            self.viewer_repeater = r;
+        }
+        if let Some(r) = get(KEY_HOST_REPEATER) {
+            self.repeater_addr = r;
+        }
+    }
+
+    fn save_pref(ctx: &egui::Context, key: &str, value: &str) {
+        ctx.data_mut(|d| d.insert_persisted(egui::Id::NULL.with(key), value.to_string()));
+    }
+
     pub fn is_running(&self) -> bool {
         matches!(
             self.status,
@@ -239,6 +303,9 @@ impl HostView {
         let stop_flag = self.stop_flag.clone();
         let active_stream = self.active_stream.clone();
         let use_repeater = self.use_repeater;
+        if use_repeater {
+            Self::save_pref(ctx, KEY_HOST_REPEATER, self.repeater_addr.trim());
+        }
         let use_e2ee = self.use_e2ee_pin || self.use_repeater;
         let bind_addr = self.bind_addr.trim().to_string();
         let repeater_addr = self.repeater_addr.trim().to_string();
@@ -555,6 +622,7 @@ impl HostView {
     /// The "Share this device" page: one card that walks through the session, and the rules on the right.
     pub fn show_page(&mut self, ui: &mut Ui) {
         self.poll_events();
+        self.load_prefs(&ui.ctx().clone());
         let p = theme::palette(ui.ctx());
         let stage = self.stage();
         if stage == Stage::Active {
@@ -1084,8 +1152,27 @@ impl HostView {
     /// Dialog "Connect with a code" for the person helping: code and PIN as boxes, repeater tucked away.
     pub fn show_join_dialog(&mut self, ctx: &egui::Context) -> Option<ConnectRequest> {
         if !self.join_open {
+            self.join_fresh = true;
+            self.pasted_invitation = false;
             return None;
         }
+        self.load_prefs(ctx);
+        // A whole invitation pasted with Ctrl/Cmd+V fills every field at once.
+        let pasted = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Paste(t) => parse_invitation(t),
+                _ => None,
+            })
+        });
+        if let Some(inv) = pasted {
+            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Paste(_))));
+            self.viewer_target_code = inv.code.unwrap_or_default();
+            self.viewer_pin = inv.pin.unwrap_or_default();
+            self.viewer_repeater = inv.repeater.unwrap_or_default();
+            self.viewer_direct = inv.address.unwrap_or_default();
+            self.pasted_invitation = true;
+        }
+        let autofocus = std::mem::take(&mut self.join_fresh);
         let p = theme::palette(ctx);
         let mut request = None;
         let mut close = false;
@@ -1107,15 +1194,43 @@ impl HostView {
                     .inner_margin(egui::Margin::symmetric(24, 18))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(
-                            RichText::new(tr("Ask the other person for their code and PIN"))
+                        if self.pasted_invitation {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    char::from(Icon::Check),
+                                    tr("Invitation read. Check it and press Connect.")
+                                ))
+                                .size(13.0)
+                                .strong()
+                                .color(p.success),
+                            );
+                        } else {
+                            let paste = if cfg!(target_os = "macos") {
+                                "⌘V"
+                            } else {
+                                "Ctrl+V"
+                            };
+                            ui.label(
+                                RichText::new(fill(
+                                    tr("Ask the other person to copy their invitation, then paste it here with {}. Or type the code and PIN."),
+                                    &[&paste],
+                                ))
                                 .size(13.0)
                                 .color(p.text2),
-                        );
+                            );
+                        }
                         ui.add_space(16.0);
                         ui.label(RichText::new(tr("Session code")).size(12.0).strong().color(p.text2));
                         ui.add_space(6.0);
-                        digit_boxes(ui, "join_code", &mut self.viewer_target_code, 6, false);
+                        digit_boxes(
+                            ui,
+                            "join_code",
+                            &mut self.viewer_target_code,
+                            6,
+                            false,
+                            autofocus,
+                        );
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(tr("PIN")).size(12.0).strong().color(p.text2));
@@ -1134,7 +1249,14 @@ impl HostView {
                             });
                         });
                         ui.add_space(6.0);
-                        digit_boxes(ui, "join_pin", &mut self.viewer_pin, 4, !self.show_pin);
+                        digit_boxes(
+                            ui,
+                            "join_pin",
+                            &mut self.viewer_pin,
+                            4,
+                            !self.show_pin,
+                            false,
+                        );
                         ui.add_space(14.0);
                         egui::CollapsingHeader::new(RichText::new(tr("Repeater or direct address")).size(13.0).strong())
                             .default_open(false)
@@ -1180,6 +1302,13 @@ impl HostView {
                                 .min_size(egui::vec2(w, 48.0));
                             if ui.add_enabled(ready, go).clicked() {
                                 request = self.build_viewer_connect_request();
+                                if !self.viewer_repeater.trim().is_empty() {
+                                    Self::save_pref(
+                                        ctx,
+                                        KEY_VIEWER_REPEATER,
+                                        self.viewer_repeater.trim(),
+                                    );
+                                }
                                 close = true;
                             }
                         });
@@ -1365,11 +1494,21 @@ fn safety_card(ui: &mut Ui) {
 }
 
 /// `len` digit boxes fed by one hidden text field, so typing, pasting and backspace all work.
-fn digit_boxes(ui: &mut Ui, salt: &str, text: &mut String, len: usize, mask: bool) {
+fn digit_boxes(
+    ui: &mut Ui,
+    salt: &str,
+    text: &mut String,
+    len: usize,
+    mask: bool,
+    autofocus: bool,
+) {
     let p = theme::palette(ui.ctx());
     text.retain(|c| c.is_ascii_digit());
     text.truncate(len);
     let id = ui.make_persistent_id(salt);
+    if autofocus {
+        ui.memory_mut(|m| m.request_focus(id));
+    }
     let (box_w, gap, split_gap) = (56.0, 8.0, 12.0);
     let extra = if len == 6 { split_gap } else { 0.0 };
     let total = len as f32 * box_w + (len as f32 - 1.0) * gap + extra;
@@ -1601,6 +1740,27 @@ fn run_repeater_host_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_an_invitation_in_english_and_in_spanish() {
+        let en = "Lucarna QuickSupport Invitation\nRepeater: 203.0.113.10:5500\nSession Code: 842-786 (ID:842786)\nE2EE PIN: 4138";
+        let inv = parse_invitation(en).unwrap();
+        assert_eq!(inv.code.as_deref(), Some("842786"));
+        assert_eq!(inv.pin.as_deref(), Some("4138"));
+        assert_eq!(inv.repeater.as_deref(), Some("203.0.113.10:5500"));
+
+        let es = "Invitación de Lucarna Studio E2EE\nDirección: 127.0.0.1:5950\nCódigo de sesión: 367-842\nPIN E2EE: 2329";
+        let inv = parse_invitation(es).unwrap();
+        assert_eq!(inv.address.as_deref(), Some("127.0.0.1:5950"));
+        assert_eq!(inv.code.as_deref(), Some("367842"));
+        assert_eq!(inv.pin.as_deref(), Some("2329"));
+    }
+
+    #[test]
+    fn plain_digits_are_not_an_invitation() {
+        assert_eq!(parse_invitation("582914"), None);
+        assert_eq!(parse_invitation("Session Code: 842-786"), None);
+    }
 
     #[test]
     fn viewer_connect_card_maps_numeric_code_with_repeater_to_id_format() {
