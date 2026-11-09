@@ -41,6 +41,10 @@ const C_FILE_RENAME: u16 = 5;
 
 const SERVER_BLOCK_SIZE: usize = 32 << 10;
 const MAX_DATA: usize = MAX_BLOCK + 1024;
+/// Largest single upload and total uploaded in one session. A viewer announces any size it likes, so without
+/// a cap one offer could fill the disk of the person sharing.
+pub const MAX_UPLOAD_FILE: u64 = 4 * 1024 * 1024 * 1024;
+pub const MAX_UPLOAD_SESSION: u64 = 8 * 1024 * 1024 * 1024;
 const ERROR: u32 = 0xFFFF_FFFF;
 const FILETIME_UNIX_DIFF_SECS: u64 = 11_644_473_600;
 
@@ -241,6 +245,7 @@ pub struct FtServer {
     pub read_only: bool,
     pending_download: Option<PendingDownload>,
     active_upload: Option<ActiveUpload>,
+    uploaded: u64,
 }
 
 impl FtServer {
@@ -250,6 +255,7 @@ impl FtServer {
             read_only,
             pending_download: None,
             active_upload: None,
+            uploaded: 0,
         }
     }
 
@@ -448,7 +454,10 @@ impl FtServer {
         total: u64,
     ) -> io::Result<()> {
         let remote_path = strip_offer_timestamp(spec);
-        if self.read_only {
+        if self.read_only
+            || total > MAX_UPLOAD_FILE
+            || self.uploaded.saturating_add(total) > MAX_UPLOAD_SESSION
+        {
             s.write_all(&wire_msg(
                 FILE_ACCEPT_HEADER,
                 0,
@@ -459,12 +468,20 @@ impl FtServer {
         }
 
         let prep = self.drives.resolve_new_child(remote_path).and_then(|dest| {
+            // Never replace a file that is already there: the new one gets "name (1).ext".
+            let dest = unique_name(dest);
             let file_name = dest
                 .file_name()
                 .and_then(|n| n.to_str())
-                .ok_or_else(|| invalid("invalid destination filename"))?;
+                .ok_or_else(|| invalid("invalid destination filename"))?
+                .to_string();
             let part = dest.with_file_name(format!(".{file_name}.lucarna-part"));
-            let file = File::create(&part)?;
+            // A leftover from a crash is removed (a symlink is removed, not followed); the new file must be new.
+            let _ = fs::remove_file(&part);
+            let file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&part)?;
             Ok((file, part, dest))
         });
 
@@ -536,6 +553,7 @@ impl FtServer {
             return Err(invalid("upload ended before reaching announced size"));
         }
         up.file.sync_all()?;
+        self.uploaded = self.uploaded.saturating_add(up.total);
         fs::rename(&up.part_path, &up.dest_path)
     }
 
@@ -638,6 +656,30 @@ fn format_virtual_dir(drive: char, root: &Path, target: &Path) -> String {
     out
 }
 
+/// `report.pdf` taken: `report (1).pdf`, `report (2).pdf`, and so on.
+fn unique_name(dest: PathBuf) -> PathBuf {
+    if fs::symlink_metadata(&dest).is_err() {
+        return dest;
+    }
+    let stem = dest
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let ext = dest
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{e}"))
+        .unwrap_or_default();
+    for n in 1..1000 {
+        let candidate = dest.with_file_name(format!("{stem} ({n}){ext}"));
+        if fs::symlink_metadata(&candidate).is_err() {
+            return candidate;
+        }
+    }
+    dest
+}
+
 /// Strips the trailing `,MM/DD/YYYY HH:MM` timestamp appended by `RemoteFiles::upload`.
 fn strip_offer_timestamp(spec: &str) -> &str {
     if let Some((path, suffix)) = spec.rsplit_once(',')
@@ -724,6 +766,58 @@ mod tests {
             );
         }
 
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// Sends one upload offer for `spec` announcing `total` bytes and returns whether it was accepted.
+    fn offer(server: &mut FtServer, spec: &[u8], total: u64) -> bool {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&wire_msg(FILE_TRANSFER_OFFER, 0, total as u32, spec)[1..]);
+        stream.extend_from_slice(&((total >> 32) as u32).to_be_bytes());
+        let mut io = crate::shared::wire::Duplex::new(stream);
+        server.handle_message(&mut io).unwrap();
+        let mut resp = &io.output[..];
+        assert_eq!(read_u8(&mut resp).unwrap(), 7);
+        matches!(
+            crate::features::file_transfer::read(&mut resp).unwrap(),
+            Msg::FileAccept(true)
+        )
+    }
+
+    #[test]
+    fn an_upload_that_would_fill_the_disk_is_refused() {
+        let (base, drives) = temp_sandbox("quota");
+        let mut server = FtServer::new(drives, false);
+        // A 1 TiB announcement is refused before any file is created.
+        assert!(!offer(&mut server, b"M:\\huge.bin", 1 << 40));
+        assert!(!base.join("Music").join("huge.bin").exists());
+        assert!(!base.join("Music").join(".huge.bin.lucarna-part").exists());
+        // The limit for one file is exact.
+        assert!(offer(&mut server, b"M:\\ok.bin", MAX_UPLOAD_FILE));
+        assert!(!offer(&mut server, b"M:\\over.bin", MAX_UPLOAD_FILE + 1));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn an_upload_never_replaces_a_file_that_is_already_there() {
+        let (base, drives) = temp_sandbox("noreplace");
+        let target = base.join("Music").join("report.txt");
+        fs::write(&target, "original").unwrap();
+        let mut server = FtServer::new(drives, false);
+        assert!(offer(&mut server, b"M:\\report.txt", 3));
+        let mut io = crate::shared::wire::Duplex::new({
+            let mut v = Vec::new();
+            v.extend_from_slice(&wire_msg(FILE_PACKET, 0, 3, b"new")[1..]);
+            v.extend_from_slice(&wire_msg(END_OF_FILE, 0, 0, &[])[1..]);
+            v
+        });
+        server.handle_message(&mut io).unwrap();
+        server.handle_message(&mut io).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original");
+        assert_eq!(
+            fs::read_to_string(base.join("Music").join("report (1).txt")).unwrap(),
+            "new"
+        );
         let _ = fs::remove_dir_all(&base);
     }
 
