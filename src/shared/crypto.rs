@@ -9,18 +9,14 @@
 use std::io::{self, Read, Write};
 
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, StaticSecret};
+use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use crate::shared::wire::invalid;
 
 pub const MAX_PIN_FAILURES: u32 = 3;
-/// Cost of testing one PIN guess. The PIN is short, so this (and its length) is what slows an attacker who has
-/// recorded a handshake and tries every PIN offline; see `docs/` for why a PAKE would be the real fix.
-pub const PBKDF2_ITERATIONS: u32 = 100_000;
-
 /// Digits in the E2EE PIN.
 pub const PIN_DIGITS: usize = 6;
-pub const E2EE_MAGIC: &[u8; 8] = b"LUCE2E01";
+pub const E2EE_MAGIC: &[u8; 8] = b"LUCE2E02";
 
 /// Constant-time slice comparison.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -664,11 +660,40 @@ impl<R: Read> Read for E2eeReader<R> {
     }
 }
 
-/// Performs the Host side of E2EE handshake over an untrusted repeater socket:
-/// 1. Sends magic `LUCE2E01` + 16-byte random salt + 32-byte Host Ephemeral Public Key.
-/// 2. Reads 32-byte Viewer Ephemeral Public Key + 32-byte Viewer PIN Auth Proof.
-/// 3. Derives shared secret via X25519 and verifies Auth Proof.
-/// 4. Sends 32-byte Host Auth Confirmation.
+/// Bytes of one SPAKE2 message: a side byte and a compressed Ed25519 point.
+const SPAKE_MSG_LEN: usize = 33;
+const HOST_ID: &[u8] = b"lucarna-host";
+const VIEWER_ID: &[u8] = b"lucarna-viewer";
+
+/// Turns the SPAKE2 shared key into the proofs and the directional session keys.
+fn keys_from_shared(shared: &[u8]) -> ([u8; 32], E2eeKeys, E2eeKeys) {
+    let mut master = [0u8; 32];
+    pbkdf2_sha256(shared, b"lucarna-e2ee-master-v2", 1, &mut master);
+    let host_to_viewer = hmac_sha256(&master, b"host-to-viewer-key");
+    let viewer_to_host = hmac_sha256(&master, b"viewer-to-host-key");
+    let host_nonce = hmac_sha256(&master, b"host-nonce-base");
+    let viewer_nonce = hmac_sha256(&master, b"viewer-nonce-base");
+    let host_keys = E2eeKeys {
+        send_key: host_to_viewer,
+        recv_key: viewer_to_host,
+        send_nonce_base: host_nonce[0..12].try_into().unwrap(),
+        recv_nonce_base: viewer_nonce[0..12].try_into().unwrap(),
+    };
+    let viewer_keys = E2eeKeys {
+        send_key: viewer_to_host,
+        recv_key: host_to_viewer,
+        send_nonce_base: viewer_nonce[0..12].try_into().unwrap(),
+        recv_nonce_base: host_nonce[0..12].try_into().unwrap(),
+    };
+    (master, host_keys, viewer_keys)
+}
+
+/// Host side of the E2EE handshake, a SPAKE2 password-authenticated key exchange with the PIN as the password.
+/// Whoever records the exchange learns nothing about the PIN: every guess has to be made against a live peer,
+/// which the limiter counts. The wire format is:
+/// 1. Host sends the magic `LUCE2E02` and its SPAKE2 message (33 bytes).
+/// 2. Viewer sends its SPAKE2 message (33 bytes) and a proof (32 bytes) made with the shared key.
+/// 3. Host checks the proof (constant time) and answers with its own proof (32 bytes).
 pub fn host_e2ee_handshake(
     stream: &mut (impl Read + Write),
     pin: &str,
@@ -677,48 +702,26 @@ pub fn host_e2ee_handshake(
     if limiter.is_locked() {
         return Err(invalid("session locked: too many failed PIN attempts"));
     }
-
-    let mut salt = [0u8; 16];
-    getrandom::fill(&mut salt).map_err(|e| invalid(e.to_string()))?;
-
-    let mut secret_bytes = [0u8; 32];
-    getrandom::fill(&mut secret_bytes).map_err(|e| invalid(e.to_string()))?;
-    let host_secret = StaticSecret::from(secret_bytes);
-    let host_public = PublicKey::from(&host_secret);
-
-    // Write: MAGIC (8) + SALT (16) + HOST_PUB (32) = 56 bytes
-    let mut out = Vec::with_capacity(56);
+    let (state, host_msg) = Spake2::<Ed25519Group>::start_a(
+        &Password::new(pin.as_bytes()),
+        &Identity::new(HOST_ID),
+        &Identity::new(VIEWER_ID),
+    );
+    let mut out = Vec::with_capacity(8 + SPAKE_MSG_LEN);
     out.extend_from_slice(E2EE_MAGIC);
-    out.extend_from_slice(&salt);
-    out.extend_from_slice(host_public.as_bytes());
+    out.extend_from_slice(&host_msg);
     stream.write_all(&out)?;
     stream.flush()?;
 
-    // Read: VIEWER_PUB (32) + VIEWER_PROOF (32) = 64 bytes
-    let mut in_buf = [0u8; 64];
+    let mut in_buf = [0u8; SPAKE_MSG_LEN + 32];
     stream.read_exact(&mut in_buf)?;
-    let viewer_pub_bytes: [u8; 32] = in_buf[0..32].try_into().unwrap();
-    let viewer_proof: [u8; 32] = in_buf[32..64].try_into().unwrap();
-    let viewer_public = PublicKey::from(viewer_pub_bytes);
+    let shared = state
+        .finish(&in_buf[..SPAKE_MSG_LEN])
+        .map_err(|_| invalid("invalid key exchange message"))?;
+    let (master, host_keys, _) = keys_from_shared(&shared);
 
-    // Compute shared DH secret
-    let shared_dh = host_secret.diffie_hellman(&viewer_public);
-
-    // Derive PIN key via PBKDF2
-    let mut pin_key = [0u8; 32];
-    pbkdf2_sha256(pin.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut pin_key);
-
-    // Derive authentication keys and directional session keys
-    let mut kdf_input = Vec::with_capacity(32 + 32 + 16);
-    kdf_input.extend_from_slice(shared_dh.as_bytes());
-    kdf_input.extend_from_slice(&pin_key);
-    kdf_input.extend_from_slice(&salt);
-
-    let mut master_key = [0u8; 32];
-    pbkdf2_sha256(&kdf_input, b"lucarna-e2ee-master", 1, &mut master_key);
-
-    let expected_viewer_proof = hmac_sha256(&master_key, b"viewer-pin-proof");
-    if !constant_time_eq(&viewer_proof, &expected_viewer_proof) {
+    let expected = hmac_sha256(&master, b"viewer-pin-proof");
+    if !constant_time_eq(&in_buf[SPAKE_MSG_LEN..], &expected) {
         if limiter.record_failure() {
             let _ = stream.write_all(&[0xff; 32]);
             return Err(invalid(
@@ -728,87 +731,42 @@ pub fn host_e2ee_handshake(
         let _ = stream.write_all(&[0xee; 32]);
         return Err(invalid("authentication failed: invalid PIN"));
     }
-
-    // Auth succeeded: send host confirmation proof
-    let host_proof = hmac_sha256(&master_key, b"host-pin-proof");
-    stream.write_all(&host_proof)?;
+    stream.write_all(&hmac_sha256(&master, b"host-pin-proof"))?;
     stream.flush()?;
-
-    // Derive directional keys
-    let host_to_viewer_key = hmac_sha256(&master_key, b"host-to-viewer-key");
-    let viewer_to_host_key = hmac_sha256(&master_key, b"viewer-to-host-key");
-    let host_nonce = hmac_sha256(&master_key, b"host-nonce-base");
-    let viewer_nonce = hmac_sha256(&master_key, b"viewer-nonce-base");
-
-    Ok(E2eeKeys {
-        send_key: host_to_viewer_key,
-        recv_key: viewer_to_host_key,
-        send_nonce_base: host_nonce[0..12].try_into().unwrap(),
-        recv_nonce_base: viewer_nonce[0..12].try_into().unwrap(),
-    })
+    Ok(host_keys)
 }
 
-/// Performs the Viewer side of E2EE handshake over an untrusted repeater socket.
+/// Viewer side of the handshake; see [`host_e2ee_handshake`].
 pub fn viewer_e2ee_handshake(stream: &mut (impl Read + Write), pin: &str) -> io::Result<E2eeKeys> {
-    // Read: MAGIC (8) + SALT (16) + HOST_PUB (32) = 56 bytes
-    let mut in_buf = [0u8; 56];
+    let mut in_buf = [0u8; 8 + SPAKE_MSG_LEN];
     stream.read_exact(&mut in_buf)?;
     if &in_buf[0..8] != E2EE_MAGIC {
-        return Err(invalid("server does not speak Lucarna E2EE"));
+        return Err(invalid(
+            "the other side runs another Lucarna version: update both sides",
+        ));
     }
-    let salt: [u8; 16] = in_buf[8..24].try_into().unwrap();
-    let host_pub_bytes: [u8; 32] = in_buf[24..56].try_into().unwrap();
-    let host_public = PublicKey::from(host_pub_bytes);
+    let (state, viewer_msg) = Spake2::<Ed25519Group>::start_b(
+        &Password::new(pin.as_bytes()),
+        &Identity::new(HOST_ID),
+        &Identity::new(VIEWER_ID),
+    );
+    let shared = state
+        .finish(&in_buf[8..])
+        .map_err(|_| invalid("invalid key exchange message"))?;
+    let (master, _, viewer_keys) = keys_from_shared(&shared);
 
-    let mut secret_bytes = [0u8; 32];
-    getrandom::fill(&mut secret_bytes).map_err(|e| invalid(e.to_string()))?;
-    let viewer_secret = StaticSecret::from(secret_bytes);
-    let viewer_public = PublicKey::from(&viewer_secret);
-
-    // Compute shared DH secret
-    let shared_dh = viewer_secret.diffie_hellman(&host_public);
-
-    // Derive PIN key via PBKDF2
-    let mut pin_key = [0u8; 32];
-    pbkdf2_sha256(pin.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut pin_key);
-
-    let mut kdf_input = Vec::with_capacity(32 + 32 + 16);
-    kdf_input.extend_from_slice(shared_dh.as_bytes());
-    kdf_input.extend_from_slice(&pin_key);
-    kdf_input.extend_from_slice(&salt);
-
-    let mut master_key = [0u8; 32];
-    pbkdf2_sha256(&kdf_input, b"lucarna-e2ee-master", 1, &mut master_key);
-
-    let viewer_proof = hmac_sha256(&master_key, b"viewer-pin-proof");
-
-    // Write: VIEWER_PUB (32) + VIEWER_PROOF (32) = 64 bytes
-    let mut out = Vec::with_capacity(64);
-    out.extend_from_slice(viewer_public.as_bytes());
-    out.extend_from_slice(&viewer_proof);
+    let mut out = Vec::with_capacity(SPAKE_MSG_LEN + 32);
+    out.extend_from_slice(&viewer_msg);
+    out.extend_from_slice(&hmac_sha256(&master, b"viewer-pin-proof"));
     stream.write_all(&out)?;
     stream.flush()?;
 
-    // Read host proof: 32 bytes
     let mut host_proof = [0u8; 32];
     stream.read_exact(&mut host_proof)?;
-    let expected_host_proof = hmac_sha256(&master_key, b"host-pin-proof");
-
-    if !constant_time_eq(&host_proof, &expected_host_proof) {
+    if !constant_time_eq(&host_proof, &hmac_sha256(&master, b"host-pin-proof")) {
         return Err(invalid("PIN rejected by host or session locked"));
     }
-
-    let host_to_viewer_key = hmac_sha256(&master_key, b"host-to-viewer-key");
-    let viewer_to_host_key = hmac_sha256(&master_key, b"viewer-to-host-key");
-    let host_nonce = hmac_sha256(&master_key, b"host-nonce-base");
-    let viewer_nonce = hmac_sha256(&master_key, b"viewer-nonce-base");
-
-    Ok(E2eeKeys {
-        send_key: viewer_to_host_key,
-        recv_key: host_to_viewer_key,
-        send_nonce_base: viewer_nonce[0..12].try_into().unwrap(),
-        recv_nonce_base: host_nonce[0..12].try_into().unwrap(),
-    })
+    Ok(viewer_keys)
 }
 
 #[cfg(test)]
@@ -924,6 +882,73 @@ mod tests {
         assert_eq!(a.len(), 10);
         assert_ne!(a, b);
         assert_ne!(a, "studio");
+    }
+
+    fn run_handshake(
+        host_pin: &'static str,
+        viewer_pin: &'static str,
+    ) -> (io::Result<E2eeKeys>, io::Result<E2eeKeys>) {
+        let (mut s1, mut s2) = crate::shared::wire::pipe_pair();
+        let host = std::thread::spawn(move || {
+            let mut limiter = BruteForceLimiter::new();
+            host_e2ee_handshake(&mut s1, host_pin, &mut limiter)
+        });
+        let viewer = viewer_e2ee_handshake(&mut s2, viewer_pin);
+        (host.join().unwrap(), viewer)
+    }
+
+    #[test]
+    fn every_handshake_gets_new_keys_even_with_the_same_pin() {
+        let (a, _) = run_handshake("123456", "123456");
+        let (b, _) = run_handshake("123456", "123456");
+        // Fresh secrets per visit: recording one visit and learning the PIN later opens nothing.
+        assert_ne!(a.unwrap().send_key, b.unwrap().send_key);
+    }
+
+    #[test]
+    fn a_wrong_pin_gives_neither_side_a_key() {
+        let (host, viewer) = run_handshake("123456", "123457");
+        assert!(host.is_err());
+        assert!(viewer.is_err());
+    }
+
+    #[test]
+    fn the_old_wire_format_is_refused_with_a_clear_message() {
+        let (mut host_side, mut viewer_side) = crate::shared::wire::pipe_pair();
+        host_side.write_all(b"LUCE2E01").unwrap();
+        host_side.write_all(&[0u8; SPAKE_MSG_LEN]).unwrap();
+        let err = viewer_e2ee_handshake(&mut viewer_side, "123456")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("update both sides"), "{err}");
+    }
+
+    #[test]
+    fn a_guessing_peer_is_rejected_and_counted() {
+        // An attacker who has the host's message but not the PIN gets one try per connection, and the host
+        // counts it. (That no PIN can be checked offline against a recording is a property of SPAKE2 and is
+        // covered by the crate's own tests; it cannot be shown by a black-box test here.)
+        let (mut s1, mut s2) = crate::shared::wire::pipe_pair();
+        let host = std::thread::spawn(move || {
+            let mut l = BruteForceLimiter::new();
+            let _ = host_e2ee_handshake(&mut s1, "000001", &mut l);
+        });
+        let mut hello = [0u8; 8 + SPAKE_MSG_LEN];
+        s2.read_exact(&mut hello).unwrap();
+        assert_eq!(&hello[..8], E2EE_MAGIC);
+        // An attacker answers with a random point and a made-up proof: the host rejects it and counts it.
+        let (_, msg) = Spake2::<Ed25519Group>::start_b(
+            &Password::new(b"999999"),
+            &Identity::new(HOST_ID),
+            &Identity::new(VIEWER_ID),
+        );
+        let mut reply = msg.clone();
+        reply.extend_from_slice(&[7u8; 32]);
+        s2.write_all(&reply).unwrap();
+        let mut answer = [0u8; 32];
+        s2.read_exact(&mut answer).unwrap();
+        assert_eq!(answer, [0xee; 32]);
+        host.join().unwrap();
     }
 
     #[test]
