@@ -272,6 +272,10 @@ static ES: &[(&str, &str)] = &[
     ),
     ("Dismiss message", "Descartar mensaje"),
     (
+        "{} wrong PINs from {}: the PIN was changed and sharing goes on.",
+        "{} PIN erróneos de {}: se cambió el PIN y se sigue compartiendo.",
+    ),
+    (
         "{} arrived and runs code if you open it. Open it only if you expected it.",
         "{} llegó y ejecuta código si lo abres. Ábrelo solo si lo esperabas.",
     ),

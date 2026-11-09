@@ -450,6 +450,11 @@ impl HostView {
     }
 
     pub fn poll_events(&mut self) {
+        // The host thread may have changed the PIN (after three wrong guesses): the shared copy is the truth.
+        let shared = self.pin_shared.lock().unwrap().clone();
+        if !shared.is_empty() && shared != self.pin {
+            self.pin = shared;
+        }
         let mut incoming = Vec::new();
         if let Some(rx) = &self.events_rx {
             while let Ok(ev) = rx.try_recv() {
@@ -577,17 +582,13 @@ impl HostView {
                         true,
                     );
                     if locked {
-                        let reason = fill(
-                            tr(
-                                "Locked after {} failed PIN attempts from {}. Regenerate code to resume.",
+                        self.push_audit(
+                            fill(
+                                tr("{} wrong PINs from {}: the PIN was changed and sharing goes on."),
+                                &[&attempts, &peer],
                             ),
-                            &[&attempts, &peer],
+                            true,
                         );
-                        self.status = HostStatus::Locked {
-                            reason: reason.clone(),
-                        };
-                        self.push_audit(reason, true);
-                        self.events_rx = None;
                     }
                 }
                 HostUiEvent::Stopped(reason) => {
@@ -2088,6 +2089,8 @@ fn digit_boxes(
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the person sharing has to answer "wants to connect"; silence is a no.
 pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Pause after a PIN is burned (three wrong guesses): about 0.1 guesses per second at most.
+const LOCKOUT_COOLDOWN: Duration = Duration::from_secs(30);
 /// How long the "a file that runs code arrived" strip stays.
 const RISKY_ALERT_FOR: Duration = Duration::from_secs(120);
 /// Sharing that nobody used stops by itself after this long.
@@ -2116,6 +2119,18 @@ impl HostRun {
 
     fn current_pin(&self) -> String {
         self.pin.lock().unwrap().clone()
+    }
+
+    /// Three wrong PINs burn this PIN, not the share: a new PIN, a fresh count and a pause. Whoever knows only
+    /// the session code can no longer end the share by failing on purpose, and gets nothing from the guesses
+    /// already made. ponytail: fixed pause, back-off that grows if it is ever abused.
+    fn burn_pin(&self, limiter: &mut BruteForceLimiter) {
+        *self.pin.lock().unwrap() = generate_pin();
+        *limiter = BruteForceLimiter::new();
+        let from = Instant::now();
+        while from.elapsed() < LOCKOUT_COOLDOWN && !self.stopped() {
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     /// Asks the person sharing whether `peer` may in. `socket` has its timeouts removed once they say yes.
@@ -2193,7 +2208,7 @@ fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
     });
 
     let mut limiter = BruteForceLimiter::new();
-    while !run.stopped() && !limiter.is_locked() {
+    while !run.stopped() {
         match listener.accept() {
             Ok((mut stream, peer_addr)) => {
                 let _ = stream.set_nonblocking(false);
@@ -2247,7 +2262,10 @@ fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
                 if !bad_pin {
                     run.finish(peer, result);
                 }
-                if !run.stopped() && !limiter.is_locked() {
+                if limiter.is_locked() {
+                    run.burn_pin(&mut limiter);
+                }
+                if !run.stopped() {
                     run.notify(HostUiEvent::Waiting {
                         endpoint: bind_addr.clone(),
                         e2ee: use_e2ee,
@@ -2267,7 +2285,7 @@ fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
 
 fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: HostRun) {
     let mut limiter = BruteForceLimiter::new();
-    while !run.stopped() && !limiter.is_locked() {
+    while !run.stopped() {
         let mut stream = match TcpStream::connect(&repeater_addr) {
             Ok(s) => s,
             Err(e) => {
@@ -2325,7 +2343,10 @@ fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: Host
                         attempts: limiter.failures,
                         locked: limiter.is_locked(),
                     });
-                    if run.stopped() || limiter.is_locked() {
+                    if limiter.is_locked() {
+                        run.burn_pin(&mut limiter);
+                    }
+                    if run.stopped() {
                         return;
                     }
                 } else {
@@ -2341,6 +2362,30 @@ fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: Host
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_burned_pin_reaches_the_screen_and_sharing_stays_on() {
+        let mut v = HostView::default();
+        v.set_pin("111111".into());
+        v.status = HostStatus::Waiting {
+            endpoint: "x".into(),
+            e2ee: true,
+        };
+        let (tx, rx) = mpsc::channel();
+        v.events_rx = Some(rx);
+        // What the host thread does after three wrong guesses.
+        *v.pin_shared.lock().unwrap() = "222222".into();
+        tx.send(HostUiEvent::PinFailed {
+            peer: "9.9.9.9:1".into(),
+            attempts: 3,
+            locked: true,
+        })
+        .unwrap();
+        v.poll_events();
+        assert_eq!(v.pin, "222222");
+        assert!(matches!(v.status, HostStatus::Waiting { .. }));
+        assert!(v.is_running());
+    }
 
     #[test]
     fn a_risky_file_raises_the_strip_and_a_plain_one_does_not() {
