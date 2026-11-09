@@ -8,6 +8,7 @@ use lucide_icons::Icon;
 
 use super::protocol::{self, Entry};
 use super::transfer::{self, FileOps, Update};
+use crate::shared::theme;
 
 /// The server stays silent when file transfer is disabled, so we give up waiting after this.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -158,7 +159,10 @@ impl FilesView {
                     self.start_next_upload(files);
                 }
             }
-            egui::CentralPanel::default().show(ctx, |ui| {
+            let frame = egui::Frame::NONE
+                .fill(theme::palette(ctx).bg)
+                .inner_margin(egui::Margin::same(12));
+            egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                 self.contents(ui, files);
             });
         });
@@ -197,13 +201,13 @@ impl FilesView {
         let busy = self.progress.is_some();
         let can_upload = !busy && !self.path.is_empty();
 
-        let pane_height = (ui.available_height() - 44.0).max(160.0);
+        let pane_height = (ui.available_height() - 112.0).max(160.0);
         ui.columns(2, |cols| {
-            self.local_pane(&mut cols[0], files, pane_height);
-            self.remote_pane(&mut cols[1], files, pane_height);
+            card(&mut cols[0], |ui| self.local_pane(ui, files, pane_height));
+            card(&mut cols[1], |ui| self.remote_pane(ui, files, pane_height));
         });
 
-        ui.separator();
+        ui.add_space(4.0);
         if let Some((name, done, total)) = &self.progress {
             let queued = self.upload_queue.len();
             let suffix = if queued > 0 {
@@ -227,7 +231,7 @@ impl FilesView {
                         .desired_width(ui.available_width() - 80.0),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.add(theme::danger(ui, "Cancel")).clicked() {
                         self.upload_queue.clear();
                         files.cancel();
                     }
@@ -247,7 +251,7 @@ impl FilesView {
                 if ui
                     .add_enabled(
                         can_upload,
-                        egui::Button::new(format!("{} Upload to Remote", char::from(Icon::Upload)))
+                        theme::primary(format!("{} Upload to Remote", char::from(Icon::Upload)))
                             .small(),
                     )
                     .clicked()
@@ -307,7 +311,7 @@ impl FilesView {
             let btn = ui
                 .add_enabled(
                     can_upload && self.selected_local.is_some(),
-                    egui::Button::new(upload_label).small(),
+                    theme::primary(upload_label).small(),
                 )
                 .on_hover_text(tip);
             if btn.clicked()
@@ -719,7 +723,7 @@ fn child(path: &str, name: &str) -> String {
     }
 }
 
-const ROW_H: f32 = 26.0;
+const ROW_H: f32 = 32.0;
 const PAD: f32 = 8.0;
 const GAP: f32 = 8.0;
 const LOCAL_SIZE_W: f32 = 64.0;
@@ -751,7 +755,7 @@ fn table_row(
         );
     } else if interactive && resp.hovered() {
         ui.painter()
-            .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
+            .rect_filled(rect, 6.0, theme::palette(ui.ctx()).elevated);
     }
     let mut right = rect.right() - PAD;
     let mut cols = vec![egui::Rect::NOTHING; fixed.len()];
@@ -793,20 +797,36 @@ fn table_header<const N: usize>(ui: &mut egui::Ui, fixed: &[f32], titles: [&str;
 }
 
 fn name_label(ui: &mut egui::Ui, icon: Icon, name: &str, dim: bool) {
+    let p = theme::palette(ui.ctx());
+    if matches!(icon, Icon::Folder) && !dim {
+        ui.label(RichText::new(char::from(icon).to_string()).color(p.accent_text));
+        ui.add(egui::Label::new(name).truncate().selectable(false));
+        return;
+    }
     let text = RichText::new(format!("{} {name}", char::from(icon)));
     let text = if dim { text.weak() } else { text };
     ui.add(egui::Label::new(text).truncate().selectable(false));
 }
 
+/// Rounded surface that holds one pane of the file browser.
+fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    let p = theme::palette(ui.ctx());
+    egui::Frame::NONE
+        .fill(p.card)
+        .stroke(egui::Stroke::new(1.0, p.border))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, add);
+}
+
 fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, enabled: bool) -> bool {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(char::from(icon).to_string())
-            .small()
-            .frame(false),
-    )
-    .on_hover_text(tip)
-    .clicked()
+    let mut text = RichText::new(char::from(icon).to_string());
+    if matches!(icon, Icon::Trash2) {
+        text = text.color(theme::palette(ui.ctx()).danger);
+    }
+    ui.add_enabled(enabled, egui::Button::new(text).small().frame(false))
+        .on_hover_text(tip)
+        .clicked()
 }
 
 fn human_size(n: u64) -> String {

@@ -239,7 +239,7 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
         }
         let bar =
-            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 6));
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(14, 8));
         if !fullscreen {
             live.bar_rect = None;
             egui::Panel::top("bar")
@@ -422,24 +422,28 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
             }
-            let (label, tip) = match live.scale {
-                Scale::Fit => (
-                    "Fit",
-                    "Fit to window. Click for actual size (1:1, scroll bars)",
-                ),
-                Scale::Actual => ("1:1", "Actual size. Click to fit the window"),
-            };
-            if ui
-                .button(format!("{} {label}", char::from(Icon::ZoomIn)))
-                .on_hover_text(tip)
-                .clicked()
-            {
-                live.scale = if live.scale == Scale::Fit {
-                    Scale::Actual
-                } else {
-                    Scale::Fit
-                };
-            }
+            // Segmented Fit | 1:1 control; drawn left to right inside this right-to-left bar.
+            egui::Frame::NONE
+                .fill(theme::palette(ui.ctx()).elevated)
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(3))
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        for (label, scale, tip) in [
+                            ("Fit", Scale::Fit, "Fit to window"),
+                            ("1:1", Scale::Actual, "Actual size (scroll bars)"),
+                        ] {
+                            if ui
+                                .selectable_label(live.scale == scale, label)
+                                .on_hover_text(tip)
+                                .clicked()
+                            {
+                                live.scale = scale;
+                            }
+                        }
+                    });
+                });
             if ui
                 .selectable_label(
                     live.view_only,
