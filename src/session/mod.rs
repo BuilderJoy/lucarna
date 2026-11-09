@@ -6,6 +6,8 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
 
+mod stats;
+
 use crate::features::chat;
 use crate::features::clipboard::RemoteClipboard;
 use crate::features::connection::{Credentials, ServerAddress, SshTarget, handshake};
@@ -14,6 +16,8 @@ use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::sftp::SftpClient;
 use crate::features::ssh::Tunnel;
 use crate::shared::wire::{invalid, read_u8};
+
+pub use stats::Stats;
 
 pub enum Event {
     Connected {
@@ -32,15 +36,29 @@ pub enum Event {
 }
 
 /// Client-to-server channel, shared by the UI and the reader thread.
-pub struct Outbound(Mutex<TcpStream>);
+pub struct Outbound {
+    stream: Mutex<TcpStream>,
+    stats: Stats,
+}
 
 impl Outbound {
     pub fn send(&self, msg: &[u8]) -> io::Result<()> {
-        self.0.lock().unwrap().write_all(msg)
+        self.stream.lock().unwrap().write_all(msg)
     }
 
     pub fn close(&self) {
-        let _ = self.0.lock().unwrap().shutdown(Shutdown::Both);
+        let _ = self.stream.lock().unwrap().shutdown(Shutdown::Both);
+    }
+
+    pub fn new(stream: TcpStream) -> Self {
+        Self {
+            stream: Mutex::new(stream),
+            stats: Stats::default(),
+        }
+    }
+
+    pub fn stats(&self) -> &Stats {
+        &self.stats
     }
 }
 
@@ -81,7 +99,7 @@ pub fn run(
             init.height.into(),
         )?));
         remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
-        let outbound = Arc::new(Outbound(Mutex::new(s.try_clone()?)));
+        let outbound = Arc::new(Outbound::new(s.try_clone()?));
         remote_screen::request_update(&outbound, false, &screen)?;
         let (tx_files, notify_files) = (tx.clone(), notify.clone());
         let vnc_files = Arc::new(RemoteFiles::new(outbound.clone(), move |u| {
@@ -112,7 +130,8 @@ pub fn run(
         loop {
             match read_u8(&mut s)? {
                 0 => {
-                    remote_screen::read_update(&mut s, &screen, &mut decoder)?;
+                    let encoding = remote_screen::read_update(&mut s, &screen, &mut decoder)?;
+                    outbound.stats().update_received(encoding);
                     let _ = tx.send(Event::ScreenUpdated);
                     notify();
                     remote_screen::request_update(&outbound, true, &screen)?;
@@ -478,7 +497,7 @@ mod tests {
             m.extend((encodings.len() as u16).to_be_bytes());
             encodings.iter().for_each(|e| m.extend(e.to_be_bytes()));
             s.write_all(&m).unwrap();
-            let out = Outbound(Mutex::new(s.try_clone().unwrap()));
+            let out = Outbound::new(s.try_clone().unwrap());
             remote_screen::request_update(&out, false, &screen).unwrap();
             let mut r = BufReader::new(s);
             assert_eq!(read_u8(&mut r).unwrap(), 0, "expected a FramebufferUpdate");

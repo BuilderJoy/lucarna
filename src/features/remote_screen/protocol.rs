@@ -89,18 +89,22 @@ fn read_zlib(s: &mut impl Read, z: &mut Decompress, max: usize) -> io::Result<Ve
 }
 
 /// Reads a FramebufferUpdate body (after the message-type byte) into `screen`.
+/// Reads one `FramebufferUpdate`. Returns the encoding of its last large rectangle (small ones, such as
+/// the reply to a ping, are often Raw whatever the server prefers).
 pub fn read_update(
     s: &mut impl Read,
     screen: &Mutex<Framebuffer>,
     decoder: &mut Decoder,
-) -> io::Result<()> {
+) -> io::Result<Option<&'static str>> {
+    let mut used = None;
     read_u8(s)?;
     // With LastRect, servers may send 0xFFFF and end the update with a LastRect rectangle.
     let rects = read_u16(s)?;
     for _ in 0..rects {
         let [x, y, w, h] = [0; 4].map(|_| read_u16(s).map(usize::from));
         let (x, y, w, h) = (x?, y?, w?, h?);
-        match read_u32(s)? as i32 {
+        let encoding = read_u32(s)? as i32;
+        match encoding {
             ENC_DESKTOP_SIZE => *screen.lock().unwrap() = Framebuffer::new(w, h)?,
             ENC_LAST_RECT => break,
             // x, y are the hotspot, not a position, so this must come before the bounds check.
@@ -147,8 +151,32 @@ pub fn read_update(
             }
             e => return Err(invalid(format!("unsupported encoding {e}"))),
         }
+        if w * h >= LARGE_RECT
+            && let Some(name) = encoding_name(encoding)
+        {
+            used = Some(name);
+        }
     }
-    Ok(())
+    Ok(used)
+}
+
+const LARGE_RECT: usize = 400;
+
+fn encoding_name(encoding: i32) -> Option<&'static str> {
+    Some(match encoding {
+        ENC_RAW => "Raw",
+        ENC_HEXTILE => "Hextile",
+        ENC_ZLIB => "Zlib",
+        ENC_TIGHT => "Tight",
+        ENC_ZRLE => "ZRLE",
+        _ => return None,
+    })
+}
+
+/// One-pixel, non-incremental update request. The server must answer it, so the time to the next update
+/// is a round trip even when the screen doesn't change.
+pub fn ping(out: &Outbound) -> io::Result<()> {
+    out.send(&[3, 0, 0, 0, 0, 0, 0, 1, 0, 1])
 }
 
 /// Colour maps are unused in true-colour mode.

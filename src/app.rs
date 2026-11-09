@@ -12,7 +12,7 @@ use crate::features::connection::{
 };
 use crate::features::file_transfer::{DualFiles, FilesView};
 use crate::features::input::{self, InputForwarder};
-use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
+use crate::features::remote_screen::{self, Framebuffer, Scale, ScreenView};
 use crate::session::{self, Event, Outbound};
 use crate::shared::theme;
 
@@ -418,6 +418,11 @@ impl eframe::App for App {
             }
             return;
         };
+        // Round-trip measurement for the bar; the answer arrives as a normal update.
+        if live.has_frame && live.outbound.stats().ping_due() {
+            let _ = remote_screen::ping(&live.outbound);
+        }
+        ctx.request_repaint_after(Duration::from_secs(2));
         // Our own shortcut: consumed before input forwarding so the remote machine never sees it.
         let toggle = ctx.input_mut(|i| {
             i.consume_key(
@@ -536,7 +541,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
     use lucide_icons::Icon;
     let p = theme::palette(ui.ctx());
     const H: f32 = 38.0;
-    const LEFT_W: f32 = 250.0;
+    const LEFT_W: f32 = 340.0;
     const RIGHT_W: f32 = 140.0;
     let center_w =
         (ui.available_width() - LEFT_W - RIGHT_W - 2.0 * ui.spacing().item_spacing.x).max(0.0);
@@ -567,12 +572,26 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                         });
                 }
                 let (w, h) = live.screen.lock().unwrap().size();
-                ui.label(
-                    RichText::new(format!("{w}×{h}"))
-                        .monospace()
-                        .size(12.0)
-                        .color(p.text2),
-                );
+                let stats = live.outbound.stats();
+                let info = match stats.encoding() {
+                    Some(e) => format!("{e} · {w}×{h}"),
+                    None => format!("{w}×{h}"),
+                };
+                ui.label(RichText::new(info).monospace().size(12.0).color(p.text2));
+                if let Some(rtt) = stats.latency() {
+                    let ms = rtt.as_millis();
+                    let color = if ms > 150 {
+                        ui.visuals().warn_fg_color
+                    } else {
+                        p.text2
+                    };
+                    ui.label(
+                        RichText::new(format!("· {ms} ms"))
+                            .monospace()
+                            .size(12.0)
+                            .color(color),
+                    );
+                }
                 if live.bell_until.is_some_and(|t| Instant::now() < t) {
                     ui.label(
                         RichText::new(format!("{} Bell", char::from(Icon::Bell)))
@@ -591,6 +610,8 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 let used = ui
                     .horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
+                        // Flat buttons: the Keys menu button would otherwise keep the default grey fill.
+                        ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                         let scales = [
                             (Scale::Fit, "Fit".to_string(), "Fit to window"),
                             (
