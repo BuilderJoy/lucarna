@@ -49,9 +49,25 @@ pub const MAX_UPLOAD_SESSION: u64 = 8 * 1024 * 1024 * 1024;
 /// What the person sharing is told about, as it happens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileEvent {
-    Received { name: String, size: u64 },
-    Sent { name: String, size: u64 },
-    Deleted { name: String },
+    /// A transfer began; the person sharing can cancel it until it ends.
+    Started {
+        name: String,
+        incoming: bool,
+    },
+    Cancelled {
+        name: String,
+    },
+    Received {
+        name: String,
+        size: u64,
+    },
+    Sent {
+        name: String,
+        size: u64,
+    },
+    Deleted {
+        name: String,
+    },
 }
 
 /// Receives [`FileEvent`]s from the file transfer server.
@@ -279,9 +295,25 @@ pub struct FtServer {
     active_upload: Option<ActiveUpload>,
     uploaded: u64,
     pub hook: Option<FileHook>,
+    /// Set by the person sharing to stop the transfer that is running; read once per block.
+    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl FtServer {
+    /// True once if the person sharing asked to cancel (and clears the request).
+    fn cancel_requested(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|c| c.swap(false, std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// A new transfer starts with no pending cancel from an earlier one.
+    fn clear_cancel(&self) {
+        if let Some(c) = &self.cancel {
+            c.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     fn emit(&self, event: FileEvent) {
         if let Some(h) = &self.hook {
             (h.0)(event);
@@ -296,6 +328,7 @@ impl FtServer {
             active_upload: None,
             uploaded: 0,
             hook: None,
+            cancel: None,
         }
     }
 
@@ -444,6 +477,11 @@ impl FtServer {
 
         match opened {
             Ok((file, total, name)) => {
+                self.clear_cancel();
+                self.emit(FileEvent::Started {
+                    name: name.clone(),
+                    incoming: false,
+                });
                 self.pending_download = Some(PendingDownload {
                     file,
                     total,
@@ -472,6 +510,12 @@ impl FtServer {
         let mut reader = (&dl.file).take(dl.total);
         let mut buf = vec![0u8; SERVER_BLOCK_SIZE];
         loop {
+            if self.cancel_requested() {
+                s.write_all(&wire_msg(ABORT, 0, 0, &[]))?;
+                s.flush()?;
+                self.emit(FileEvent::Cancelled { name: dl.name });
+                return Ok(());
+            }
             let n = reader.read(&mut buf)?;
             if n == 0 {
                 break;
@@ -533,6 +577,11 @@ impl FtServer {
 
         match prep {
             Ok((file, part_path, dest_path)) => {
+                self.clear_cancel();
+                self.emit(FileEvent::Started {
+                    name: file_label(&dest_path),
+                    incoming: true,
+                });
                 self.active_upload = Some(ActiveUpload {
                     file,
                     part_path,
@@ -562,6 +611,16 @@ impl FtServer {
         compressed: bool,
         data: &[u8],
     ) -> io::Result<()> {
+        if self.active_upload.is_some() && self.cancel_requested() {
+            // Dropping the upload removes its .lucarna-part file.
+            if let Some(up) = self.active_upload.take() {
+                self.emit(FileEvent::Cancelled {
+                    name: file_label(&up.dest_path),
+                });
+            }
+            s.write_all(&wire_msg(ABORT, 0, 0, &[]))?;
+            return s.flush();
+        }
         let Some(up) = &mut self.active_upload else {
             return Ok(());
         };
@@ -861,6 +920,76 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
     }
 
+    fn hooked(
+        drives: VirtualDrives,
+    ) -> (
+        FtServer,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::sync::Arc<std::sync::Mutex<Vec<FileEvent>>>,
+    ) {
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut server = FtServer::new(drives, false);
+        server.cancel = Some(cancel.clone());
+        let sink = seen.clone();
+        server.hook = Some(FileHook(std::sync::Arc::new(move |e| {
+            sink.lock().unwrap().push(e)
+        })));
+        (server, cancel, seen)
+    }
+
+    #[test]
+    fn cancelling_an_upload_stops_it_and_leaves_no_file() {
+        let (base, drives) = temp_sandbox("cancel_up");
+        let (mut server, cancel, seen) = hooked(drives);
+        assert!(offer(&mut server, b"M:\\big.bin", 100));
+        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut io =
+            crate::shared::wire::Duplex::new(wire_msg(FILE_PACKET, 0, 3, b"abc")[1..].to_vec());
+        server.handle_message(&mut io).unwrap();
+        // The viewer is told to stop, nothing stays on disk, and the person sharing is told too.
+        assert_eq!(io.output[0], 7);
+        assert!(!base.join("Music").join("big.bin").exists());
+        assert!(!base.join("Music").join(".big.bin.lucarna-part").exists());
+        let events = seen.lock().unwrap().clone();
+        assert!(matches!(
+            events.first(),
+            Some(FileEvent::Started { incoming: true, .. })
+        ));
+        assert!(matches!(events.last(), Some(FileEvent::Cancelled { name }) if name == "big.bin"));
+        // A cancel with nothing running does not cancel the next transfer.
+        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(offer(&mut server, b"M:\\next.bin", 3));
+        assert!(!cancel.load(std::sync::atomic::Ordering::SeqCst));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn cancelling_a_download_sends_abort_before_the_next_block() {
+        let (base, drives) = temp_sandbox("cancel_down");
+        fs::write(base.join("Music").join("song.wav"), vec![7u8; 200_000]).unwrap();
+        let (mut server, cancel, seen) = hooked(drives);
+        let mut req = Vec::new();
+        req.extend_from_slice(&wire_msg(FILE_TRANSFER_REQUEST, 0, 0, b"M:\\song.wav")[1..]);
+        let mut io = crate::shared::wire::Duplex::new(req);
+        server.handle_message(&mut io).unwrap();
+        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut go =
+            crate::shared::wire::Duplex::new(wire_msg(FILE_HEADER, 0, 0, b"")[1..].to_vec());
+        server.handle_message(&mut go).unwrap();
+        // No data block was written: only the abort.
+        let mut out = &go.output[..];
+        assert_eq!(read_u8(&mut out).unwrap(), 7);
+        assert_eq!(
+            crate::features::file_transfer::read(&mut out).unwrap(),
+            Msg::Abort
+        );
+        assert!(out.is_empty());
+        let events = seen.lock().unwrap().clone();
+        assert!(matches!(events.last(), Some(FileEvent::Cancelled { name }) if name == "song.wav"));
+        let _ = fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn risky_names_are_flagged_by_extension_only() {
         for n in ["setup.EXE", "run.sh", "x.app", "a.ps1", "inst.dmg"] {
@@ -891,10 +1020,16 @@ mod tests {
         server.handle_message(&mut io).unwrap();
         assert_eq!(
             seen.lock().unwrap().as_slice(),
-            &[FileEvent::Received {
-                name: "setup.exe".into(),
-                size: 3
-            }]
+            &[
+                FileEvent::Started {
+                    name: "setup.exe".into(),
+                    incoming: true
+                },
+                FileEvent::Received {
+                    name: "setup.exe".into(),
+                    size: 3
+                }
+            ]
         );
         let _ = fs::remove_dir_all(&base);
     }

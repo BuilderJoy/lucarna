@@ -272,6 +272,17 @@ static ES: &[(&str, &str)] = &[
     ),
     ("Dismiss message", "Descartar mensaje"),
     (
+        "You have the mouse. Remote control is paused.",
+        "Tienes el ratón. El control remoto está en pausa.",
+    ),
+    ("Receiving {}", "Recibiendo {}"),
+    ("Sending {}", "Enviando {}"),
+    (
+        "Transfer of {} was cancelled.",
+        "Se canceló la transferencia de {}.",
+    ),
+    ("Cancel transfer: {}", "Cancelar transferencia: {}"),
+    (
         "{} wrong PINs from {}: the PIN was changed and sharing goes on.",
         "{} PIN erróneos de {}: se cambió el PIN y se sigue compartiendo.",
     ),

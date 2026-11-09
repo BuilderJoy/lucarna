@@ -662,6 +662,19 @@ impl<R: Read> Read for E2eeReader<R> {
 
 /// Bytes of one SPAKE2 message: a side byte and a compressed Ed25519 point.
 const SPAKE_MSG_LEN: usize = 33;
+/// A SPAKE2 message carries a side byte and an Ed25519 point. The crate only decompresses it, so we also refuse
+/// points of small order (identity, 2-torsion...) and points outside the prime-order subgroup: a legitimate peer
+/// never sends one, and one from an attacker could leak a few bits of the PIN hash per try.
+fn peer_point_ok(msg: &[u8]) -> bool {
+    use curve25519_dalek::edwards::CompressedEdwardsY;
+    let Some(bytes) = msg.get(1..).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+        return false;
+    };
+    CompressedEdwardsY(bytes)
+        .decompress()
+        .is_some_and(|p| !p.is_small_order() && p.is_torsion_free())
+}
+
 const HOST_ID: &[u8] = b"lucarna-host";
 const VIEWER_ID: &[u8] = b"lucarna-viewer";
 
@@ -715,6 +728,9 @@ pub fn host_e2ee_handshake(
 
     let mut in_buf = [0u8; SPAKE_MSG_LEN + 32];
     stream.read_exact(&mut in_buf)?;
+    if !peer_point_ok(&in_buf[..SPAKE_MSG_LEN]) {
+        return Err(invalid("invalid key exchange message"));
+    }
     let shared = state
         .finish(&in_buf[..SPAKE_MSG_LEN])
         .map_err(|_| invalid("invalid key exchange message"))?;
@@ -750,6 +766,9 @@ pub fn viewer_e2ee_handshake(stream: &mut (impl Read + Write), pin: &str) -> io:
         &Identity::new(HOST_ID),
         &Identity::new(VIEWER_ID),
     );
+    if !peer_point_ok(&in_buf[8..]) {
+        return Err(invalid("invalid key exchange message"));
+    }
     let shared = state
         .finish(&in_buf[8..])
         .map_err(|_| invalid("invalid key exchange message"))?;
@@ -895,6 +914,58 @@ mod tests {
         });
         let viewer = viewer_e2ee_handshake(&mut s2, viewer_pin);
         (host.join().unwrap(), viewer)
+    }
+
+    #[test]
+    fn points_of_small_order_are_refused_and_honest_ones_pass() {
+        // Identity (y = 1) and the point of order 2 (y = -1), each behind the side byte.
+        let mut identity = vec![0x41];
+        identity.extend_from_slice(&{
+            let mut b = [0u8; 32];
+            b[0] = 1;
+            b
+        });
+        let mut order2 = vec![0x41];
+        order2.extend_from_slice(&{
+            let mut b = [0xffu8; 32];
+            b[0] = 0xec;
+            b[31] = 0x7f;
+            b
+        });
+        assert!(!peer_point_ok(&identity));
+        assert!(!peer_point_ok(&order2));
+        assert!(!peer_point_ok(&[0x41; 5]));
+        // A real message from the crate passes (it is checked end to end by the round-trip tests too).
+        let (_, msg) = Spake2::<Ed25519Group>::start_b(
+            &Password::new(b"123456"),
+            &Identity::new(HOST_ID),
+            &Identity::new(VIEWER_ID),
+        );
+        assert!(peer_point_ok(&msg));
+    }
+
+    #[test]
+    fn a_host_refuses_a_viewer_that_sends_a_small_order_point() {
+        let (mut s1, mut s2) = crate::shared::wire::pipe_pair();
+        let host = std::thread::spawn(move || {
+            let mut l = BruteForceLimiter::new();
+            let r = host_e2ee_handshake(&mut s1, "123456", &mut l);
+            (r.is_err(), l.failures)
+        });
+        let mut hello = [0u8; 8 + SPAKE_MSG_LEN];
+        s2.read_exact(&mut hello).unwrap();
+        let mut reply = vec![0x42];
+        reply.extend_from_slice(&{
+            let mut b = [0u8; 32];
+            b[0] = 1;
+            b
+        });
+        reply.extend_from_slice(&[0u8; 32]);
+        s2.write_all(&reply).unwrap();
+        let (refused, failures) = host.join().unwrap();
+        assert!(refused);
+        // It is a malformed message, not a PIN guess: it does not use up an attempt.
+        assert_eq!(failures, 0);
     }
 
     #[test]

@@ -157,6 +157,10 @@ pub struct HostConfig {
     pub gate: Option<Gate>,
     /// Told about files that arrive, leave or are deleted.
     pub on_file: Option<FileHook>,
+    /// Raised by the person sharing to cancel the transfer in progress.
+    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Unix milliseconds of the last remote input held back because the person here moved the mouse.
+    pub mouse_blocked: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl Default for HostConfig {
@@ -169,6 +173,8 @@ impl Default for HostConfig {
             fixed_challenge: None,
             gate: None,
             on_file: None,
+            cancel: None,
+            mouse_blocked: None,
         }
     }
 }
@@ -201,6 +207,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
         let read_only = config.view_only;
         let mut ft_server = FtServer::new(drives, read_only);
         ft_server.hook = config.on_file.clone();
+        ft_server.cancel = config.cancel.clone();
         Self {
             config,
             capturer,
@@ -445,6 +452,7 @@ fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
 /// Runs a complete user-space RFB 3.8 Host session over `stream` using the OS screen capturer and input injector.
 pub fn serve_stream(config: HostConfig, stream: &mut (impl Read + Write)) -> io::Result<()> {
     let view_only = config.view_only;
+    let mouse_blocked = config.mouse_blocked.clone();
     // No shared folders at all unless file transfer was allowed.
     let drives = if config.allow_files {
         VirtualDrives::default()
@@ -454,7 +462,7 @@ pub fn serve_stream(config: HostConfig, stream: &mut (impl Read + Write)) -> io:
     let mut host = HostSession::with_drives(
         config,
         SystemCapturer::new((1280, 720)),
-        SystemInputInjector::new(view_only),
+        SystemInputInjector::new(view_only).with_blocked_marker(mouse_blocked),
         drives,
     );
     host.handshake(stream)?;
@@ -574,6 +582,8 @@ pub fn cli_host() -> Option<i32> {
             fixed_challenge: None,
             gate: None,
             on_file: None,
+            cancel: None,
+            mouse_blocked: None,
         };
         let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
         while !limiter.is_locked() {
@@ -663,6 +673,8 @@ pub fn cli_host() -> Option<i32> {
         fixed_challenge: None,
         gate: None,
         on_file: None,
+        cancel: None,
+        mouse_blocked: None,
     };
     let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
 
@@ -798,6 +810,8 @@ mod tests {
             allow_files: false,
             fixed_challenge: None,
             on_file: None,
+            cancel: None,
+            mouse_blocked: None,
             gate: Some(Gate(std::sync::Arc::new(move || {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 allow
@@ -875,6 +889,8 @@ mod tests {
                 fixed_challenge: Some(*b"0123456789abcdef"),
                 gate: None,
                 on_file: None,
+                cancel: None,
+                mouse_blocked: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1.clone(), f1, f2]);
             let injector = RecordingInjector::new(false);
@@ -979,6 +995,8 @@ mod tests {
                 fixed_challenge: None,
                 gate: None,
                 on_file: None,
+                cancel: None,
+                mouse_blocked: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1]);
             let injector = RecordingInjector::new(false);

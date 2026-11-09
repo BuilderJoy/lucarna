@@ -9,7 +9,7 @@ use crate::shared::i18n::{fill, tr};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, RecvTimeoutError, Sender},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -121,6 +121,11 @@ pub struct HostView {
     pub allow_files: bool,
     /// A file that runs code arrived: shown in its own strip until dismissed or two minutes pass.
     risky_alert: Option<(String, Instant)>,
+    /// The transfer in progress (name, incoming) and the switch that cancels it.
+    transfer: Option<(String, bool)>,
+    cancel_transfer: Arc<AtomicBool>,
+    /// Set by the injector when the person here took the mouse (unix ms), read by the strip.
+    mouse_blocked: Arc<AtomicU64>,
     drives_loaded: bool,
     /// The PIN the host thread checks; changes after every session and every denied connection.
     pin_shared: Arc<Mutex<String>>,
@@ -166,6 +171,9 @@ impl Default for HostView {
             failed_pins: 0,
             allow_files: false,
             risky_alert: None,
+            transfer: None,
+            cancel_transfer: Arc::new(AtomicBool::new(false)),
+            mouse_blocked: Arc::new(AtomicU64::new(0)),
             drives_loaded: false,
             pin_shared: Arc::new(Mutex::new(String::new())),
             consent_tx: None,
@@ -395,6 +403,8 @@ impl HostView {
         };
         let view_only = self.view_only;
         let allow_files = self.allow_files;
+        let cancel = Arc::clone(&self.cancel_transfer);
+        let mouse_blocked = Arc::clone(&self.mouse_blocked);
         let ctx = ctx.clone();
         self.waiting_since = None;
 
@@ -407,6 +417,8 @@ impl HostView {
                     allow_files,
                     fixed_challenge: None,
                     gate: None,
+                    cancel: Some(cancel),
+                    mouse_blocked: Some(mouse_blocked),
                     on_file: Some(FileHook(Arc::new({
                         let (tx, ctx) = (tx.clone(), ctx.clone());
                         move |e| {
@@ -470,7 +482,27 @@ impl HostView {
                     self.push_audit(fill(tr("{} asks to connect."), &[&peer]), true);
                 }
                 HostUiEvent::File(event) => {
+                    match &event {
+                        FileEvent::Started { name, incoming } => {
+                            self.transfer = Some((name.clone(), *incoming));
+                        }
+                        _ => self.transfer = None,
+                    }
                     let (text, alert) = match event {
+                        FileEvent::Started { name, incoming } => (
+                            fill(
+                                if incoming {
+                                    tr("Receiving {}")
+                                } else {
+                                    tr("Sending {}")
+                                },
+                                &[&name],
+                            ),
+                            false,
+                        ),
+                        FileEvent::Cancelled { name } => {
+                            (fill(tr("Transfer of {} was cancelled."), &[&name]), false)
+                        }
                         FileEvent::Received { name, size } => {
                             let risky = is_risky(&name);
                             if risky {
@@ -554,6 +586,7 @@ impl HostView {
                     );
                 }
                 HostUiEvent::Disconnected { peer, reason } => {
+                    self.transfer = None;
                     if let Some(t) = self.session_started.take() {
                         self.last_session = Some((peer.clone(), t.elapsed().as_secs()));
                     }
@@ -587,6 +620,7 @@ impl HostView {
                     }
                 }
                 HostUiEvent::Stopped(reason) => {
+                    self.transfer = None;
                     self.consent_tx = None;
                     self.consent_since = None;
                     self.waiting_since = None;
@@ -1222,6 +1256,8 @@ impl HostView {
         };
         let mut answer = None;
         let mut stop = false;
+        let mut cancel = false;
+        let transfer = self.transfer.clone();
         egui::Panel::top("sharing_strip")
             .frame(
                 egui::Frame::NONE
@@ -1248,19 +1284,31 @@ impl HostView {
                             {
                                 answer = Some(false);
                             }
-                        } else if ui
-                            .add(egui::Button::new(
-                                RichText::new(if active {
-                                    tr("End session now")
-                                } else {
-                                    tr("Stop sharing")
-                                })
-                                .strong()
-                                .color(Color32::WHITE),
-                            ))
-                            .clicked()
-                        {
-                            stop = true;
+                        } else {
+                            if ui
+                                .add(egui::Button::new(
+                                    RichText::new(if active {
+                                        tr("End session now")
+                                    } else {
+                                        tr("Stop sharing")
+                                    })
+                                    .strong()
+                                    .color(Color32::WHITE),
+                                ))
+                                .clicked()
+                            {
+                                stop = true;
+                            }
+                            if let Some((name, _)) = &transfer
+                                && ui
+                                    .add(egui::Button::new(
+                                        RichText::new(fill(tr("Cancel transfer: {}"), &[name]))
+                                            .color(Color32::WHITE),
+                                    ))
+                                    .clicked()
+                            {
+                                cancel = true;
+                            }
                         }
                     });
                 });
@@ -1271,7 +1319,41 @@ impl HostView {
         if stop {
             self.stop_sharing();
         }
+        if cancel {
+            self.cancel_transfer.store(true, Ordering::SeqCst);
+        }
+        self.show_mouse_strip(ui);
         self.show_risky_strip(ui);
+    }
+
+    /// "You have the mouse": shown for as long as remote input is being held back, so the person here knows why
+    /// the remote cursor stopped and that it comes back by itself.
+    fn show_mouse_strip(&mut self, ui: &mut Ui) {
+        let at = self.mouse_blocked.load(Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        if at == 0 || now.saturating_sub(at) > MOUSE_STRIP_MS {
+            return;
+        }
+        ui.ctx().request_repaint_after(Duration::from_millis(300));
+        egui::Panel::top("mouse_priority_strip")
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::ACCENT)
+                    .inner_margin(egui::Margin::symmetric(16, 4)),
+            )
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}  {}",
+                        char::from(Icon::MousePointer2),
+                        tr("You have the mouse. Remote control is paused.")
+                    ))
+                    .strong()
+                    .color(theme::ON_ACCENT),
+                );
+            });
     }
 
     /// Second strip under the first, so a file that can run code is not missed in the activity list.
@@ -2047,6 +2129,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Pause after a PIN is burned (three wrong guesses): about 0.1 guesses per second at most.
 const LOCKOUT_COOLDOWN: Duration = Duration::from_secs(30);
+/// The "you have the mouse" strip stays this long after the last held-back event (the pause is 2 s).
+const MOUSE_STRIP_MS: u64 = 2_500;
 /// How long the "a file that runs code arrived" strip stays.
 const RISKY_ALERT_FOR: Duration = Duration::from_secs(120);
 /// Sharing that nobody used stops by itself after this long.

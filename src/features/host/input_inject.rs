@@ -1,6 +1,8 @@
 //! User-space keyboard and mouse event injection with local mouse priority (Anti-RAT guard).
 
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 const SHIFT: u32 = 0xffe1;
@@ -138,6 +140,11 @@ impl LocalActivityGuard {
         self.last_local_pos = Some(pos);
     }
 
+    /// The local operator moved the physical mouse (seen as the cursor not being where we left it).
+    pub fn local_moved(&mut self, now: Instant) {
+        self.last_local_move = Some(now);
+    }
+
     /// Returns true if remote input must be blocked because the local operator moved the mouse recently.
     pub fn is_remote_blocked(&self, now: Instant) -> bool {
         self.last_local_move
@@ -190,6 +197,13 @@ pub struct SystemInputInjector {
     pub view_only: bool,
     pub guard: LocalActivityGuard,
     last_buttons: PointerButtons,
+    /// Where the cursor was right after our last injected move. If it is somewhere else when the next remote
+    /// move arrives, a person moved the mouse. ponytail: one `xdotool` spawn per probe; read the pointer through
+    /// the X11 API if the cost shows.
+    probe: fn() -> Option<(u16, u16)>,
+    expected: Option<(u16, u16)>,
+    /// Unix milliseconds of the last remote event we dropped because the person here had the mouse (0 = never).
+    blocked_at: Option<Arc<AtomicU64>>,
 }
 
 impl SystemInputInjector {
@@ -198,13 +212,66 @@ impl SystemInputInjector {
             view_only,
             guard: LocalActivityGuard::default(),
             last_buttons: PointerButtons::default(),
+            probe: local_pointer,
+            expected: None,
+            blocked_at: None,
         }
     }
+
+    /// Lets the UI see when remote input was held back.
+    pub fn with_blocked_marker(mut self, marker: Option<Arc<AtomicU64>>) -> Self {
+        self.blocked_at = marker;
+        self
+    }
+}
+
+/// The physical cursor position. Only where we can inject input (Linux with xdotool) is there anything to
+/// protect, so elsewhere this is `None` and no priority is applied.
+fn local_pointer() -> Option<(u16, u16)> {
+    #[cfg(target_os = "linux")]
+    {
+        let out = std::process::Command::new("xdotool")
+            .args(["getmouselocation", "--shell"])
+            .output()
+            .ok()?;
+        return parse_mouse_location(&String::from_utf8_lossy(&out.stdout));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+/// `xdotool getmouselocation --shell` prints `X=…`, `Y=…`, `SCREEN=…`, `WINDOW=…`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_mouse_location(text: &str) -> Option<(u16, u16)> {
+    let get = |key: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .and_then(|v| v.trim().parse::<u16>().ok())
+    };
+    Some((get("X=")?, get("Y=")?))
 }
 
 impl InputInjector for SystemInputInjector {
     fn inject(&mut self, event: HostInputEvent) -> io::Result<()> {
-        if self.view_only || self.guard.is_remote_blocked(Instant::now()) {
+        if self.view_only {
+            return Ok(());
+        }
+        let now = Instant::now();
+        if matches!(event, HostInputEvent::Pointer { .. })
+            && let (Some(here), Some(left)) = ((self.probe)(), self.expected)
+            && here != left
+        {
+            self.guard.local_moved(now);
+            // Judge the next remote event against where the person left the cursor, not where we did.
+            self.expected = Some(here);
+        }
+        if self.guard.is_remote_blocked(now) {
+            if let Some(m) = &self.blocked_at {
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                m.store(ms, Ordering::Relaxed);
+            }
             return Ok(());
         }
         match event {
@@ -213,6 +280,7 @@ impl InputInjector for SystemInputInjector {
                 let prev = self.last_buttons;
                 self.last_buttons = b;
                 inject_os_pointer(x, y, prev, b);
+                self.expected = (self.probe)();
             }
             HostInputEvent::Key { down, keysym } => {
                 if let Some(key) = NativeKey::from_keysym(keysym) {
@@ -297,6 +365,77 @@ fn inject_os_key(down: bool, key: NativeKey) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_xdotool_location_output_is_parsed() {
+        assert_eq!(
+            parse_mouse_location("X=640\nY=360\nSCREEN=0\nWINDOW=4194307\n"),
+            Some((640, 360))
+        );
+        assert_eq!(parse_mouse_location("nothing"), None);
+        assert_eq!(parse_mouse_location("X=-5\nY=3\n"), None);
+    }
+
+    static FAKE_X: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    fn fake_pointer() -> Option<(u16, u16)> {
+        let x = FAKE_X.load(Ordering::SeqCst) as u16;
+        Some((x, x))
+    }
+
+    #[test]
+    fn a_person_moving_the_mouse_holds_back_remote_input_for_the_cooldown() {
+        let marker = Arc::new(AtomicU64::new(0));
+        let mut inj = SystemInputInjector::new(false).with_blocked_marker(Some(marker.clone()));
+        inj.probe = fake_pointer;
+        inj.guard = LocalActivityGuard::new(Duration::from_millis(80));
+        let remote = |x| HostInputEvent::Pointer {
+            buttons: 0,
+            x,
+            y: x,
+        };
+
+        // The remote moves the cursor; it lands where it was told to, so nobody else touched it.
+        FAKE_X.store(10, Ordering::SeqCst);
+        inj.inject(remote(10)).unwrap();
+        inj.inject(remote(10)).unwrap();
+        assert_eq!(marker.load(Ordering::Relaxed), 0);
+
+        // A person moves the mouse: the next remote move is dropped and the UI marker is set.
+        FAKE_X.store(300, Ordering::SeqCst);
+        inj.inject(remote(11)).unwrap();
+        assert_ne!(marker.load(Ordering::Relaxed), 0);
+
+        // Still inside the pause: still held back, and it does not re-trigger by itself.
+        inj.inject(remote(12)).unwrap();
+        assert!(inj.guard.is_remote_blocked(Instant::now()));
+
+        // After the pause the remote has the mouse again, with no new local movement to blame.
+        std::thread::sleep(Duration::from_millis(120));
+        marker.store(0, Ordering::Relaxed);
+        inj.inject(remote(13)).unwrap();
+        assert_eq!(
+            marker.load(Ordering::Relaxed),
+            0,
+            "still blocked after the pause"
+        );
+        assert!(!inj.guard.is_remote_blocked(Instant::now()));
+    }
+
+    #[test]
+    fn view_only_never_reaches_the_probe_or_the_marker() {
+        let marker = Arc::new(AtomicU64::new(0));
+        let mut inj = SystemInputInjector::new(true).with_blocked_marker(Some(marker.clone()));
+        inj.probe = fake_pointer;
+        inj.inject(HostInputEvent::Pointer {
+            buttons: 0,
+            x: 1,
+            y: 1,
+        })
+        .unwrap();
+        assert_eq!(inj.expected, None);
+        assert_eq!(marker.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn maps_ascii_unicode_and_special_keysyms() {
