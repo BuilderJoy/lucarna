@@ -14,6 +14,7 @@ use crate::features::file_transfer::{DualFiles, FilesView};
 use crate::features::input::{self, InputForwarder};
 use crate::features::remote_screen::{Framebuffer, Scale, ScreenView};
 use crate::session::{self, Event, Outbound};
+use crate::shared::theme;
 
 const PREVIEW_INTERVAL: Duration = Duration::from_secs(5);
 const BELL_FLASH: Duration = Duration::from_secs(2);
@@ -306,7 +307,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
     use lucide_icons::Icon;
     ui.horizontal(|ui| {
         let dot = if live.has_frame {
-            Color32::from_rgb(80, 200, 120)
+            theme::palette(ui.ctx()).success
         } else {
             ui.visuals().warn_fg_color
         };
@@ -315,7 +316,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         let (w, h) = live.screen.lock().unwrap().size();
         ui.label(RichText::new(format!("{w}×{h}")).weak());
         if live.bell_until.is_some_and(|t| Instant::now() < t) {
-            let accent = ui.visuals().selection.bg_fill;
+            let accent = theme::palette(ui.ctx()).accent_text;
             ui.label(
                 RichText::new(format!("{} Bell", char::from(Icon::Bell)))
                     .color(accent)
@@ -324,7 +325,10 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
-                .button(format!("{} Disconnect", char::from(Icon::LogOut)))
+                .add(theme::danger(
+                    ui,
+                    format!("{} Disconnect", char::from(Icon::LogOut)),
+                ))
                 .clicked()
             {
                 live.user_disconnected = true;
@@ -448,37 +452,4 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
             }
         });
     });
-}
-
-/// Dark theme with the amber accent of the logo and the embedded Lucide icon font.
-pub fn apply_theme(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "lucide".into(),
-        Arc::new(
-            egui::FontData::from_static(lucide_icons::LUCIDE_FONT_BYTES).tweak(egui::FontTweak {
-                y_offset_factor: 0.08,
-                ..Default::default()
-            }),
-        ),
-    );
-    if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        prop.insert(1, "lucide".into());
-    }
-    if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        mono.push("lucide".into());
-    }
-    ctx.set_fonts(fonts);
-
-    let accent = Color32::from_rgb(0xff, 0xbe, 0x3d);
-    let mut v = egui::Visuals::dark();
-    v.selection.bg_fill = accent;
-    v.selection.stroke.color = Color32::BLACK;
-    v.hyperlink_color = accent;
-    v.panel_fill = Color32::from_rgb(0x10, 0x16, 0x22);
-    v.window_fill = Color32::from_rgb(0x18, 0x21, 0x33);
-    v.extreme_bg_color = Color32::from_rgb(0x0b, 0x10, 0x1a);
-    v.widgets.hovered.bg_stroke.color = accent;
-    ctx.set_theme(egui::Theme::Dark);
-    ctx.set_visuals(v);
 }

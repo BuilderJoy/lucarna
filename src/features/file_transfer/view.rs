@@ -746,8 +746,8 @@ fn table_row(
     if selected {
         ui.painter().rect_filled(
             rect,
-            4.0,
-            ui.visuals().selection.bg_fill.gamma_multiply(0.35),
+            6.0,
+            crate::shared::theme::palette(ui.ctx()).accent_soft,
         );
     } else if interactive && resp.hovered() {
         ui.painter()

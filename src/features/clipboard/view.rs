@@ -1,6 +1,8 @@
 use std::time::SystemTime;
 
-use eframe::egui::{self, Color32, Rect, RichText};
+use eframe::egui::{self, Rect, RichText};
+
+use crate::shared::theme;
 use lucide_icons::Icon;
 
 use super::RemoteClipboard;
@@ -98,10 +100,7 @@ impl ClipboardView {
                     if ui
                         .add_enabled(
                             can_send,
-                            egui::Button::new(
-                                RichText::new(format!("{} Send to Remote", char::from(Icon::Send)))
-                                    .strong(),
-                            ),
+                            theme::primary(format!("{} Send to Remote", char::from(Icon::Send))),
                         )
                         .clicked()
                     {
@@ -150,9 +149,9 @@ impl ClipboardView {
                                 egui::Frame::group(ui.style()).show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         let (tag, color) = if item.is_from_server {
-                                            ("Remote ➔ Local", Color32::from_rgb(76, 175, 80))
+                                            ("Remote ➔ Local", theme::palette(ui.ctx()).success)
                                         } else {
-                                            ("Local ➔ Remote", ui.visuals().selection.bg_fill)
+                                            ("Local ➔ Remote", theme::palette(ui.ctx()).accent_text)
                                         };
                                         ui.label(
                                             RichText::new(tag).size(11.0).strong().color(color),

@@ -34,6 +34,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 
 - A feature owns its domain types, wire messages (`protocol.rs`) and UI (`view.rs`). Only what its `mod.rs` re-exports is public; cross-feature use goes through those exports.
 - `shared/wire.rs`: big-endian read helpers and `invalid()` for `io::ErrorKind::InvalidData` errors.
+- `shared/theme.rs`: light/dark design tokens (`DARK`, `LIGHT`, amber `ACCENT`), egui visuals for both themes, `primary`/`danger` buttons and the sun/moon `toggle`. Views take colours from `theme::palette(ctx)`, never `Color32::from_rgb`; the remote-desktop illustration in previews is the only exception. The theme preference persists through egui memory. A test checks every text token for WCAG AA (4.5:1) on `surface` and `card`.
 
 ### Threading / data flow
 

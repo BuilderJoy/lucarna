@@ -10,6 +10,7 @@ use lucide_icons::Icon;
 
 use super::saved::{self, SavedConnection, SessionOptions};
 use super::{Credentials, ServerAddress, SshTarget};
+use crate::shared::theme;
 
 #[derive(Clone)]
 pub struct ConnectRequest {
@@ -226,6 +227,7 @@ impl Dashboard {
     /// Draws the Address Book and returns a `ConnectRequest` when the user initiates a connection.
     pub fn show(&mut self, ui: &mut egui::Ui, busy: bool) -> Option<ConnectRequest> {
         let ctx = ui.ctx().clone();
+        let p = theme::palette(&ctx);
         let mut request = None;
 
         // Top omni-bar: logo, quick-connect / search bar, view controls, and + New button.
@@ -254,7 +256,7 @@ impl Dashboard {
 
         // Left sidebar: Address book categories & user labels.
         let side_frame = egui::Frame::side_top_panel(ui.style())
-            .fill(Color32::from_rgb(0x13, 0x1a, 0x28))
+            .fill(p.surface)
             .inner_margin(egui::Margin::symmetric(12, 12));
         egui::Panel::left("address_book_sidebar")
             .resizable(false)
@@ -266,7 +268,7 @@ impl Dashboard {
 
         // Main canvas: connection tiles (Grid) or rows (List).
         let center_frame = egui::Frame::central_panel(ui.style())
-            .fill(Color32::from_rgb(0x0e, 0x14, 0x20))
+            .fill(p.bg)
             .inner_margin(egui::Margin::symmetric(20, 16));
         egui::CentralPanel::default()
             .frame(center_frame)
@@ -304,7 +306,6 @@ impl Dashboard {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) -> Option<ConnectRequest> {
         let mut request = None;
-        let accent = ui.visuals().selection.bg_fill;
         let logo_id = self
             .logo
             .get_or_insert_with(|| {
@@ -320,7 +321,7 @@ impl Dashboard {
 
         ui.horizontal(|ui| {
             ui.image((logo_id, egui::vec2(32.0, 32.0)));
-            ui.label(RichText::new("Lucarna").size(20.0).strong().color(accent));
+            ui.label(RichText::new("Lucarna").size(19.0).strong());
             ui.add_space(12.0);
 
             // Omni search & quick-connect bar.
@@ -346,12 +347,7 @@ impl Dashboard {
                 self.omni.clear();
             }
             if let Some(addr) = parsed_addr {
-                let connect_btn = egui::Button::new(
-                    RichText::new(format!("{} Connect", char::from(Icon::Play)))
-                        .strong()
-                        .color(Color32::BLACK),
-                )
-                .fill(accent);
+                let connect_btn = theme::primary(format!("{} Connect", char::from(Icon::Play)));
                 if ui
                     .add(connect_btn)
                     .on_hover_text(format!("Connect directly to {}", addr.as_str()))
@@ -417,13 +413,9 @@ impl Dashboard {
                 })
                 .response
                 .on_hover_text("Address book actions");
+                theme::toggle(ui);
 
-                let new_btn = egui::Button::new(
-                    RichText::new(format!("{} New", char::from(Icon::Plus)))
-                        .strong()
-                        .color(Color32::BLACK),
-                )
-                .fill(accent);
+                let new_btn = theme::primary(format!("{} New", char::from(Icon::Plus)));
                 if ui
                     .add(new_btn)
                     .on_hover_text("Create a new connection (⌘N / Ctrl+N)")
@@ -651,13 +643,8 @@ impl Dashboard {
                     .weak(),
                 );
                 ui.add_space(12.0);
-                let btn = egui::Button::new(
-                    RichText::new(format!("{} New connection", char::from(Icon::Plus)))
-                        .strong()
-                        .color(Color32::BLACK),
-                )
-                .fill(ui.visuals().selection.bg_fill)
-                .min_size(egui::vec2(160.0, 34.0));
+                let btn = theme::primary(format!("{} New connection", char::from(Icon::Plus)))
+                    .min_size(egui::vec2(160.0, 34.0));
                 if ui.add(btn).clicked() {
                     self.open_new_connection(None);
                 }
@@ -724,19 +711,18 @@ impl Dashboard {
         let hovered = resp.hovered();
         let accent = ui.visuals().selection.bg_fill;
 
-        let bg = if is_selected {
-            Color32::from_rgb(0x1f, 0x2b, 0x42)
-        } else if hovered {
-            Color32::from_rgb(0x1a, 0x24, 0x38)
+        let p = theme::palette(ui.ctx());
+        let bg = if is_selected || hovered {
+            p.elevated
         } else {
-            Color32::from_rgb(0x15, 0x1d, 0x2d)
+            p.card
         };
         let stroke = if is_selected {
             Stroke::new(2.0, accent)
         } else if hovered {
-            Stroke::new(1.0, accent.gamma_multiply(0.6))
+            Stroke::new(1.0, p.border_strong)
         } else {
-            Stroke::new(1.0, Color32::from_rgb(0x26, 0x32, 0x48))
+            Stroke::new(1.0, p.border)
         };
         ui.painter()
             .rect(rect, CornerRadius::same(10), bg, stroke, StrokeKind::Inside);
@@ -758,7 +744,7 @@ impl Dashboard {
             egui::Align2::LEFT_TOP,
             truncate_str(&c.name, 22),
             FontId::proportional(14.5),
-            Color32::WHITE,
+            p.text,
         );
 
         let who = if c.user.is_empty() {
@@ -771,7 +757,7 @@ impl Dashboard {
             egui::Align2::LEFT_TOP,
             truncate_str(&who, 28),
             FontId::monospace(11.0),
-            Color32::from_rgb(0x94, 0xa3, 0xb8),
+            p.text2,
         );
 
         // Bottom row: labels on the left, relative time on the right.
@@ -782,17 +768,14 @@ impl Dashboard {
             let pill_w = (tag_text.len() as f32 * 6.5 + 14.0).min(82.0);
             let pill_rect =
                 Rect::from_min_size(Pos2::new(tag_x, footer_y), Vec2::new(pill_w, 16.0));
-            ui.painter().rect_filled(
-                pill_rect,
-                CornerRadius::same(4),
-                Color32::from_rgb(0x24, 0x32, 0x4a),
-            );
+            ui.painter()
+                .rect_filled(pill_rect, CornerRadius::same(4), p.accent_soft);
             ui.painter().text(
                 pill_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 tag_text,
                 FontId::proportional(10.5),
-                accent,
+                p.accent_text,
             );
             tag_x += pill_w + 4.0;
         }
@@ -802,7 +785,7 @@ impl Dashboard {
                 egui::Align2::LEFT_CENTER,
                 format!("+{}", c.labels.len() - 2),
                 FontId::proportional(10.0),
-                Color32::from_rgb(0x94, 0xa3, 0xb8),
+                p.text2,
             );
         }
 
@@ -812,7 +795,7 @@ impl Dashboard {
             egui::Align2::RIGHT_CENTER,
             rel,
             FontId::proportional(10.5),
-            Color32::from_rgb(0x64, 0x74, 0x8b),
+            p.text3,
         );
 
         // Favorite star button in top-right of the title row.
@@ -824,9 +807,9 @@ impl Dashboard {
         let star_color = if c.favorite {
             accent
         } else if fav_resp.hovered() {
-            Color32::WHITE
+            p.text
         } else {
-            Color32::from_rgb(0x47, 0x55, 0x69)
+            p.text3
         };
         ui.painter().text(
             fav_rect.center(),
@@ -850,11 +833,7 @@ impl Dashboard {
             egui::Align2::CENTER_CENTER,
             char::from(Icon::Ellipsis).to_string(),
             FontId::proportional(14.0),
-            if dots_resp.hovered() {
-                Color32::WHITE
-            } else {
-                Color32::from_rgb(0x94, 0xa3, 0xb8)
-            },
+            if dots_resp.hovered() { p.text } else { p.text2 },
         );
         if dots_resp.clicked() {
             self.selected = Some(idx);
@@ -902,17 +881,16 @@ impl Dashboard {
             ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
         let hovered = resp.hovered();
 
-        let bg = if is_selected {
-            Color32::from_rgb(0x1f, 0x2b, 0x42)
-        } else if hovered {
-            Color32::from_rgb(0x1a, 0x24, 0x38)
+        let p = theme::palette(ui.ctx());
+        let bg = if is_selected || hovered {
+            p.elevated
         } else {
-            Color32::from_rgb(0x15, 0x1d, 0x2d)
+            p.card
         };
         let stroke = if is_selected {
             Stroke::new(1.5, accent)
         } else {
-            Stroke::new(1.0, Color32::from_rgb(0x26, 0x32, 0x48))
+            Stroke::new(1.0, p.border)
         };
         ui.painter()
             .rect(rect, CornerRadius::same(8), bg, stroke, StrokeKind::Inside);
@@ -927,7 +905,7 @@ impl Dashboard {
             egui::Align2::LEFT_TOP,
             &c.name,
             FontId::proportional(14.5),
-            Color32::WHITE,
+            p.text,
         );
         let who = if c.user.is_empty() {
             c.address.as_str().to_string()
@@ -939,7 +917,7 @@ impl Dashboard {
             egui::Align2::LEFT_TOP,
             who,
             FontId::monospace(11.5),
-            Color32::from_rgb(0x94, 0xa3, 0xb8),
+            p.text2,
         );
 
         // Right-side controls inside the row.
@@ -960,12 +938,7 @@ impl Dashboard {
         {
             action = Some(TileAction::Properties(idx));
         }
-        let connect_btn = egui::Button::new(
-            RichText::new(format!("{} Connect", char::from(Icon::Play)))
-                .strong()
-                .color(Color32::BLACK),
-        )
-        .fill(accent);
+        let connect_btn = theme::primary(format!("{} Connect", char::from(Icon::Play)));
         if child_ui.add(connect_btn).clicked() {
             action = Some(TileAction::Connect(idx, None));
         }
@@ -980,7 +953,7 @@ impl Dashboard {
             child_ui.label(
                 RichText::new(format!("{} {label}", char::from(Icon::Tag)))
                     .size(11.0)
-                    .color(accent),
+                    .color(p.accent_text),
             );
         }
 
@@ -1015,7 +988,7 @@ impl Dashboard {
             rect,
             CornerRadius::same(6),
             Color32::from_rgb(0x09, 0x0d, 0x16),
-            Stroke::new(1.0, Color32::from_rgb(0x28, 0x35, 0x4c)),
+            Stroke::new(1.0, theme::palette(ui.ctx()).border),
             StrokeKind::Inside,
         );
         let screen = rect.shrink(3.0);
@@ -1062,7 +1035,7 @@ impl Dashboard {
                 p.circle_filled(
                     Pos2::new(bar_rect.left() + 6.0, bar_rect.center().y),
                     2.0,
-                    Color32::from_rgb(0xff, 0xbe, 0x3d),
+                    theme::ACCENT,
                 );
                 p.circle_filled(
                     Pos2::new(bar_rect.left() + 12.0, bar_rect.center().y),
@@ -1074,7 +1047,7 @@ impl Dashboard {
                     egui::Align2::CENTER_CENTER,
                     initials(&c.name),
                     FontId::proportional(16.0),
-                    Color32::from_rgb(0xff, 0xbe, 0x3d),
+                    theme::ACCENT,
                 );
                 // Taskbar strip at the bottom of the simulated screen.
                 let taskbar = Rect::from_min_max(
@@ -1092,7 +1065,7 @@ impl Dashboard {
                     egui::Align2::CENTER_CENTER,
                     initials(&c.name),
                     FontId::proportional(12.0),
-                    Color32::from_rgb(0xff, 0xbe, 0x3d),
+                    theme::ACCENT,
                 );
             }
         }
@@ -1409,7 +1382,6 @@ impl Dashboard {
             .default_width(420.0)
             .order(Order::Foreground)
             .show(ctx, |ui| {
-                let accent = ui.visuals().selection.bg_fill;
                 ui.set_min_width(400.0);
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -1662,13 +1634,13 @@ impl Dashboard {
                         Ok(msg) => {
                             ui.label(
                                 RichText::new(format!("✔ {msg}"))
-                                    .color(Color32::from_rgb(80, 200, 120)),
+                                    .color(theme::palette(ui.ctx()).success),
                             );
                         }
                         Err(err) => {
                             ui.label(
                                 RichText::new(format!("✖ {err}"))
-                                    .color(Color32::from_rgb(255, 100, 100)),
+                                    .color(theme::palette(ui.ctx()).danger),
                             );
                         }
                     }
@@ -1676,12 +1648,7 @@ impl Dashboard {
                 }
 
                 ui.horizontal(|ui| {
-                    let connect_btn = egui::Button::new(
-                        RichText::new("Save & Connect")
-                            .strong()
-                            .color(Color32::BLACK),
-                    )
-                    .fill(accent);
+                    let connect_btn = theme::primary("Save & Connect");
                     if ui.add_enabled(target.is_some(), connect_btn).clicked()
                         && let Some(t) = target.clone()
                     {
@@ -1896,7 +1863,6 @@ impl Dashboard {
     fn bottom_bar(&mut self, ui: &mut egui::Ui, busy: bool) -> Option<ConnectRequest> {
         let mut request = None;
         let count = self.visible_indices().len();
-        let accent = ui.visuals().selection.bg_fill;
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{count} device(s)")).strong().size(12.0));
             ui.separator();
@@ -1906,12 +1872,7 @@ impl Dashboard {
             } else if !self.status.is_empty() {
                 ui.label(RichText::new(&self.status).color(ui.visuals().warn_fg_color));
                 if let Some(last) = &self.last_request {
-                    let btn = egui::Button::new(
-                        RichText::new(format!("{} Reconnect ({})", char::from(Icon::RefreshCw), last.address.as_str()))
-                            .strong()
-                            .color(Color32::BLACK),
-                    )
-                    .fill(accent)
+                    let btn = theme::primary(format!("{} Reconnect ({})", char::from(Icon::RefreshCw), last.address.as_str()))
                     .small();
                     if ui.add(btn).on_hover_text(format!("Reconnect to {}", last.address.as_str())).clicked() {
                         request = Some(last.clone());
@@ -2281,42 +2242,36 @@ impl Dashboard {
 }
 
 fn sidebar_item(ui: &mut Ui, label: &str, count: usize, selected: bool) -> egui::Response {
-    let desired = Vec2::new(ui.available_width(), 28.0);
+    let desired = Vec2::new(ui.available_width(), 34.0);
     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-    let accent = ui.visuals().selection.bg_fill;
+    let p = theme::palette(ui.ctx());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), accent.gamma_multiply(0.18));
-        let bar = Rect::from_min_size(
-            rect.min + Vec2::new(0.0, 5.0),
-            Vec2::new(3.0, rect.height() - 10.0),
-        );
-        ui.painter().rect_filled(bar, CornerRadius::same(2), accent);
+            .rect_filled(rect, CornerRadius::same(8), p.accent_soft);
     } else if resp.hovered() {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(6),
-            Color32::from_rgb(0x1c, 0x26, 0x3b),
-        );
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(8), p.elevated);
     }
-    let text_color = if selected {
-        accent
+    let (text_color, count_color) = if selected {
+        (p.accent_text, p.accent_text)
+    } else if resp.hovered() {
+        (p.text, p.text3)
     } else {
-        Color32::from_rgb(0xe2, 0xe8, 0xf0)
+        (p.text2, p.text3)
     };
     ui.painter().text(
         Pos2::new(rect.left() + 10.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         truncate_str(label, 21),
-        FontId::proportional(13.0),
+        FontId::proportional(13.5),
         text_color,
     );
     ui.painter().text(
-        Pos2::new(rect.right() - 8.0, rect.center().y),
+        Pos2::new(rect.right() - 10.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         FontId::proportional(11.5),
-        Color32::from_rgb(0x64, 0x74, 0x8b),
+        count_color,
     );
     resp
 }

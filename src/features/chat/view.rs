@@ -48,7 +48,7 @@ impl ChatView {
             .open(&mut open)
             .default_size([340.0, 300.0])
             .show(ctx, |ui| {
-                let accent = ui.visuals().selection.bg_fill;
+                let accent = crate::shared::theme::palette(ui.ctx()).accent_text;
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
                     .auto_shrink(false)

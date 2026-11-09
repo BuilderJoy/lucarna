@@ -12,6 +12,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Portapapeles de texto UTF-8 (`Extended Clipboard` `0xC0A1E5CE`) con fallback automático a Latin-1 | ⚠️ desactivado (2026-10-20): solo Latin-1 hasta probar contra UltraVNC |
 | Botón Ctrl+Alt+Del | ✅ |
 | Tema, formulario de conexión, spinner hasta el primer frame | ✅ |
+| Tema claro y oscuro con tokens (`shared/theme.rs`), conmutador sol/luna persistente | ✅ (2026-11-09). Primera entrega del rediseño; quedan barra de sesión con pestañas, ventana de archivos de dos paneles y pantallas de QuickSupport (BUI-44) |
 | Fase 0: lectura con buffer, timeouts, subida parcial de textura | ✅ |
 | Fase 1.1–1.2: `Decoder` con zlib persistente y ZRLE | ✅ |
 | Fase 1.3–1.4: Zlib, Hextile y LastRect | ✅ |

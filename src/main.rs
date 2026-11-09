@@ -27,7 +27,7 @@ fn main() -> eframe::Result {
         "Lucarna",
         options,
         Box::new(|cc| {
-            app::apply_theme(&cc.egui_ctx);
+            shared::theme::apply(&cc.egui_ctx);
             Ok(Box::<app::App>::default())
         }),
     )
