@@ -42,9 +42,6 @@ pub enum HostStatus {
         peer: String,
         e2ee: bool,
     },
-    Locked {
-        reason: String,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -285,9 +282,6 @@ impl HostView {
     pub fn regenerate_credentials(&mut self) {
         self.session_code = generate_session_code();
         self.set_pin(generate_pin());
-        if matches!(self.status, HostStatus::Locked { .. }) {
-            self.status = HostStatus::Idle;
-        }
         self.push_audit(
             fill(
                 tr("Generated new session code {} and 6-digit E2EE PIN."),
@@ -426,6 +420,7 @@ impl HostView {
                 pin,
                 tx,
                 ctx,
+                cooldown: LOCKOUT_COOLDOWN,
             };
             if use_repeater {
                 run_repeater_host_loop(repeater_addr, session_code, run);
@@ -595,9 +590,7 @@ impl HostView {
                     self.consent_tx = None;
                     self.consent_since = None;
                     self.waiting_since = None;
-                    if !matches!(self.status, HostStatus::Locked { .. }) {
-                        self.status = HostStatus::Idle;
-                    }
+                    self.status = HostStatus::Idle;
                     self.push_audit(reason, false);
                     self.events_rx = None;
                 }
@@ -815,7 +808,6 @@ impl HostView {
             HostStatus::Waiting { .. } => Stage::Waiting,
             HostStatus::Pending { .. } => Stage::Pending,
             HostStatus::Active { .. } => Stage::Active,
-            HostStatus::Locked { .. } => Stage::Locked,
         }
     }
 
@@ -867,10 +859,8 @@ impl HostView {
             .corner_radius(CornerRadius::same(18))
             .show(ui, |ui| {
                 ui.set_width(main_w);
-                if stage != Stage::Locked {
-                    self.stepper(ui, stage);
-                    ui.add(egui::Separator::default().spacing(0.0));
-                }
+                self.stepper(ui, stage);
+                ui.add(egui::Separator::default().spacing(0.0));
                 let pad = if main_w < 560.0 { 20 } else { 40 };
                 egui::Frame::NONE
                     .inner_margin(egui::Margin::symmetric(pad, 28))
@@ -881,7 +871,6 @@ impl HostView {
                             Stage::Waiting => self.waiting_view(ui),
                             Stage::Pending => self.pending_view(ui),
                             Stage::Active => self.active_view(ui),
-                            Stage::Locked => self.locked_view(ui),
                         }
                     });
             });
@@ -901,7 +890,6 @@ impl HostView {
             Stage::Waiting => 0,
             Stage::Pending => 1,
             Stage::Active => 2,
-            Stage::Locked => -1,
         };
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(28, 16))
@@ -1538,37 +1526,6 @@ impl HostView {
         }
     }
 
-    fn locked_view(&mut self, ui: &mut Ui) {
-        let p = theme::palette(ui.ctx());
-        let reason = match &self.status {
-            HostStatus::Locked { reason } => reason.clone(),
-            _ => String::new(),
-        };
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            icon_tile(ui, Icon::ShieldAlert, 64.0);
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(tr("Sharing is locked"))
-                    .size(26.0)
-                    .strong()
-                    .color(p.danger),
-            );
-            ui.add_space(6.0);
-            ui.label(RichText::new(reason).size(14.0).color(p.text2));
-            ui.add_space(18.0);
-            let btn = theme::primary(fill(
-                tr("{}  Generate a new code"),
-                &[&(char::from(Icon::RefreshCw))],
-            ))
-            .min_size(egui::vec2(240.0, 48.0));
-            if ui.add(btn).clicked() {
-                self.regenerate_credentials();
-            }
-        });
-        self.last_session_note(ui);
-    }
-
     fn last_session_note(&self, ui: &mut Ui) {
         let p = theme::palette(ui.ctx());
         if let Some((peer, secs)) = &self.last_session {
@@ -1836,7 +1793,6 @@ enum Stage {
     Waiting,
     Pending,
     Active,
-    Locked,
 }
 
 /// `3.2 MB`, for the activity list.
@@ -2105,6 +2061,8 @@ struct HostRun {
     pin: Arc<Mutex<String>>,
     tx: Sender<HostUiEvent>,
     ctx: egui::Context,
+    /// Pause after a burned PIN; a field so a test does not wait 30 s.
+    cooldown: Duration,
 }
 
 impl HostRun {
@@ -2128,7 +2086,7 @@ impl HostRun {
         *self.pin.lock().unwrap() = generate_pin();
         *limiter = BruteForceLimiter::new();
         let from = Instant::now();
-        while from.elapsed() < LOCKOUT_COOLDOWN && !self.stopped() {
+        while from.elapsed() < self.cooldown && !self.stopped() {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
@@ -2363,6 +2321,95 @@ fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: Host
 mod tests {
     use super::*;
 
+    /// Starts the real listener loop on a free local port and returns what a test needs to drive it.
+    fn live_host(
+        pin: &str,
+    ) -> (
+        String,
+        HostRun,
+        Receiver<HostUiEvent>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let addr = format!("127.0.0.1:{port}");
+        let (tx, rx) = mpsc::channel();
+        let run = HostRun {
+            config: HostConfig::default(),
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            active_stream: Arc::new(Mutex::new(None)),
+            pin: Arc::new(Mutex::new(pin.into())),
+            tx,
+            ctx: egui::Context::default(),
+            cooldown: Duration::from_millis(100),
+        };
+        let (a, r) = (addr.clone(), run.clone());
+        let handle = std::thread::spawn(move || run_listener_host_loop(a, true, r));
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            HostUiEvent::Waiting { .. } => {}
+            _ => panic!("the host did not start waiting"),
+        }
+        (addr, run, rx, handle)
+    }
+
+    #[test]
+    fn three_wrong_pins_burn_the_pin_and_the_host_keeps_listening() {
+        let (addr, run, rx, handle) = live_host("123456");
+        for _ in 0..3 {
+            let mut s = TcpStream::connect(&addr).unwrap();
+            assert!(crate::shared::crypto::viewer_e2ee_handshake(&mut s, "000000").is_err());
+        }
+        // The third failure is reported as burning the PIN...
+        let mut burned = false;
+        while let Ok(ev) = rx.recv_timeout(Duration::from_secs(5)) {
+            if matches!(ev, HostUiEvent::PinFailed { locked: true, .. }) {
+                burned = true;
+                break;
+            }
+        }
+        assert!(burned);
+        // ...the PIN is replaced (after the pause)...
+        let started = Instant::now();
+        while run.current_pin() == "123456" && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let new_pin = run.current_pin();
+        assert_ne!(new_pin, "123456");
+        // ...and the host takes the next connection: with the new PIN it asks the person sharing.
+        let new_for_viewer = new_pin.clone();
+        let viewer = std::thread::spawn(move || {
+            let mut s = TcpStream::connect(&addr).unwrap();
+            let keys = crate::shared::crypto::viewer_e2ee_handshake(&mut s, &new_for_viewer);
+            let ok = keys.is_ok();
+            // The host asks the person sharing only after the RFB handshake, so go on with it.
+            if let Ok(keys) = keys {
+                let mut e2ee = crate::shared::crypto::E2eeStream::new(&mut s, keys);
+                let creds = Credentials {
+                    user: String::new(),
+                    password: String::new(),
+                    pin: String::new(),
+                };
+                let _ = crate::features::connection::handshake::perform(&mut e2ee, &creds);
+            }
+            ok
+        });
+        let mut asked = false;
+        while let Ok(ev) = rx.recv_timeout(Duration::from_secs(5)) {
+            if let HostUiEvent::Consent { reply, .. } = ev {
+                asked = true;
+                let _ = reply.send(false);
+                break;
+            }
+        }
+        assert!(asked, "the host stopped listening after the burn");
+        assert!(viewer.join().unwrap());
+        run.stop_flag.store(true, Ordering::SeqCst);
+        handle.join().unwrap();
+    }
+
     #[test]
     fn a_burned_pin_reaches_the_screen_and_sharing_stays_on() {
         let mut v = HostView::default();
@@ -2523,19 +2570,13 @@ mod tests {
     }
 
     #[test]
-    fn regenerate_credentials_resets_lockout_and_records_audit_log() {
-        let mut view = HostView {
-            status: HostStatus::Locked {
-                reason: "3 failed attempts".into(),
-            },
-            ..Default::default()
-        };
-        let old_code = view.session_code.clone();
+    fn regenerate_credentials_makes_a_new_pair_and_records_audit_log() {
+        let mut view = HostView::default();
+        let old = (view.session_code.clone(), view.pin.clone());
         view.regenerate_credentials();
-        assert_eq!(view.status, HostStatus::Idle);
         assert_eq!(view.session_code.len(), 6);
         assert_eq!(view.pin.len(), PIN_DIGITS);
+        assert_ne!((view.session_code.clone(), view.pin.clone()), old);
         assert!(!view.audit_log.is_empty());
-        let _ = old_code;
     }
 }

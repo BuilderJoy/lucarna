@@ -461,10 +461,6 @@ static ES: &[(&str, &str)] = &[
     ("Listen on", "Escuchar en"),
     ("Local disk", "Disco local"),
     (
-        "Locked after {} failed PIN attempts from {}. Regenerate code to resume.",
-        "Bloqueado tras {} intentos de PIN fallidos desde {}. Genera un código nuevo para continuar.",
-    ),
-    (
         "Lucarna QuickSupport Invitation\nRepeater: {}\nSession Code: {} (ID:{})\nE2EE PIN: {}",
         "Invitación de Lucarna QuickSupport\nRepetidor: {}\nCódigo de sesión: {} (ID:{})\nPIN E2EE: {}",
     ),
@@ -626,7 +622,6 @@ static ES: &[(&str, &str)] = &[
     ("Share this device ●", "Compartir este equipo ●"),
     ("Share this screen", "Compartir esta pantalla"),
     ("Sharing", "Compartiendo"),
-    ("Sharing is locked", "El uso compartido está bloqueado"),
     (
         "Sharing this computer · waiting on {}",
         "Compartiendo este equipo · esperando en {}",
@@ -759,7 +754,6 @@ static ES: &[(&str, &str)] = &[
     ("{}  End session now", "{}  Terminar sesión ahora"),
     ("{}  Export connections…", "{}  Exportar conexiones…"),
     ("{}  Favorites", "{}  Favoritos"),
-    ("{}  Generate a new code", "{}  Generar un código nuevo"),
     ("{}  Hidden", "{}  Ocultas"),
     ("{}  Hide", "{}  Ocultar"),
     ("{}  Import connections…", "{}  Importar conexiones…"),
