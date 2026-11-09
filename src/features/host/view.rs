@@ -4,6 +4,7 @@
 //! - Permanent unhideable active-session security banner with instant red "Terminate Now" button
 //! - Real-time anti-RAT audit log and virtual drive (`M:\`, `D:\`, `H:\`, `V:\`) status inspector
 
+use crate::shared::i18n::{fill, tr};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{
     Arc, Mutex,
@@ -142,9 +143,9 @@ impl HostView {
             self.status = HostStatus::Idle;
         }
         self.push_audit(
-            format!(
-                "Generated new session code {} and 4-digit E2EE PIN.",
-                format_code(&self.session_code)
+            fill(
+                tr("Generated new session code {} and 4-digit E2EE PIN."),
+                &[&(format_code(&self.session_code))],
             ),
             false,
         );
@@ -153,25 +154,26 @@ impl HostView {
     pub fn format_invitation(&self) -> String {
         let code_fmt = format_code(&self.session_code);
         if self.use_repeater {
-            format!(
-                "Lucarna QuickSupport Invitation\nRepeater: {}\nSession Code: {} (ID:{})\nE2EE PIN: {}",
-                self.repeater_addr.trim(),
-                code_fmt,
-                normalize_code(&self.session_code),
-                self.pin
+            fill(
+                tr(
+                    "Lucarna QuickSupport Invitation\nRepeater: {}\nSession Code: {} (ID:{})\nE2EE PIN: {}",
+                ),
+                &[
+                    &(self.repeater_addr.trim()),
+                    &code_fmt,
+                    &(normalize_code(&self.session_code)),
+                    &self.pin,
+                ],
             )
         } else if self.use_e2ee_pin {
-            format!(
-                "Lucarna Studio E2EE Invitation\nAddress: {}\nSession Code: {}\nE2EE PIN: {}",
-                self.bind_addr.trim(),
-                code_fmt,
-                self.pin
+            fill(
+                tr("Lucarna Studio E2EE Invitation\nAddress: {}\nSession Code: {}\nE2EE PIN: {}"),
+                &[&(self.bind_addr.trim()), &code_fmt, &self.pin],
             )
         } else {
-            format!(
-                "Lucarna Studio Host\nAddress: {}\nPassword: {}",
-                self.bind_addr.trim(),
-                self.studio_password
+            fill(
+                tr("Lucarna Studio Host\nAddress: {}\nPassword: {}"),
+                &[&(self.bind_addr.trim()), &self.studio_password],
             )
         }
     }
@@ -252,7 +254,7 @@ impl HostView {
 
         std::thread::spawn(move || {
             let config = HostConfig {
-                desktop_name: "Lucarna Studio Host".into(),
+                desktop_name: tr("Lucarna Studio Host").into(),
                 password,
                 view_only,
                 fixed_challenge: None,
@@ -310,13 +312,16 @@ impl HostView {
                         e2ee,
                     };
                     self.push_audit(
-                        format!(
-                            "Waiting for remote connection on {endpoint} ({}).",
-                            if e2ee {
-                                "E2EE ChaCha20-Poly1305"
-                            } else {
-                                "RFB 3.8"
-                            }
+                        fill(
+                            tr("Waiting for remote connection on {} ({})."),
+                            &[
+                                &endpoint,
+                                &(if e2ee {
+                                    tr("E2EE ChaCha20-Poly1305")
+                                } else {
+                                    tr("RFB 3.8")
+                                }),
+                            ],
                         ),
                         false,
                     );
@@ -328,13 +333,16 @@ impl HostView {
                         e2ee,
                     };
                     self.push_audit(
-                        format!(
-                            "Session established with {peer} ({}).",
-                            if e2ee {
-                                "Verified E2EE PIN"
-                            } else {
-                                "VNC Auth"
-                            }
+                        fill(
+                            tr("Session established with {} ({})."),
+                            &[
+                                &peer,
+                                &(if e2ee {
+                                    tr("Verified E2EE PIN")
+                                } else {
+                                    tr("VNC Auth")
+                                }),
+                            ],
                         ),
                         false,
                     );
@@ -343,7 +351,10 @@ impl HostView {
                     if let Some(t) = self.session_started.take() {
                         self.last_session = Some((peer.clone(), t.elapsed().as_secs()));
                     }
-                    self.push_audit(format!("Session ended with {peer}: {reason}"), false);
+                    self.push_audit(
+                        fill(tr("Session ended with {}: {}"), &[&peer, &reason]),
+                        false,
+                    );
                 }
                 HostUiEvent::PinFailed {
                     peer,
@@ -352,12 +363,18 @@ impl HostView {
                 } => {
                     self.failed_pins += 1;
                     self.push_audit(
-                        format!("SECURITY ALERT: Failed E2EE PIN attempt #{attempts} from {peer}."),
+                        fill(
+                            tr("SECURITY ALERT: Failed E2EE PIN attempt #{} from {}."),
+                            &[&attempts, &peer],
+                        ),
                         true,
                     );
                     if locked {
-                        let reason = format!(
-                            "Locked after {attempts} failed PIN attempts from {peer}. Regenerate code to resume."
+                        let reason = fill(
+                            tr(
+                                "Locked after {} failed PIN attempts from {}. Regenerate code to resume.",
+                            ),
+                            &[&attempts, &peer],
                         );
                         self.status = HostStatus::Locked {
                             reason: reason.clone(),
@@ -408,12 +425,12 @@ impl HostView {
         let (is_active, headline, e2ee) = match &self.status {
             HostStatus::Active { peer, e2ee } => (
                 true,
-                format!("Assistance session active with {peer}"),
+                fill(tr("Assistance session active with {}"), &[&peer]),
                 *e2ee,
             ),
             HostStatus::Waiting { endpoint, e2ee } => (
                 false,
-                format!("Sharing this computer · waiting on {endpoint}"),
+                fill(tr("Sharing this computer · waiting on {}"), &[&endpoint]),
                 *e2ee,
             ),
             _ => return,
@@ -421,12 +438,12 @@ impl HostView {
         let sub = format!(
             "{} · {}",
             if e2ee {
-                "Encrypted end to end"
+                tr("Encrypted end to end")
             } else {
-                "Not encrypted"
+                tr("Not encrypted")
             },
             self.elapsed_label()
-                .unwrap_or_else(|| "nobody connected yet".into())
+                .unwrap_or_else(|| tr("nobody connected yet").into())
         );
         let border = if is_active {
             Color32::from_rgb(0xf8, 0x71, 0x71)
@@ -434,16 +451,16 @@ impl HostView {
             theme::ACCENT
         };
         let chips = [
-            (Icon::Eye, "Screen"),
+            (Icon::Eye, tr("Screen")),
             (
                 Icon::MousePointer2,
                 if self.view_only {
-                    "View only"
+                    tr("View only")
                 } else {
-                    "Control"
+                    tr("Control")
                 },
             ),
-            (Icon::Folder, "Files"),
+            (Icon::Folder, tr("Files")),
         ];
         let width = 780.0;
         let mut builder = egui::ViewportBuilder::default()
@@ -487,9 +504,9 @@ impl HostView {
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 let label = if is_active {
-                                    "End session now"
+                                    tr("End session now")
                                 } else {
-                                    "Stop sharing"
+                                    tr("Stop sharing")
                                 };
                                 let btn = egui::Button::new(
                                     RichText::new(format!("{}  {label}", char::from(Icon::Power)))
@@ -500,7 +517,9 @@ impl HostView {
                                 .min_size(egui::vec2(0.0, 40.0));
                                 if ui
                                     .add(btn)
-                                    .on_hover_text("Disconnect the remote person and stop sharing")
+                                    .on_hover_text(tr(
+                                        "Disconnect the remote person and stop sharing",
+                                    ))
                                     .clicked()
                                 {
                                     stop = true;
@@ -601,7 +620,7 @@ impl HostView {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    let names = ["Waiting", "Connecting", "Active", "Ended"];
+                    let names = [tr("Waiting"), tr("Connecting"), tr("Active"), tr("Ended")];
                     for (i, name) in names.iter().enumerate() {
                         let i = i as i32;
                         let done = i < current;
@@ -658,11 +677,11 @@ impl HostView {
             ui.add_space(8.0);
             icon_tile(ui, Icon::MonitorUp, 72.0);
             ui.add_space(14.0);
-            ui.label(RichText::new("Let someone help you").size(28.0).strong());
+            ui.label(RichText::new(tr("Let someone help you")).size(28.0).strong());
             ui.add_space(6.0);
             ui.label(
                 RichText::new(
-                    "Lucarna creates a one-time code and PIN. Give both to the person you trust. Nothing is shared until you start.",
+                    tr("Lucarna creates a one-time code and PIN. Give both to the person you trust. Nothing is shared until you start."),
                 )
                 .size(15.0)
                 .color(p.text2),
@@ -670,18 +689,18 @@ impl HostView {
             ui.add_space(18.0);
             ui.horizontal(|ui| {
                 ui.add_space(((ui.available_width() - 330.0) / 2.0).max(0.0));
-                if theme::chip(ui, Icon::Network, "Direct (LAN)", !self.use_repeater).clicked() {
+                if theme::chip(ui, Icon::Network, tr("Direct (LAN)"), !self.use_repeater).clicked() {
                     self.use_repeater = false;
                 }
-                if theme::chip(ui, Icon::Globe, "Repeater (through NAT)", self.use_repeater).clicked() {
+                if theme::chip(ui, Icon::Globe, tr("Repeater (through NAT)"), self.use_repeater).clicked() {
                     self.use_repeater = true;
                 }
             });
             ui.add_space(10.0);
             let (label, field, hint) = if self.use_repeater {
-                ("Repeater", &mut self.repeater_addr, "repeater.example.com:5500")
+                (tr("Repeater"), &mut self.repeater_addr, "repeater.example.com:5500")
             } else {
-                ("Listen on", &mut self.bind_addr, "0.0.0.0:5950")
+                (tr("Listen on"), &mut self.bind_addr, "0.0.0.0:5950")
             };
             ui.allocate_ui(egui::vec2(420.0, 70.0), |ui| {
                 ui.vertical(|ui| {
@@ -699,11 +718,11 @@ impl HostView {
                 ui.add_space(6.0);
                 ui.checkbox(
                     &mut self.use_e2ee_pin,
-                    "Require the PIN and encrypt the session (recommended)",
+                    tr("Require the PIN and encrypt the session (recommended)"),
                 );
                 if !self.use_e2ee_pin {
                     ui.allocate_ui(egui::vec2(420.0, 56.0), |ui| {
-                        ui.label(RichText::new("Classic VNC password").size(12.0).color(p.text2));
+                        ui.label(RichText::new(tr("Classic VNC password")).size(12.0).color(p.text2));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.studio_password)
                                 .password(true)
@@ -713,7 +732,7 @@ impl HostView {
                 }
             }
             ui.add_space(14.0);
-            let go = theme::primary(format!("Wait for connection  {}", char::from(Icon::ArrowRight)))
+            let go = theme::primary(fill(tr("Wait for connection  {}"), &[&(char::from(Icon::ArrowRight))]))
                 .min_size(egui::vec2(260.0, 52.0));
             if ui.add(go).clicked() {
                 let ctx = ui.ctx().clone();
@@ -735,13 +754,13 @@ impl HostView {
                 .circle_filled(r.center(), 5.0, theme::ACCENT.gamma_multiply(pulse));
             ui.ctx().request_repaint_after(Duration::from_millis(250));
             ui.label(
-                RichText::new("Waiting for the other person")
+                RichText::new(tr("Waiting for the other person"))
                     .size(15.0)
                     .strong(),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
-                    RichText::new(format!("via {endpoint}"))
+                    RichText::new(fill(tr("via {}"), &[&endpoint]))
                         .monospace()
                         .size(12.0)
                         .color(p.text3),
@@ -752,7 +771,7 @@ impl HostView {
         ui.columns(2, |cols| {
             code_card(
                 &mut cols[0],
-                "Session code",
+                tr("Session code"),
                 &format_code(&self.session_code),
                 p.text,
                 None,
@@ -760,7 +779,7 @@ impl HostView {
             let mut refresh = false;
             code_card(
                 &mut cols[1],
-                "PIN",
+                tr("PIN"),
                 &self.pin,
                 p.accent_text,
                 Some(&mut refresh),
@@ -773,9 +792,9 @@ impl HostView {
         ui.horizontal(|ui| {
             let copied = self.copied_until.is_some_and(|t| Instant::now() < t);
             let label = if copied {
-                format!("{}  Invitation copied", char::from(Icon::Check))
+                fill(tr("{}  Invitation copied"), &[&(char::from(Icon::Check))])
             } else {
-                format!("{}  Copy invitation", char::from(Icon::Copy))
+                fill(tr("{}  Copy invitation"), &[&(char::from(Icon::Copy))])
             };
             let w = (ui.available_width() - 150.0).max(200.0);
             if ui
@@ -786,7 +805,7 @@ impl HostView {
                 self.copied_until = Some(Instant::now() + Duration::from_secs(2));
             }
             if ui
-                .add(egui::Button::new("Stop waiting").min_size(egui::vec2(0.0, 48.0)))
+                .add(egui::Button::new(tr("Stop waiting")).min_size(egui::vec2(0.0, 48.0)))
                 .clicked()
             {
                 self.stop_sharing();
@@ -809,9 +828,11 @@ impl HostView {
             });
         ui.add_space(10.0);
         ui.label(
-            RichText::new("The code ends when you stop waiting. Three wrong PINs revoke it.")
-                .size(12.0)
-                .color(p.text3),
+            RichText::new(tr(
+                "The code ends when you stop waiting. Three wrong PINs revoke it.",
+            ))
+            .size(12.0)
+            .color(p.text3),
         );
         self.last_session_note(ui);
     }
@@ -833,7 +854,7 @@ impl HostView {
                     icon_tile(ui, Icon::Monitor, 44.0);
                     ui.vertical(|ui| {
                         ui.label(
-                            RichText::new(format!("Session active with {peer}"))
+                            RichText::new(fill(tr("Session active with {}"), &[&peer]))
                                 .size(17.0)
                                 .strong(),
                         );
@@ -841,9 +862,9 @@ impl HostView {
                             RichText::new(format!(
                                 "{} · {}",
                                 if e2ee {
-                                    "Encrypted end to end"
+                                    tr("Encrypted end to end")
                                 } else {
-                                    "Not encrypted"
+                                    tr("Not encrypted")
                                 },
                                 self.elapsed_label().unwrap_or_default()
                             ))
@@ -853,9 +874,12 @@ impl HostView {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let btn = egui::Button::new(
-                            RichText::new(format!("{}  End session now", char::from(Icon::Power)))
-                                .strong()
-                                .color(Color32::WHITE),
+                            RichText::new(fill(
+                                tr("{}  End session now"),
+                                &[&(char::from(Icon::Power))],
+                            ))
+                            .strong()
+                            .color(Color32::WHITE),
                         )
                         .fill(Color32::from_rgb(0xdc, 0x26, 0x26))
                         .min_size(egui::vec2(0.0, 46.0));
@@ -869,25 +893,25 @@ impl HostView {
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 24.0) / 3.0;
             let control = if self.view_only {
-                "View only"
+                tr("View only")
             } else {
-                "Controlling"
+                tr("Controlling")
             };
             for (icon, title, note) in [
                 (
                     Icon::Eye,
-                    "Screen shared".to_string(),
-                    "Always on while sharing".to_string(),
+                    tr("Screen shared").to_string(),
+                    tr("Always on while sharing").to_string(),
                 ),
                 (
                     Icon::MousePointer2,
                     control.to_string(),
-                    "Paused when you move".to_string(),
+                    tr("Paused when you move").to_string(),
                 ),
                 (
                     Icon::Folder,
-                    "Files".to_string(),
-                    format!("{} shared folders", self.drives.roots().len()),
+                    tr("Files").to_string(),
+                    fill(tr("{} shared folders"), &[&(self.drives.roots().len())]),
                 ),
             ] {
                 egui::Frame::NONE
@@ -909,10 +933,10 @@ impl HostView {
         });
         ui.add_space(18.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Activity").size(14.0).strong());
+            ui.label(RichText::new(tr("Activity")).size(14.0).strong());
             theme::count_pill(ui, self.audit_log.len());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if !self.audit_log.is_empty() && ui.small_button("Clear").clicked() {
+                if !self.audit_log.is_empty() && ui.small_button(tr("Clear")).clicked() {
                     self.audit_log.clear();
                 }
             });
@@ -962,7 +986,7 @@ impl HostView {
             icon_tile(ui, Icon::ShieldAlert, 64.0);
             ui.add_space(12.0);
             ui.label(
-                RichText::new("Sharing is locked")
+                RichText::new(tr("Sharing is locked"))
                     .size(26.0)
                     .strong()
                     .color(p.danger),
@@ -970,9 +994,9 @@ impl HostView {
             ui.add_space(6.0);
             ui.label(RichText::new(reason).size(14.0).color(p.text2));
             ui.add_space(18.0);
-            let btn = theme::primary(format!(
-                "{}  Generate a new code",
-                char::from(Icon::RefreshCw)
+            let btn = theme::primary(fill(
+                tr("{}  Generate a new code"),
+                &[&(char::from(Icon::RefreshCw))],
             ))
             .min_size(egui::vec2(240.0, 48.0));
             if ui.add(btn).clicked() {
@@ -1003,22 +1027,22 @@ impl HostView {
         let p = theme::palette(ui.ctx());
         let running = self.is_running();
         side_card(ui, |ui| {
-            ui.label(RichText::new("What they can do").size(15.0).strong());
+            ui.label(RichText::new(tr("What they can do")).size(15.0).strong());
             ui.add_space(8.0);
             let mut control = !self.view_only;
             perm_row(
                 ui,
                 Icon::Eye,
-                "See my screen",
-                "Always on while sharing",
+                tr("See my screen"),
+                tr("Always on while sharing"),
                 &mut true,
                 false,
             );
             if perm_row(
                 ui,
                 Icon::MousePointer2,
-                "Control mouse and keyboard",
-                "Your mouse always wins",
+                tr("Control mouse and keyboard"),
+                tr("Your mouse always wins"),
                 &mut control,
                 !running,
             ) {
@@ -1028,8 +1052,8 @@ impl HostView {
             perm_row(
                 ui,
                 Icon::Folder,
-                "Transfer files",
-                "Only these folders",
+                tr("Transfer files"),
+                tr("Only these folders"),
                 &mut files,
                 false,
             );
@@ -1039,7 +1063,7 @@ impl HostView {
                     let name = path
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "Volumes".into());
+                        .unwrap_or_else(|| tr("Volumes").into());
                     egui::Frame::NONE
                         .fill(p.elevated)
                         .corner_radius(CornerRadius::same(6))
@@ -1078,25 +1102,25 @@ impl HostView {
             .order(Order::Foreground)
             .fixed_size([520.0, 0.0])
             .show(ctx, |ui| {
-                close = theme::window_header(ui, Icon::Lock, "Connect with a code", |_| {});
+                close = theme::window_header(ui, Icon::Lock, tr("Connect with a code"), |_| {});
                 egui::Frame::NONE
                     .inner_margin(egui::Margin::symmetric(24, 18))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(
-                            RichText::new("Ask the other person for their code and PIN")
+                            RichText::new(tr("Ask the other person for their code and PIN"))
                                 .size(13.0)
                                 .color(p.text2),
                         );
                         ui.add_space(16.0);
-                        ui.label(RichText::new("Session code").size(12.0).strong().color(p.text2));
+                        ui.label(RichText::new(tr("Session code")).size(12.0).strong().color(p.text2));
                         ui.add_space(6.0);
                         digit_boxes(ui, "join_code", &mut self.viewer_target_code, 6, false);
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("PIN").size(12.0).strong().color(p.text2));
+                            ui.label(RichText::new(tr("PIN")).size(12.0).strong().color(p.text2));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let label = if self.show_pin { "Hide" } else { "Show" };
+                                let label = if self.show_pin { tr("Hide") } else { tr("Show") };
                                 if ui
                                     .add(
                                         egui::Button::new(RichText::new(label).size(12.0).color(p.text2))
@@ -1112,10 +1136,10 @@ impl HostView {
                         ui.add_space(6.0);
                         digit_boxes(ui, "join_pin", &mut self.viewer_pin, 4, !self.show_pin);
                         ui.add_space(14.0);
-                        egui::CollapsingHeader::new(RichText::new("Repeater or direct address").size(13.0).strong())
+                        egui::CollapsingHeader::new(RichText::new(tr("Repeater or direct address")).size(13.0).strong())
                             .default_open(false)
                             .show(ui, |ui| {
-                                ui.label(RichText::new("Repeater").size(12.0).color(p.text2));
+                                ui.label(RichText::new(tr("Repeater")).size(12.0).color(p.text2));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.viewer_repeater)
                                         .font(egui::FontId::monospace(13.0))
@@ -1124,7 +1148,7 @@ impl HostView {
                                 );
                                 ui.add_space(6.0);
                                 ui.label(
-                                    RichText::new("Direct address (instead of a code)")
+                                    RichText::new(tr("Direct address (instead of a code)"))
                                         .size(12.0)
                                         .color(p.text2),
                                 );
@@ -1134,28 +1158,25 @@ impl HostView {
                                         .hint_text("192.168.1.40:5950")
                                         .desired_width(f32::INFINITY),
                                 );
-                                ui.checkbox(&mut self.viewer_view_only, "View only");
+                                ui.checkbox(&mut self.viewer_view_only, tr("View only"));
                             });
                         ui.add_space(14.0);
                         ui.label(
-                            RichText::new(format!(
-                                "{} End-to-end encrypted. The repeater relays the session but cannot read it, and the PIN never leaves this computer.",
-                                char::from(Icon::ShieldCheck)
-                            ))
+                            RichText::new(fill(tr("{} End-to-end encrypted. The repeater relays the session but cannot read it, and the PIN never leaves this computer."), &[&(char::from(Icon::ShieldCheck))]))
                             .size(12.0)
                             .color(p.text3),
                         );
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .add(egui::Button::new("Cancel").min_size(egui::vec2(0.0, 48.0)))
+                                .add(egui::Button::new(tr("Cancel")).min_size(egui::vec2(0.0, 48.0)))
                                 .clicked()
                             {
                                 close = true;
                             }
                             let ready = self.build_viewer_connect_request().is_some();
                             let w = ui.available_width();
-                            let go = theme::primary(format!("Connect  {}", char::from(Icon::ArrowRight)))
+                            let go = theme::primary(fill(tr("Connect  {}"), &[&(char::from(Icon::ArrowRight))]))
                                 .min_size(egui::vec2(w, 48.0));
                             if ui.add_enabled(ready, go).clicked() {
                                 request = self.build_viewer_connect_request();
@@ -1217,7 +1238,7 @@ fn code_card(ui: &mut Ui, title: &str, value: &str, color: Color32, refresh: Opt
                                 egui::Button::new(char::from(Icon::RefreshCw).to_string())
                                     .min_size(egui::vec2(30.0, 30.0)),
                             )
-                            .on_hover_text("Generate a new code and PIN")
+                            .on_hover_text(tr("Generate a new code and PIN"))
                             .clicked()
                         {
                             *r = true;
@@ -1307,28 +1328,28 @@ fn perm_row(
 fn safety_card(ui: &mut Ui) {
     let p = theme::palette(ui.ctx());
     side_card(ui, |ui| {
-        ui.label(RichText::new("You stay in control").size(15.0).strong());
+        ui.label(RichText::new(tr("You stay in control")).size(15.0).strong());
         ui.add_space(8.0);
         for (icon, title, body) in [
             (
                 Icon::Lock,
-                "End-to-end encrypted",
-                "The repeater only relays bytes it cannot read.",
+                tr("End-to-end encrypted"),
+                tr("The repeater only relays bytes it cannot read."),
             ),
             (
                 Icon::ShieldCheck,
-                "Three tries, then locked",
-                "A wrong PIN three times revokes the code.",
+                tr("Three tries, then locked"),
+                tr("A wrong PIN three times revokes the code."),
             ),
             (
                 Icon::MousePointer2,
-                "Your mouse wins",
-                "Move yours and remote input pauses for 2 seconds.",
+                tr("Your mouse wins"),
+                tr("Move yours and remote input pauses for 2 seconds."),
             ),
             (
                 Icon::Eye,
-                "Always visible",
-                "A banner stays on top while anyone is connected.",
+                tr("Always visible"),
+                tr("A banner stays on top while anyone is connected."),
             ),
         ] {
             ui.horizontal(|ui| {
@@ -1410,8 +1431,9 @@ fn run_listener_host_loop(
     let listener = match TcpListener::bind(&bind_addr) {
         Ok(l) => l,
         Err(e) => {
-            let _ = tx.send(HostUiEvent::Stopped(format!(
-                "Failed to bind Host port {bind_addr}: {e}"
+            let _ = tx.send(HostUiEvent::Stopped(fill(
+                tr("Failed to bind Host port {}: {}"),
+                &[&bind_addr, &e],
             )));
             ctx.request_repaint();
             return;
@@ -1480,7 +1502,7 @@ fn run_listener_host_loop(
                 } else {
                     let _ = tx.send(HostUiEvent::Disconnected {
                         peer,
-                        reason: "Client closed session".into(),
+                        reason: tr("Client closed session").into(),
                     });
                 }
                 if !stop_flag.load(Ordering::SeqCst) && !limiter.is_locked() {
@@ -1495,7 +1517,7 @@ fn run_listener_host_loop(
                 std::thread::sleep(Duration::from_millis(80));
             }
             Err(e) => {
-                let _ = tx.send(HostUiEvent::Stopped(format!("Accept error: {e}")));
+                let _ = tx.send(HostUiEvent::Stopped(fill(tr("Accept error: {}"), &[&e])));
                 ctx.request_repaint();
                 return;
             }
@@ -1519,8 +1541,9 @@ fn run_repeater_host_loop(
         let mut stream = match TcpStream::connect(&repeater_addr) {
             Ok(s) => s,
             Err(e) => {
-                let _ = tx.send(HostUiEvent::Stopped(format!(
-                    "Failed to reach repeater {repeater_addr}: {e}"
+                let _ = tx.send(HostUiEvent::Stopped(fill(
+                    tr("Failed to reach repeater {}: {}"),
+                    &[&repeater_addr, &e],
                 )));
                 ctx.request_repaint();
                 return;
@@ -1528,8 +1551,9 @@ fn run_repeater_host_loop(
         };
         let _ = stream.set_nodelay(true);
         if let Err(e) = register_repeater_mode_ii(&mut stream, &session_code) {
-            let _ = tx.send(HostUiEvent::Stopped(format!(
-                "Failed to register ID:{session_code} on repeater: {e}"
+            let _ = tx.send(HostUiEvent::Stopped(fill(
+                tr("Failed to register ID:{} on repeater: {}"),
+                &[&session_code, &e],
             )));
             ctx.request_repaint();
             return;
@@ -1549,7 +1573,7 @@ fn run_repeater_host_loop(
             Ok(()) => {
                 *active_stream.lock().unwrap() = None;
                 let _ = tx.send(HostUiEvent::Stopped(
-                    "Repeater E2EE session finished.".into(),
+                    tr("Repeater E2EE session finished.").into(),
                 ));
                 ctx.request_repaint();
                 return;
@@ -1563,7 +1587,7 @@ fn run_repeater_host_loop(
                         locked: limiter.is_locked(),
                     });
                 } else {
-                    let _ = tx.send(HostUiEvent::Stopped(format!("Session closed: {e}")));
+                    let _ = tx.send(HostUiEvent::Stopped(fill(tr("Session closed: {}"), &[&e])));
                 }
                 ctx.request_repaint();
                 if stop_flag.load(Ordering::SeqCst) || limiter.is_locked() {

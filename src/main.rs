@@ -32,6 +32,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             shared::theme::apply(&cc.egui_ctx);
+            shared::i18n::init(&cc.egui_ctx);
             Ok(Box::<app::App>::default())
         }),
     )

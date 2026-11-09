@@ -1,3 +1,4 @@
+use crate::shared::i18n::{fill, tr};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -79,16 +80,18 @@ impl FilesView {
                 entries.sort_by_key(|e| (e.name != "..", !e.is_dir, e.name.to_lowercase()));
                 (self.path, self.entries) = (path, entries);
             }
-            Update::Inaccessible => self.status = "That folder can't be read on the server.".into(),
+            Update::Inaccessible => {
+                self.status = tr("That folder can't be read on the server.").into()
+            }
             Update::Progress { name, done, total } => self.progress = Some((name, done, total)),
             Update::Downloaded(dest) => {
                 self.progress = None;
-                self.status = format!("Saved to {}", dest.display());
+                self.status = fill(tr("Saved to {}"), &[&(dest.display())]);
                 self.refresh_local();
             }
             Update::Uploaded(name) => {
                 self.progress = None;
-                self.status = format!("Uploaded {name}");
+                self.status = fill(tr("Uploaded {}"), &[&name]);
                 if !self.path.is_empty() {
                     files.list(&self.path);
                 }
@@ -173,11 +176,11 @@ impl FilesView {
 
     fn contents(&mut self, ui: &mut egui::Ui, files: &dyn FileOps) {
         let p = theme::palette(ui.ctx());
-        if theme::window_header(ui, Icon::Folder, "Files", |ui| {
+        if theme::window_header(ui, Icon::Folder, tr("Files"), |ui| {
             theme::tag(
                 ui,
                 Icon::Network,
-                "UltraVNC file transfer",
+                tr("UltraVNC file transfer"),
                 p.text2,
                 p.elevated,
             );
@@ -196,7 +199,7 @@ impl FilesView {
             note(
                 ui,
                 RichText::new(
-                    "No answer from the server. File transfer may be disabled in its UltraVNC settings.",
+                    tr("No answer from the server. File transfer may be disabled in its UltraVNC settings."),
                 )
                 .color(ui.visuals().warn_fg_color),
             );
@@ -209,14 +212,14 @@ impl FilesView {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     ui.spinner();
-                    ui.label("Asking the server for file transfer…");
+                    ui.label(tr("Asking the server for file transfer…"));
                 });
                 return;
             }
             Some(false) => {
                 note(
                     ui,
-                    RichText::new("The server refused file transfer.")
+                    RichText::new(tr("The server refused file transfer."))
                         .color(ui.visuals().warn_fg_color),
                 );
                 return;
@@ -250,12 +253,12 @@ impl FilesView {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Transfers").size(13.0).strong());
+                    ui.label(RichText::new(tr("Transfers")).size(13.0).strong());
                     let active = usize::from(self.progress.is_some());
                     theme::count_pill(ui, active + self.upload_queue.len());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
-                            RichText::new("Drop files on this window to upload")
+                            RichText::new(tr("Drop files on this window to upload"))
                                 .size(12.0)
                                 .color(p.text3),
                         );
@@ -284,7 +287,7 @@ impl FilesView {
                                             Layout::right_to_left(Align::Center),
                                             |ui| {
                                                 let q = if queued > 0 {
-                                                    format!(" · +{queued} queued")
+                                                    fill(tr(" · +{} queued"), &[&queued])
                                                 } else {
                                                     String::new()
                                                 };
@@ -312,7 +315,7 @@ impl FilesView {
                                             .fill(theme::ACCENT),
                                     );
                                 });
-                                if ui.add(theme::danger(ui, "Cancel")).clicked() {
+                                if ui.add(theme::danger(ui, tr("Cancel"))).clicked() {
                                     self.upload_queue.clear();
                                     files.cancel();
                                 }
@@ -323,7 +326,7 @@ impl FilesView {
                 } else {
                     ui.label(
                         RichText::new(
-                            "Nothing running. Pick a file on the left and press Upload, or double-click a file to send or fetch it.",
+                            tr("Nothing running. Pick a file on the left and press Upload, or double-click a file to send or fetch it."),
                         )
                         .size(12.0)
                         .color(p.text3),
@@ -338,18 +341,18 @@ impl FilesView {
         let mut upload = None;
 
         ui.horizontal(|ui| {
-            pane_title(ui, Icon::Laptop, "Local");
+            pane_title(ui, Icon::Laptop, tr("Local"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let sel = self.selected_local.clone();
                 let tip = if sel.is_none() {
-                    "Select a file below to upload (or double-click it)"
+                    tr("Select a file below to upload (or double-click it)")
                 } else {
-                    "Upload the selected file to the remote folder"
+                    tr("Upload the selected file to the remote folder")
                 };
                 if ui
                     .add_enabled(
                         can_upload && sel.is_some(),
-                        theme::primary(format!("{} Upload", char::from(Icon::Upload)))
+                        theme::primary(fill(tr("{} Upload"), &[&(char::from(Icon::Upload))]))
                             .min_size(egui::vec2(0.0, 32.0)),
                     )
                     .on_hover_text(tip)
@@ -358,7 +361,7 @@ impl FilesView {
                 {
                     upload = sel;
                 }
-                if icon_square(ui, Icon::RefreshCw, "Refresh local folder") {
+                if icon_square(ui, Icon::RefreshCw, tr("Refresh local folder")) {
                     self.refresh_local();
                 }
             });
@@ -367,18 +370,25 @@ impl FilesView {
         ui.horizontal_wrapped(|ui| {
             let mut go = None;
             let downloads = transfer::downloads_dir();
-            if theme::chip(ui, Icon::Download, "Downloads", self.local_dir == downloads).clicked() {
+            if theme::chip(
+                ui,
+                Icon::Download,
+                tr("Downloads"),
+                self.local_dir == downloads,
+            )
+            .clicked()
+            {
                 go = Some(downloads);
             }
             if let Some(home) = std::env::home_dir() {
-                let desktop = home.join("Desktop");
+                let desktop = home.join(tr("Desktop"));
                 if desktop.is_dir()
-                    && theme::chip(ui, Icon::Monitor, "Desktop", self.local_dir == desktop)
+                    && theme::chip(ui, Icon::Monitor, tr("Desktop"), self.local_dir == desktop)
                         .clicked()
                 {
                     go = Some(desktop);
                 }
-                if theme::chip(ui, Icon::House, "Home", self.local_dir == home).clicked() {
+                if theme::chip(ui, Icon::House, tr("Home"), self.local_dir == home).clicked() {
                     go = Some(home);
                 }
             }
@@ -392,7 +402,7 @@ impl FilesView {
 
         // Sticky column headers
         let local_cols = [LOCAL_SIZE_W, LOCAL_ACT_W];
-        table_header(ui, &local_cols, ["Name", "Size", ""]);
+        table_header(ui, &local_cols, [tr("Name"), tr("Size"), ""]);
 
         let mut go_dir = None;
         let scroll_h = (height - 214.0).max(80.0);
@@ -407,7 +417,10 @@ impl FilesView {
                     cell(ui, name, false, |ui| {
                         name_label(ui, Icon::CornerLeftUp, "..", false)
                     });
-                    if resp.on_hover_text("Double-click to go up").double_clicked() {
+                    if resp
+                        .on_hover_text(tr("Double-click to go up"))
+                        .double_clicked()
+                    {
                         go_dir = Some(parent.to_path_buf());
                     }
                 }
@@ -417,7 +430,10 @@ impl FilesView {
                     let icon = if e.is_dir { Icon::Folder } else { Icon::File };
                     cell(ui, name, false, |ui| name_label(ui, icon, &e.name, false));
                     if e.is_dir {
-                        if resp.on_hover_text("Double-click to open").double_clicked() {
+                        if resp
+                            .on_hover_text(tr("Double-click to open"))
+                            .double_clicked()
+                        {
                             go_dir = Some(e.path.clone());
                         }
                         continue;
@@ -431,9 +447,9 @@ impl FilesView {
                     let mut clicked_btn = false;
                     cell(ui, cols[1], false, |ui| {
                         let hint = if can_upload {
-                            "Upload to the remote folder"
+                            tr("Upload to the remote folder")
                         } else {
-                            "Select a remote folder first"
+                            tr("Select a remote folder first")
                         };
                         if icon_button(ui, Icon::Upload, hint, can_upload) {
                             upload = Some(e.path.clone());
@@ -451,7 +467,7 @@ impl FilesView {
                     }
                 }
             });
-        pane_footer(ui, &format!("{} items", self.local_entries.len()));
+        pane_footer(ui, &fill(tr("{} items"), &[&(self.local_entries.len())]));
         if let Some(dir) = go_dir {
             self.set_local_dir(dir);
         }
@@ -466,15 +482,18 @@ impl FilesView {
         let has_dir = !self.path.is_empty();
         let mut go = None;
         ui.horizontal(|ui| {
-            pane_title(ui, Icon::Server, "Remote");
+            pane_title(ui, Icon::Server, tr("Remote"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .add_enabled(
                         !busy && has_dir,
-                        egui::Button::new(format!("{} Folder", char::from(Icon::FolderPlus)))
-                            .min_size(egui::vec2(0.0, 32.0)),
+                        egui::Button::new(fill(
+                            tr("{} Folder"),
+                            &[&(char::from(Icon::FolderPlus))],
+                        ))
+                        .min_size(egui::vec2(0.0, 32.0)),
                     )
-                    .on_hover_text("Create a folder here")
+                    .on_hover_text(tr("Create a folder here"))
                     .clicked()
                 {
                     self.prompt = Some(Prompt::NewFolder(String::new()));
@@ -485,7 +504,7 @@ impl FilesView {
                         icon_square_button(Icon::RefreshCw)
                             .stroke(egui::Stroke::new(1.0, theme::palette(ui.ctx()).border)),
                     )
-                    .on_hover_text("Refresh remote folder")
+                    .on_hover_text(tr("Refresh remote folder"))
                     .clicked()
                 {
                     go = Some(self.path.clone());
@@ -497,23 +516,25 @@ impl FilesView {
             for (drive, kind) in &self.drives {
                 let (label, tip, icon) = match kind {
                     'h' => (
-                        "Home".to_string(),
-                        "Home folder: files you upload land here",
+                        tr("Home").to_string(),
+                        tr("Home folder: files you upload land here"),
                         Icon::House,
                     ),
                     'd' => (
                         drive.rsplit('/').next().unwrap_or(drive).to_string(),
-                        "Shortcut",
+                        tr("Shortcut"),
                         Icon::Folder,
                     ),
-                    'l' if drive == "/" => {
-                        ("Root /".to_string(), "Filesystem root", Icon::HardDrive)
-                    }
-                    'l' => (drive.clone(), "Local disk", Icon::HardDrive),
-                    'f' => (drive.clone(), "Removable", Icon::Usb),
-                    'c' => (drive.clone(), "CD-ROM", Icon::Disc),
-                    'n' => (drive.clone(), "Network", Icon::Network),
-                    _ => (drive.clone(), "Drive", Icon::HardDrive),
+                    'l' if drive == "/" => (
+                        tr("Root /").to_string(),
+                        tr("Filesystem root"),
+                        Icon::HardDrive,
+                    ),
+                    'l' => (drive.clone(), tr("Local disk"), Icon::HardDrive),
+                    'f' => (drive.clone(), tr("Removable"), Icon::Usb),
+                    'c' => (drive.clone(), tr("CD-ROM"), Icon::Disc),
+                    'n' => (drive.clone(), tr("Network"), Icon::Network),
+                    _ => (drive.clone(), tr("Drive"), Icon::HardDrive),
                 };
                 let here = self.path.trim_end_matches('/');
                 let active = if drive == "/" {
@@ -535,7 +556,7 @@ impl FilesView {
         path_bar(
             ui,
             if self.path.is_empty() {
-                "Pick a drive"
+                tr("Pick a drive")
             } else {
                 &self.path
             },
@@ -545,7 +566,11 @@ impl FilesView {
 
         // Sticky column headers
         let remote_cols = [REMOTE_SIZE_W, REMOTE_DATE_W, REMOTE_ACT_W];
-        table_header(ui, &remote_cols, ["Name", "Size", "Modified (UTC)", ""]);
+        table_header(
+            ui,
+            &remote_cols,
+            [tr("Name"), tr("Size"), tr("Modified (UTC)"), ""],
+        );
 
         let mut fetch = None;
         let scroll_h = (height - if self.prompt.is_some() { 266.0 } else { 214.0 }).max(80.0);
@@ -569,7 +594,10 @@ impl FilesView {
                         name_label(ui, icon, &e.name, e.inaccessible)
                     });
                     if is_up {
-                        if resp.on_hover_text("Double-click to go up").double_clicked() {
+                        if resp
+                            .on_hover_text(tr("Double-click to go up"))
+                            .double_clicked()
+                        {
                             go = Some(child(&self.path, &e.name));
                         }
                         continue;
@@ -592,12 +620,12 @@ impl FilesView {
                     cell(ui, cols[2], false, |ui| {
                         let (tip, path) = if e.is_dir {
                             (
-                                "Download the folder as a .zip",
+                                tr("Download the folder as a .zip"),
                                 format!("{}[ {} ]", self.path, e.name),
                             )
                         } else {
                             (
-                                "Download to your computer",
+                                tr("Download to your computer"),
                                 format!("{}{}", self.path, e.name),
                             )
                         };
@@ -605,14 +633,14 @@ impl FilesView {
                             fetch = Some(path);
                             clicked_btn = true;
                         }
-                        if icon_button(ui, Icon::Pencil, "Rename", !busy) {
+                        if icon_button(ui, Icon::Pencil, tr("Rename"), !busy) {
                             self.prompt = Some(Prompt::Rename {
                                 old: e.name.clone(),
                                 new: e.name.clone(),
                             });
                             clicked_btn = true;
                         }
-                        if icon_button(ui, Icon::Trash2, "Delete", !busy) {
+                        if icon_button(ui, Icon::Trash2, tr("Delete"), !busy) {
                             self.prompt = Some(Prompt::Delete {
                                 name: e.name.clone(),
                                 is_dir: e.is_dir,
@@ -632,7 +660,7 @@ impl FilesView {
                     }
                 }
             });
-        pane_footer(ui, &format!("{} items", self.entries.len()));
+        pane_footer(ui, &fill(tr("{} items"), &[&(self.entries.len())]));
         if let Some(path) = go {
             self.prompt = None;
             self.request(files, &path);
@@ -650,29 +678,29 @@ impl FilesView {
         let mut close = false;
         ui.horizontal(|ui| match prompt {
             Prompt::NewFolder(name) => {
-                ui.label("New folder:");
+                ui.label(tr("New folder:"));
                 let resp = ui.add(egui::TextEdit::singleline(name).desired_width(160.0));
                 let submit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.small_button("Create").clicked() || submit {
+                if ui.small_button(tr("Create")).clicked() || submit {
                     let trimmed = name.trim();
                     if valid_name(trimmed) {
                         files.create_dir(&format!("{}{trimmed}", self.path));
                         close = true;
                     } else {
-                        self.status = "Invalid folder name.".into();
+                        self.status = tr("Invalid folder name.").into();
                     }
                 }
-                if ui.small_button("Cancel").clicked()
+                if ui.small_button(tr("Cancel")).clicked()
                     || ui.input(|i| i.key_pressed(egui::Key::Escape))
                 {
                     close = true;
                 }
             }
             Prompt::Rename { old, new } => {
-                ui.label(format!("Rename {old} to:"));
+                ui.label(fill(tr("Rename {} to:"), &[&old]));
                 let resp = ui.add(egui::TextEdit::singleline(new).desired_width(160.0));
                 let submit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.small_button("Rename").clicked() || submit {
+                if ui.small_button(tr("Rename")).clicked() || submit {
                     let trimmed = new.trim();
                     if valid_name(trimmed) && trimmed != old {
                         files.rename(
@@ -683,23 +711,23 @@ impl FilesView {
                     } else if trimmed == old {
                         close = true;
                     } else {
-                        self.status = "Invalid name.".into();
+                        self.status = tr("Invalid name.").into();
                     }
                 }
-                if ui.small_button("Cancel").clicked()
+                if ui.small_button(tr("Cancel")).clicked()
                     || ui.input(|i| i.key_pressed(egui::Key::Escape))
                 {
                     close = true;
                 }
             }
             Prompt::Delete { name, is_dir } => {
-                let kind = if *is_dir { "folder" } else { "file" };
-                ui.label(format!("Delete {kind} {name}?"));
-                if ui.small_button("Delete").clicked() {
+                let kind = if *is_dir { tr("folder") } else { tr("file") };
+                ui.label(fill(tr("Delete {} {}?"), &[&kind, &name]));
+                if ui.small_button(tr("Delete")).clicked() {
                     files.delete(&format!("{}{name}", self.path));
                     close = true;
                 }
-                if ui.small_button("Cancel").clicked()
+                if ui.small_button(tr("Cancel")).clicked()
                     || ui.input(|i| i.key_pressed(egui::Key::Escape))
                 {
                     close = true;

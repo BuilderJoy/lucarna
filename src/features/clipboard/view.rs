@@ -1,3 +1,4 @@
+use crate::shared::i18n::{fill, tr};
 use std::time::SystemTime;
 
 use eframe::egui::{self, Rect, RichText};
@@ -80,11 +81,11 @@ impl ClipboardView {
             .default_size([440.0, 620.0])
             .min_size([340.0, 420.0])
             .show(ctx, |ui| {
-                close = theme::window_header(ui, Icon::Clipboard, "Clipboard", |ui| {
+                close = theme::window_header(ui, Icon::Clipboard, tr("Clipboard"), |ui| {
                     let (text, fg, bg) = if active {
-                        ("Synced", p.success, p.success.gamma_multiply(0.16))
+                        (tr("Synced"), p.success, p.success.gamma_multiply(0.16))
                     } else {
-                        ("Paused", p.text3, p.elevated)
+                        (tr("Paused"), p.text3, p.elevated)
                     };
                     theme::tag(ui, Icon::Circle, text, fg, bg);
                 });
@@ -122,14 +123,14 @@ impl ClipboardView {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new("Send text to the remote clipboard")
+                    RichText::new(tr("Send text to the remote clipboard"))
                         .size(12.0)
                         .strong()
                         .color(p.text2),
                 );
                 ui.add_space(6.0);
                 let edit = egui::TextEdit::multiline(&mut self.manual_input)
-                    .hint_text("Type or paste text…")
+                    .hint_text(tr("Type or paste text…"))
                     .font(egui::FontId::monospace(12.0))
                     .desired_rows(4)
                     .margin(egui::vec2(12.0, 10.0))
@@ -138,9 +139,9 @@ impl ClipboardView {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "{} chars · Latin-1",
-                            self.manual_input.chars().count()
+                        RichText::new(fill(
+                            tr("{} chars · Latin-1"),
+                            &[&(self.manual_input.chars().count())],
                         ))
                         .size(11.0)
                         .color(p.text3),
@@ -150,9 +151,9 @@ impl ClipboardView {
                         if ui
                             .add_enabled(
                                 can_send,
-                                theme::primary(format!(
-                                    "{} Send to remote",
-                                    char::from(Icon::Send)
+                                theme::primary(fill(
+                                    tr("{} Send to remote"),
+                                    &[&(char::from(Icon::Send))],
                                 ))
                                 .min_size(egui::vec2(0.0, 34.0)),
                             )
@@ -164,7 +165,7 @@ impl ClipboardView {
                             self.push(text, false);
                         }
                         if ui
-                            .add(egui::Button::new("Clear").min_size(egui::vec2(0.0, 34.0)))
+                            .add(egui::Button::new(tr("Clear")).min_size(egui::vec2(0.0, 34.0)))
                             .clicked()
                         {
                             self.manual_input.clear();
@@ -187,20 +188,20 @@ impl ClipboardView {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("History").size(13.0).strong());
+                    ui.label(RichText::new(tr("History")).size(13.0).strong());
                     theme::count_pill(ui, self.history.len());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let items = [
-                            (Filter::All, "All".to_string(), "Everything"),
+                            (Filter::All, tr("All").to_string(), tr("Everything")),
                             (
                                 Filter::FromRemote,
-                                "From remote".to_string(),
-                                "Copied on the remote machine",
+                                tr("From remote").to_string(),
+                                tr("Copied on the remote machine"),
                             ),
                             (
                                 Filter::ToRemote,
-                                "To remote".to_string(),
-                                "Sent from this computer",
+                                tr("To remote").to_string(),
+                                tr("Sent from this computer"),
                             ),
                         ];
                         theme::segmented(ui, &mut self.filter, &items);
@@ -230,13 +231,13 @@ impl ClipboardView {
                             ui.add_space(36.0);
                             ui.vertical_centered(|ui| {
                                 ui.label(
-                                    RichText::new("Nothing here yet")
+                                    RichText::new(tr("Nothing here yet"))
                                         .strong()
                                         .color(p.text2),
                                 );
                                 ui.label(
                                     RichText::new(
-                                        "Copy text on this computer or on the remote machine and it appears here.",
+                                        tr("Copy text on this computer or on the remote machine and it appears here."),
                                     )
                                     .size(12.0)
                                     .color(p.text3),
@@ -270,14 +271,16 @@ impl ClipboardView {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "{} {} in the session pastes straight to the remote",
-                            char::from(Icon::Info),
-                            if cfg!(target_os = "macos") {
-                                "⌘V"
-                            } else {
-                                "Ctrl+V"
-                            }
+                        RichText::new(fill(
+                            tr("{} {} in the session pastes straight to the remote"),
+                            &[
+                                &(char::from(Icon::Info)),
+                                &(if cfg!(target_os = "macos") {
+                                    "⌘V"
+                                } else {
+                                    tr("Ctrl+V")
+                                }),
+                            ],
                         ))
                         .size(11.0)
                         .color(p.text3),
@@ -286,7 +289,7 @@ impl ClipboardView {
                         if ui
                             .add_enabled(
                                 !self.history.is_empty(),
-                                egui::Button::new(RichText::new("Clear history").size(12.0))
+                                egui::Button::new(RichText::new(tr("Clear history")).size(12.0))
                                     .fill(egui::Color32::TRANSPARENT)
                                     .stroke(egui::Stroke::NONE),
                             )
@@ -329,31 +332,37 @@ fn item_card(ui: &mut egui::Ui, item: &ClipboardItem) -> Option<ItemAction> {
                     theme::tag(
                         ui,
                         Icon::ArrowDown,
-                        "From remote",
+                        tr("From remote"),
                         p.success,
                         p.success.gamma_multiply(0.16),
                     );
                 } else {
-                    theme::tag(ui, Icon::ArrowUp, "To remote", p.accent_text, p.accent_soft);
+                    theme::tag(
+                        ui,
+                        Icon::ArrowUp,
+                        tr("To remote"),
+                        p.accent_text,
+                        p.accent_soft,
+                    );
                 }
                 ui.label(RichText::new(&item.time_str).size(11.0).color(p.text3));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
-                            egui::Button::new(format!("{} Send", char::from(Icon::Send)))
+                            egui::Button::new(fill(tr("{} Send"), &[&(char::from(Icon::Send))]))
                                 .min_size(egui::vec2(0.0, 28.0)),
                         )
-                        .on_hover_text("Send this text to the remote computer")
+                        .on_hover_text(tr("Send this text to the remote computer"))
                         .clicked()
                     {
                         action = Some(ItemAction::Send);
                     }
                     if ui
                         .add(
-                            egui::Button::new(format!("{} Copy", char::from(Icon::Copy)))
+                            egui::Button::new(fill(tr("{} Copy"), &[&(char::from(Icon::Copy))]))
                                 .min_size(egui::vec2(0.0, 28.0)),
                         )
-                        .on_hover_text("Copy to your clipboard")
+                        .on_hover_text(tr("Copy to your clipboard"))
                         .clicked()
                     {
                         action = Some(ItemAction::Copy);

@@ -1,3 +1,4 @@
+use crate::shared::i18n::{fill, tr};
 use std::collections::HashMap;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -102,7 +103,7 @@ impl PropertiesEditor {
         match SshTarget::parse(&self.ssh_spec()) {
             Err(e) => Some(e),
             Ok(Some(_)) if !self.repeater.trim().is_empty() => {
-                Some("SSH and a repeater can't be combined: clear one of them".into())
+                Some(tr("SSH and a repeater can't be combined: clear one of them").into())
             }
             Ok(_) => None,
         }
@@ -422,33 +423,40 @@ impl Dashboard {
 
         ui.horizontal(|ui| {
             ui.add(egui::Image::new((logo_id, egui::vec2(34.0, 34.0))).corner_radius(9));
-            ui.label(RichText::new("Lucarna").size(18.0).strong());
+            ui.label(RichText::new(tr("Lucarna")).size(18.0).strong());
             ui.add_space(12.0);
             let sharing = self.host_view.is_running();
             let items = [
-                (Mode::Connect, "Connect".to_string(), "Connect to a device"),
+                (
+                    Mode::Connect,
+                    tr("Connect").to_string(),
+                    tr("Connect to a device"),
+                ),
                 (
                     Mode::Share,
                     if sharing {
-                        "Share this device ●".to_string()
+                        tr("Share this device ●").to_string()
                     } else {
-                        "Share this device".to_string()
+                        tr("Share this device").to_string()
                     },
-                    "Let someone connect to this computer",
+                    tr("Let someone connect to this computer"),
                 ),
             ];
             theme::segmented(ui, &mut self.mode, &items);
             ui.add_space(12.0);
             if self.mode == Mode::Share {
-                ui.with_layout(Layout::right_to_left(Align::Center), theme::switch);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    theme::switch(ui);
+                    crate::shared::i18n::switch(ui);
+                });
                 return;
             }
 
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.omni)
-                    .hint_text(format!(
-                        "{}  Search connections, labels or addresses",
-                        char::from(Icon::Search)
+                    .hint_text(fill(
+                        tr("{}  Search connections, labels or addresses"),
+                        &[&(char::from(Icon::Search))],
                     ))
                     .desired_width((ui.available_width() - 470.0).clamp(160.0, 520.0))
                     .margin(egui::vec2(12.0, 10.0)),
@@ -464,7 +472,7 @@ impl Dashboard {
                         if cfg!(target_os = "macos") {
                             "⌘K"
                         } else {
-                            "Ctrl K"
+                            tr("Ctrl K")
                         },
                         FontId::proportional(11.0),
                         p.text3,
@@ -472,7 +480,7 @@ impl Dashboard {
                 }
             } else if ui
                 .small_button(char::from(Icon::X).to_string())
-                .on_hover_text("Clear search")
+                .on_hover_text(tr("Clear search"))
                 .clicked()
             {
                 self.omni.clear();
@@ -481,17 +489,20 @@ impl Dashboard {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .add(
-                        theme::primary(format!("{}  New connection", char::from(Icon::Plus)))
-                            .min_size(egui::vec2(0.0, 40.0)),
+                        theme::primary(fill(
+                            tr("{}  New connection"),
+                            &[&(char::from(Icon::Plus))],
+                        ))
+                        .min_size(egui::vec2(0.0, 40.0)),
                     )
-                    .on_hover_text("⌘N / Ctrl+N")
+                    .on_hover_text(tr("⌘N / Ctrl+N"))
                     .clicked()
                 {
                     self.open_new_connection(None);
                 }
                 ui.menu_button(char::from(Icon::Settings).to_string(), |ui| {
                     if ui
-                        .button(format!("{}  New label…", char::from(Icon::Tag)))
+                        .button(fill(tr("{}  New label…"), &[&(char::from(Icon::Tag))]))
                         .clicked()
                     {
                         self.modal = Some(Modal::NewLabel(String::new()));
@@ -499,9 +510,9 @@ impl Dashboard {
                     }
                     ui.separator();
                     if ui
-                        .button(format!(
-                            "{}  Import connections…",
-                            char::from(Icon::FolderInput)
+                        .button(fill(
+                            tr("{}  Import connections…"),
+                            &[&(char::from(Icon::FolderInput))],
                         ))
                         .clicked()
                     {
@@ -512,9 +523,9 @@ impl Dashboard {
                         ui.close();
                     }
                     if ui
-                        .button(format!(
-                            "{}  Export connections…",
-                            char::from(Icon::FolderOutput)
+                        .button(fill(
+                            tr("{}  Export connections…"),
+                            &[&(char::from(Icon::FolderOutput))],
                         ))
                         .clicked()
                     {
@@ -526,8 +537,9 @@ impl Dashboard {
                     }
                 })
                 .response
-                .on_hover_text("Address book actions");
+                .on_hover_text(tr("Address book actions"));
                 theme::switch(ui);
+                crate::shared::i18n::switch(ui);
             });
         });
     }
@@ -557,33 +569,35 @@ impl Dashboard {
                     |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(format!(
-                                    "{}  This device",
-                                    char::from(Icon::Monitor)
+                                RichText::new(fill(
+                                    tr("{}  This device"),
+                                    &[&(char::from(Icon::Monitor))],
                                 ))
                                 .strong()
                                 .size(13.0),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 let (text, color) = if sharing {
-                                    ("Sharing", p.success)
+                                    (tr("Sharing"), p.success)
                                 } else {
-                                    ("Not shared", p.text3)
+                                    (tr("Not shared"), p.text3)
                                 };
                                 ui.label(RichText::new(text).size(11.0).color(color));
                             });
                         });
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Let someone connect to this computer with Studio Host.")
-                                .size(12.0)
-                                .color(p.text2),
+                            RichText::new(tr(
+                                "Let someone connect to this computer with Studio Host.",
+                            ))
+                            .size(12.0)
+                            .color(p.text2),
                         );
                         ui.add_space(6.0);
                         let w = ui.available_width();
                         if ui
                             .add(
-                                egui::Button::new("Share this screen")
+                                egui::Button::new(tr("Share this screen"))
                                     .min_size(egui::vec2(w, 34.0)),
                             )
                             .clicked()
@@ -598,7 +612,7 @@ impl Dashboard {
     fn sidebar_lists(&mut self, ui: &mut egui::Ui) {
         let p = theme::palette(ui.ctx());
         ui.label(
-            RichText::new("ADDRESS BOOK")
+            RichText::new(tr("ADDRESS BOOK"))
                 .size(11.0)
                 .strong()
                 .color(p.text3),
@@ -620,7 +634,10 @@ impl Dashboard {
 
         if sidebar_item(
             ui,
-            &format!("{}  All connections", char::from(Icon::LayoutGrid)),
+            &fill(
+                tr("{}  All connections"),
+                &[&(char::from(Icon::LayoutGrid))],
+            ),
             total,
             self.filter == Filter::All,
             None,
@@ -631,7 +648,7 @@ impl Dashboard {
         }
         if sidebar_item(
             ui,
-            &format!("{}  Favorites", char::from(Icon::Star)),
+            &fill(tr("{}  Favorites"), &[&(char::from(Icon::Star))]),
             favs,
             self.filter == Filter::Favorites,
             None,
@@ -642,7 +659,7 @@ impl Dashboard {
         }
         if sidebar_item(
             ui,
-            &format!("{}  Recent", char::from(Icon::Clock)),
+            &fill(tr("{}  Recent"), &[&(char::from(Icon::Clock))]),
             recent,
             self.filter == Filter::Recent,
             None,
@@ -658,7 +675,7 @@ impl Dashboard {
             .count();
         if sidebar_item(
             ui,
-            &format!("{}  Online", char::from(Icon::Monitor)),
+            &fill(tr("{}  Online"), &[&(char::from(Icon::Monitor))]),
             online,
             self.filter == Filter::Online,
             None,
@@ -670,7 +687,7 @@ impl Dashboard {
         if (hidden > 0 || self.filter == Filter::Hidden)
             && sidebar_item(
                 ui,
-                &format!("{}  Hidden", char::from(Icon::EyeOff)),
+                &fill(tr("{}  Hidden"), &[&(char::from(Icon::EyeOff))]),
                 hidden,
                 self.filter == Filter::Hidden,
                 None,
@@ -682,11 +699,16 @@ impl Dashboard {
 
         ui.add_space(22.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("LABELS").size(11.0).strong().color(p.text3));
+            ui.label(
+                RichText::new(tr("LABELS"))
+                    .size(11.0)
+                    .strong()
+                    .color(p.text3),
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .small_button(char::from(Icon::Plus).to_string())
-                    .on_hover_text("Create a new label")
+                    .on_hover_text(tr("Create a new label"))
                     .clicked()
                 {
                     self.modal = Some(Modal::NewLabel(String::new()));
@@ -698,7 +720,7 @@ impl Dashboard {
         let labels = self.all_labels();
         if labels.is_empty() {
             ui.label(
-                RichText::new("No labels yet.\nRight-click a desktop or click + to organize by location, team or role.")
+                RichText::new(tr("No labels yet.\nRight-click a desktop or click + to organize by location, team or role."))
                     .size(12.0)
                     .weak(),
             );
@@ -713,11 +735,11 @@ impl Dashboard {
                         self.filter = Filter::Label(label.clone());
                     }
                     resp.context_menu(|ui| {
-                        if ui.button(format!("{}  Rename label…", char::from(Icon::Pencil))).clicked() {
+                        if ui.button(fill(tr("{}  Rename label…"), &[&(char::from(Icon::Pencil))])).clicked() {
                             label_to_rename = Some(label.clone());
                             ui.close();
                         }
-                        if ui.button(format!("{}  Delete label", char::from(Icon::Trash2))).clicked() {
+                        if ui.button(fill(tr("{}  Delete label"), &[&(char::from(Icon::Trash2))])).clicked() {
                             label_to_delete = Some(label.clone());
                             ui.close();
                         }
@@ -742,11 +764,11 @@ impl Dashboard {
         let p = theme::palette(ui.ctx());
         let indices = self.visible_indices();
         let active_title = match &self.filter {
-            Filter::All => "All connections".to_string(),
-            Filter::Favorites => "Favorites".to_string(),
-            Filter::Recent => "Recently connected".to_string(),
-            Filter::Online => "Online".to_string(),
-            Filter::Hidden => "Hidden connections".to_string(),
+            Filter::All => tr("All connections").to_string(),
+            Filter::Favorites => tr("Favorites").to_string(),
+            Filter::Recent => tr("Recently connected").to_string(),
+            Filter::Online => tr("Online").to_string(),
+            Filter::Hidden => tr("Hidden connections").to_string(),
             Filter::Label(l) => format!("{}  {l}", char::from(Icon::Tag)),
         };
 
@@ -769,27 +791,27 @@ impl Dashboard {
                     (
                         ViewMode::Grid,
                         char::from(Icon::LayoutGrid).to_string(),
-                        "Grid view",
+                        tr("Grid view"),
                     ),
                     (
                         ViewMode::List,
                         char::from(Icon::List).to_string(),
-                        "List view",
+                        tr("List view"),
                     ),
                 ];
                 theme::segmented(ui, &mut self.view_mode, &items);
                 let sort_name = match self.sort_by {
-                    SortBy::Name => "Name",
-                    SortBy::Recent => "Last connected",
-                    SortBy::Address => "Server",
+                    SortBy::Name => tr("Name"),
+                    SortBy::Recent => tr("Last connected"),
+                    SortBy::Address => tr("Server"),
                 };
                 ui.menu_button(
                     format!("{}  {sort_name}", char::from(Icon::ArrowUpDown)),
                     |ui| {
                         for (by, label) in [
-                            (SortBy::Name, "Name (A–Z)"),
-                            (SortBy::Recent, "Recently connected"),
-                            (SortBy::Address, "Server address"),
+                            (SortBy::Name, tr("Name (A–Z)")),
+                            (SortBy::Recent, tr("Recently connected")),
+                            (SortBy::Address, tr("Server address")),
                         ] {
                             if ui.selectable_label(self.sort_by == by, label).clicked() {
                                 self.sort_by = by;
@@ -801,7 +823,10 @@ impl Dashboard {
                 if let Filter::Label(l) = &self.filter {
                     let l = l.clone();
                     if ui
-                        .small_button(format!("{} Add connection here", char::from(Icon::Plus)))
+                        .small_button(fill(
+                            tr("{} Add connection here"),
+                            &[&(char::from(Icon::Plus))],
+                        ))
                         .clicked()
                     {
                         self.open_new_connection(None);
@@ -816,20 +841,21 @@ impl Dashboard {
             ui.vertical_centered(|ui| {
                 ui.add_space(64.0);
                 ui.label(
-                    RichText::new("No connections in this view")
+                    RichText::new(tr("No connections in this view"))
                         .size(16.0)
                         .strong(),
                 );
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(
+                    RichText::new(tr(
                         "Add a remote computer or type an address in the top bar to connect.",
-                    )
+                    ))
                     .weak(),
                 );
                 ui.add_space(12.0);
-                let btn = theme::primary(format!("{} New connection", char::from(Icon::Plus)))
-                    .min_size(egui::vec2(160.0, 34.0));
+                let btn =
+                    theme::primary(fill(tr("{} New connection"), &[&(char::from(Icon::Plus))]))
+                        .min_size(egui::vec2(160.0, 34.0));
                 if ui.add(btn).clicked() {
                     self.open_new_connection(None);
                 }
@@ -895,9 +921,9 @@ impl Dashboard {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(220.0);
-                        ui.label(RichText::new("Connect to a device").size(18.0).strong());
+                        ui.label(RichText::new(tr("Connect to a device")).size(18.0).strong());
                         ui.label(
-                            RichText::new("Address, user@host or repeater ID")
+                            RichText::new(tr("Address, user@host or repeater ID"))
                                 .size(13.0)
                                 .color(p.text2),
                         );
@@ -925,9 +951,9 @@ impl Dashboard {
                             let go = ui
                                 .add_enabled(
                                     addr.is_some(),
-                                    theme::primary(format!(
-                                        "Connect  {}",
-                                        char::from(Icon::ArrowRight)
+                                    theme::primary(fill(
+                                        tr("Connect  {}"),
+                                        &[&(char::from(Icon::ArrowRight))],
                                     ))
                                     .min_size(egui::vec2(112.0, 48.0)),
                                 )
@@ -950,8 +976,11 @@ impl Dashboard {
                             if let Some(a) = &addr
                                 && !saved_already
                                 && ui
-                                    .add(egui::Button::new("Save").min_size(egui::vec2(0.0, 48.0)))
-                                    .on_hover_text("Save this address to your Address Book")
+                                    .add(
+                                        egui::Button::new(tr("Save"))
+                                            .min_size(egui::vec2(0.0, 48.0)),
+                                    )
+                                    .on_hover_text(tr("Save this address to your Address Book"))
                                     .clicked()
                             {
                                 self.open_new_connection(Some(a.as_str()));
@@ -959,20 +988,22 @@ impl Dashboard {
                         });
                         ui.add_space(4.0);
                         ui.horizontal_wrapped(|ui| {
-                            if theme::chip(ui, Icon::Lock, "SSH tunnel", self.quick_ssh_on)
+                            if theme::chip(ui, Icon::Lock, tr("SSH tunnel"), self.quick_ssh_on)
                                 .clicked()
                             {
                                 self.quick_ssh_on = !self.quick_ssh_on;
                             }
-                            if theme::chip(ui, Icon::Eye, "View only", self.quick_view_only)
+                            if theme::chip(ui, Icon::Eye, tr("View only"), self.quick_view_only)
                                 .clicked()
                             {
                                 self.quick_view_only = !self.quick_view_only;
                             }
-                            if theme::chip(ui, Icon::KeyRound, "Join with code", false).clicked() {
+                            if theme::chip(ui, Icon::KeyRound, tr("Join with code"), false)
+                                .clicked()
+                            {
                                 self.host_view.join_open = true;
                             }
-                            if theme::chip(ui, Icon::Radio, "Via repeater", self.quick_rep_on)
+                            if theme::chip(ui, Icon::Radio, tr("Via repeater"), self.quick_rep_on)
                                 .clicked()
                             {
                                 self.quick_rep_on = !self.quick_rep_on;
@@ -980,14 +1011,14 @@ impl Dashboard {
                             if self.quick_ssh_on {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.quick_ssh)
-                                        .hint_text("user@host[:port]")
+                                        .hint_text(tr("user@host[:port]"))
                                         .desired_width(170.0),
                                 );
                             }
                             if self.quick_rep_on {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.quick_rep)
-                                        .hint_text("repeater host:port")
+                                        .hint_text(tr("repeater host:port"))
                                         .desired_width(170.0),
                                 );
                             }
@@ -1076,7 +1107,7 @@ impl Dashboard {
                 ui,
                 preview_rect.left_top() + Vec2::new(8.0, 8.0),
                 egui::Align2::LEFT_TOP,
-                if on { "Online" } else { "Offline" },
+                if on { tr("Online") } else { tr("Offline") },
                 Some(dot),
             );
         }
@@ -1085,7 +1116,7 @@ impl Dashboard {
                 ui,
                 preview_rect.right_top() + Vec2::new(-8.0, 8.0),
                 egui::Align2::RIGHT_TOP,
-                &format!("{} SSH", char::from(Icon::Lock)),
+                &fill(tr("{} SSH"), &[&(char::from(Icon::Lock))]),
                 None,
             );
         }
@@ -1103,7 +1134,7 @@ impl Dashboard {
             ui.painter().text(
                 pill.center(),
                 egui::Align2::CENTER_CENTER,
-                format!("Connect  {}", char::from(Icon::ArrowRight)),
+                fill(tr("Connect  {}"), &[&(char::from(Icon::ArrowRight))]),
                 FontId::proportional(13.0),
                 theme::ON_ACCENT,
             );
@@ -1192,7 +1223,7 @@ impl Dashboard {
                 if fav_resp.hovered() { p.text } else { p.text3 },
             );
         }
-        if fav_resp.on_hover_text("Toggle favorite").clicked() {
+        if fav_resp.on_hover_text(tr("Toggle favorite")).clicked() {
             return Some(TileAction::ToggleFavorite(idx));
         }
         let dots_rect = Rect::from_min_size(
@@ -1211,7 +1242,9 @@ impl Dashboard {
             self.selected = Some(idx);
             self.open_properties(idx);
         }
-        dots_resp.on_hover_text("Properties (Alt+Enter) · Right-click card for all options");
+        dots_resp.on_hover_text(tr(
+            "Properties (Alt+Enter) · Right-click card for all options",
+        ));
 
         if resp.double_clicked() {
             action = Some(TileAction::Connect(idx, None));
@@ -1219,7 +1252,7 @@ impl Dashboard {
             action = Some(TileAction::Select(idx));
         }
 
-        resp.on_hover_text("Double-click to connect · Right-click for options")
+        resp.on_hover_text(tr("Double-click to connect · Right-click for options"))
             .context_menu(|ui| {
                 if let Some(a) = Self::connection_context_menu(
                     ui,
@@ -1302,21 +1335,21 @@ impl Dashboard {
         );
         child_ui.add_space(10.0);
         if child_ui
-            .button(format!(
-                "{} Properties",
-                char::from(Icon::SlidersHorizontal)
+            .button(fill(
+                tr("{} Properties"),
+                &[&(char::from(Icon::SlidersHorizontal))],
             ))
             .clicked()
         {
             action = Some(TileAction::Properties(idx));
         }
-        let connect_btn = theme::primary(format!("{} Connect", char::from(Icon::Play)));
+        let connect_btn = theme::primary(fill(tr("{} Connect"), &[&(char::from(Icon::Play))]));
         if child_ui.add(connect_btn).clicked() {
             action = Some(TileAction::Connect(idx, None));
         }
         if child_ui
             .selectable_label(c.favorite, char::from(Icon::Star).to_string())
-            .on_hover_text("Toggle favorite")
+            .on_hover_text(tr("Toggle favorite"))
             .clicked()
         {
             action = Some(TileAction::ToggleFavorite(idx));
@@ -1416,9 +1449,9 @@ impl Dashboard {
             let mut bx = screen.left() + 5.0;
             let by = screen.bottom() - 19.0;
             for (flag, label) in [
-                (c.options.view_only, "VIEW ONLY"),
+                (c.options.view_only, tr("VIEW ONLY")),
                 (c.options.scale_1_1, "1:1"),
-                (c.options.fullscreen, "FULL"),
+                (c.options.fullscreen, tr("FULL")),
             ] {
                 if flag {
                     let bw = label.len() as f32 * 5.8 + 8.0;
@@ -1449,14 +1482,20 @@ impl Dashboard {
         ui.set_min_width(190.0);
 
         if ui
-            .button(RichText::new(format!("{}  Connect\tEnter", char::from(Icon::Play))).strong())
+            .button(
+                RichText::new(fill(tr("{}  Connect\tEnter"), &[&(char::from(Icon::Play))]))
+                    .strong(),
+            )
             .clicked()
         {
             action = Some(TileAction::Connect(idx, None));
             ui.close();
         }
         if ui
-            .button(format!("{}  Connect (View only)", char::from(Icon::Eye)))
+            .button(fill(
+                tr("{}  Connect (View only)"),
+                &[&(char::from(Icon::Eye))],
+            ))
             .clicked()
         {
             action = Some(TileAction::Connect(idx, Some(true)));
@@ -1465,25 +1504,28 @@ impl Dashboard {
         ui.separator();
 
         let fav_label = if c.favorite {
-            format!("{}  Remove from Favorites", char::from(Icon::Star))
+            fill(
+                tr("{}  Remove from Favorites"),
+                &[&(char::from(Icon::Star))],
+            )
         } else {
-            format!("{}  Add to Favorites", char::from(Icon::Star))
+            fill(tr("{}  Add to Favorites"), &[&(char::from(Icon::Star))])
         };
         if ui.button(fav_label).clicked() {
             action = Some(TileAction::ToggleFavorite(idx));
             ui.close();
         }
         let hide_label = if c.hidden {
-            format!("{}  Show in Address Book", char::from(Icon::Eye))
+            fill(tr("{}  Show in Address Book"), &[&(char::from(Icon::Eye))])
         } else {
-            format!("{}  Hide", char::from(Icon::EyeOff))
+            fill(tr("{}  Hide"), &[&(char::from(Icon::EyeOff))])
         };
         if ui.button(hide_label).clicked() {
             action = Some(TileAction::ToggleHidden(idx));
             ui.close();
         }
 
-        ui.menu_button(format!("{}  Labels", char::from(Icon::Tags)), |ui| {
+        ui.menu_button(fill(tr("{}  Labels"), &[&(char::from(Icon::Tags))]), |ui| {
             ui.set_min_width(160.0);
             for label in known_labels {
                 let mut checked = c.labels.iter().any(|l| l.eq_ignore_ascii_case(label));
@@ -1497,7 +1539,7 @@ impl Dashboard {
             ui.horizontal(|ui| {
                 let r = ui.add(
                     egui::TextEdit::singleline(new_tag_inline)
-                        .hint_text("New label…")
+                        .hint_text(tr("New label…"))
                         .desired_width(105.0),
                 );
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -1516,7 +1558,7 @@ impl Dashboard {
 
         ui.separator();
         if ui
-            .button(format!("{}  Rename…\tF2", char::from(Icon::Pencil)))
+            .button(fill(tr("{}  Rename…\tF2"), &[&(char::from(Icon::Pencil))]))
             .clicked()
         {
             action = Some(TileAction::Rename(idx));
@@ -1525,12 +1567,12 @@ impl Dashboard {
         let dup_shortcut = if cfg!(target_os = "macos") {
             "⌘D"
         } else {
-            "Ctrl+D"
+            tr("Ctrl+D")
         };
         if ui
-            .button(format!(
-                "{}  Duplicate\t{dup_shortcut}",
-                char::from(Icon::Copy)
+            .button(fill(
+                tr("{}  Duplicate\t{}"),
+                &[&(char::from(Icon::Copy)), &dup_shortcut],
             ))
             .clicked()
         {
@@ -1540,9 +1582,9 @@ impl Dashboard {
         if ui
             .add_enabled(
                 has_preview,
-                egui::Button::new(format!(
-                    "{}  Clear desktop preview",
-                    char::from(Icon::ImageOff)
+                egui::Button::new(fill(
+                    tr("{}  Clear desktop preview"),
+                    &[&(char::from(Icon::ImageOff))],
                 )),
             )
             .clicked()
@@ -1551,7 +1593,7 @@ impl Dashboard {
             ui.close();
         }
         if ui
-            .button(format!("{}  Delete\t⌫", char::from(Icon::Trash2)))
+            .button(fill(tr("{}  Delete\t⌫"), &[&(char::from(Icon::Trash2))]))
             .clicked()
         {
             action = Some(TileAction::Delete(idx));
@@ -1559,9 +1601,9 @@ impl Dashboard {
         }
         ui.separator();
         if ui
-            .button(format!(
-                "{}  Properties…\tAlt+Enter",
-                char::from(Icon::SlidersHorizontal)
+            .button(fill(
+                tr("{}  Properties…\tAlt+Enter"),
+                &[&(char::from(Icon::SlidersHorizontal))],
             ))
             .clicked()
         {
@@ -1710,9 +1752,9 @@ impl Dashboard {
         let mut request = None;
         let mut keep_open = self.editor.open;
         let title = if self.editor.editing.is_some() {
-            "Connection Properties"
+            tr("Connection Properties")
         } else {
-            "New Connection"
+            tr("New Connection")
         };
         let known_labels: Vec<String> = self.all_labels().into_iter().map(|(l, _)| l).collect();
 
@@ -1729,12 +1771,12 @@ impl Dashboard {
                     ui.selectable_value(
                         &mut self.editor.tab,
                         PropertiesTab::General,
-                        format!("{} General", char::from(Icon::SlidersHorizontal)),
+                        fill(tr("{} General"), &[&(char::from(Icon::SlidersHorizontal))]),
                     );
                     ui.selectable_value(
                         &mut self.editor.tab,
                         PropertiesTab::Options,
-                        format!("{} Options & Display", char::from(Icon::Monitor)),
+                        fill(tr("{} Options & Display"), &[&(char::from(Icon::Monitor))]),
                     );
                 });
                 ui.separator();
@@ -1755,46 +1797,46 @@ impl Dashboard {
                         };
                         let addr_resp = field(
                             ui,
-                            "VNC Server",
+                            tr("VNC Server"),
                             &mut self.editor.address,
-                            "host, host:display or host::port (ID:1234 behind a repeater)",
+                            tr("host, host:display or host::port (ID:1234 behind a repeater)"),
                         );
                         field(
                             ui,
-                            "Friendly Name",
+                            tr("Friendly Name"),
                             &mut self.editor.name,
-                            "optional, e.g. Office PC",
+                            tr("optional, e.g. Office PC"),
                         );
                         field(
                             ui,
-                            "Username",
+                            tr("Username"),
                             &mut self.editor.user,
-                            "optional, for MS-Logon (Windows login)",
+                            tr("optional, for MS-Logon (Windows login)"),
                         );
                         field(
                             ui,
-                            "Repeater",
+                            tr("Repeater"),
                             &mut self.editor.repeater,
-                            "optional UltraVNC repeater, e.g. repeater.example.com:5901",
+                            tr("optional UltraVNC repeater, e.g. repeater.example.com:5901"),
                         );
                         field(
                             ui,
-                            "SSH user",
+                            tr("SSH user"),
                             &mut self.editor.ssh_user,
-                            "optional, the account on the SSH server (e.g. vboxuser)",
+                            tr("optional, the account on the SSH server (e.g. vboxuser)"),
                         );
                         field(
                             ui,
-                            "SSH",
+                            tr("SSH"),
                             &mut self.editor.ssh,
-                            "optional host[:port]: encrypts VNC and files through SSH",
+                            tr("optional host[:port]: encrypts VNC and files through SSH"),
                         );
                         if !self.editor.ssh.trim().is_empty() {
-                            ui.label(RichText::new("SSH password").strong());
+                            ui.label(RichText::new(tr("SSH password")).strong());
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.editor.ssh_password)
                                     .password(true)
-                                    .hint_text("leave empty to use your SSH keys or agent")
+                                    .hint_text(tr("leave empty to use your SSH keys or agent"))
                                     .desired_width(f32::INFINITY)
                                     .margin(egui::vec2(8.0, 6.0)),
                             );
@@ -1805,7 +1847,7 @@ impl Dashboard {
                             ui.add_space(6.0);
                         }
 
-                        ui.label(RichText::new("Password").strong());
+                        ui.label(RichText::new(tr("Password")).strong());
                         ui.horizontal(|ui| {
                             let pw_w = (ui.available_width() - 44.0).max(120.0);
                             let show_pw = self.editor.show_password;
@@ -1825,7 +1867,7 @@ impl Dashboard {
                                     self.editor.show_password,
                                     char::from(eye_icon).to_string(),
                                 )
-                                .on_hover_text("Show / hide password")
+                                .on_hover_text(tr("Show / hide password"))
                                 .clicked()
                             {
                                 self.editor.show_password = !self.editor.show_password;
@@ -1855,13 +1897,13 @@ impl Dashboard {
 
                         field(
                             ui,
-                            "Labels",
+                            tr("Labels"),
                             &mut self.editor.labels_input,
-                            "comma-separated, e.g. Cambridge, London",
+                            tr("comma-separated, e.g. Cambridge, London"),
                         );
                         if !known_labels.is_empty() {
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new("Quick toggle:").size(11.5).weak());
+                                ui.label(RichText::new(tr("Quick toggle:")).size(11.5).weak());
                                 let current = saved::parse_labels(&self.editor.labels_input);
                                 for k in &known_labels {
                                     let active = current.iter().any(|l| l.eq_ignore_ascii_case(k));
@@ -1889,44 +1931,44 @@ impl Dashboard {
 
                         ui.checkbox(
                             &mut self.editor.favorite,
-                            format!("{} Pin to Favorites", char::from(Icon::Star)),
+                            fill(tr("{} Pin to Favorites"), &[&(char::from(Icon::Star))]),
                         );
                     }
                     PropertiesTab::Options => {
-                        ui.label(RichText::new("Picture & Scaling").strong());
+                        ui.label(RichText::new(tr("Picture & Scaling")).strong());
                         ui.horizontal(|ui| {
                             ui.selectable_value(
                                 &mut self.editor.options.scale_1_1,
                                 false,
-                                "Fit to window",
+                                tr("Fit to window"),
                             );
                             ui.selectable_value(
                                 &mut self.editor.options.scale_1_1,
                                 true,
-                                "Actual size (1:1)",
+                                tr("Actual size (1:1)"),
                             );
                         });
                         ui.add_space(10.0);
 
-                        ui.label(RichText::new("Input & Session Behavior").strong());
+                        ui.label(RichText::new(tr("Input & Session Behavior")).strong());
                         ui.checkbox(
                             &mut self.editor.options.view_only,
-                            "View only (do not send keyboard, mouse or clipboard)",
+                            tr("View only (do not send keyboard, mouse or clipboard)"),
                         );
                         ui.checkbox(
                             &mut self.editor.options.fullscreen,
-                            "Start session in full screen mode",
+                            tr("Start session in full screen mode"),
                         );
                         ui.checkbox(
                             &mut self.editor.options.share_clipboard,
-                            "Share clipboard text with remote computer",
+                            tr("Share clipboard text with remote computer"),
                         );
                         ui.add_space(10.0);
 
-                        ui.label(RichText::new("Desktop Preview").strong());
+                        ui.label(RichText::new(tr("Desktop Preview")).strong());
                         ui.checkbox(
                             &mut self.editor.options.save_preview,
-                            "Save desktop thumbnail preview when connected",
+                            tr("Save desktop thumbnail preview when connected"),
                         );
                         if let Some(target) = ServerAddress::parse(&self.editor.address) {
                             let has_prev = self
@@ -1937,7 +1979,7 @@ impl Dashboard {
                             if ui
                                 .add_enabled(
                                     has_prev,
-                                    egui::Button::new("Clear saved preview image"),
+                                    egui::Button::new(tr("Clear saved preview image")),
                                 )
                                 .clicked()
                             {
@@ -1967,7 +2009,7 @@ impl Dashboard {
                 if self.editor.test_rx.is_some() {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(RichText::new("Testing connection…").italics());
+                        ui.label(RichText::new(tr("Testing connection…")).italics());
                     });
                     ui.ctx()
                         .request_repaint_after(std::time::Duration::from_millis(100));
@@ -1991,7 +2033,7 @@ impl Dashboard {
                 }
 
                 ui.horizontal(|ui| {
-                    let connect_btn = theme::primary("Save & Connect");
+                    let connect_btn = theme::primary(tr("Save & Connect"));
                     if ui.add_enabled(target.is_some(), connect_btn).clicked()
                         && let Some(t) = target.clone()
                     {
@@ -2012,7 +2054,7 @@ impl Dashboard {
                         should_close = true;
                     }
                     if ui
-                        .add_enabled(target.is_some(), egui::Button::new("Save"))
+                        .add_enabled(target.is_some(), egui::Button::new(tr("Save")))
                         .clicked()
                         && let Some(t) = target.clone()
                     {
@@ -2020,7 +2062,7 @@ impl Dashboard {
                         should_close = true;
                     }
                     let testing = self.editor.test_rx.is_some();
-                    let test_btn = egui::Button::new("Test Connection");
+                    let test_btn = egui::Button::new(tr("Test Connection"));
                     if ui
                         .add_enabled(target.is_some() && !testing, test_btn)
                         .clicked()
@@ -2029,13 +2071,14 @@ impl Dashboard {
                         self.test_connection(t);
                     }
                     if let Some(idx) = self.editor.editing
-                        && ui.button("Delete").clicked()
+                        && ui.button(tr("Delete")).clicked()
                     {
                         self.delete_connection(idx);
                         should_close = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        if ui.button(tr("Cancel")).clicked()
+                            || ui.input(|i| i.key_pressed(Key::Escape))
                         {
                             should_close = true;
                         }
@@ -2061,11 +2104,11 @@ impl Dashboard {
         let mut apply_transfer = None;
 
         let title = match modal {
-            Modal::Rename { .. } => "Rename connection",
-            Modal::RenameLabel { .. } => "Rename label",
-            Modal::NewLabel(_) => "New label",
-            Modal::ImportExport { import: true, .. } => "Import connections",
-            Modal::ImportExport { import: false, .. } => "Export connections",
+            Modal::Rename { .. } => tr("Rename connection"),
+            Modal::RenameLabel { .. } => tr("Rename label"),
+            Modal::NewLabel(_) => tr("New label"),
+            Modal::ImportExport { import: true, .. } => tr("Import connections"),
+            Modal::ImportExport { import: false, .. } => tr("Export connections"),
         };
 
         egui::Window::new(title)
@@ -2075,48 +2118,51 @@ impl Dashboard {
             .order(Order::Foreground)
             .show(ctx, |ui| match modal {
                 Modal::Rename { index, name } => {
-                    ui.label("Connection name:");
+                    ui.label(tr("Connection name:"));
                     let r = ui.add(egui::TextEdit::singleline(name).desired_width(260.0));
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if (ui.button("Rename").clicked() || enter) && !name.trim().is_empty() {
+                        if (ui.button(tr("Rename")).clicked() || enter) && !name.trim().is_empty() {
                             apply_rename = Some((*index, name.trim().to_string()));
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        if ui.button(tr("Cancel")).clicked()
+                            || ui.input(|i| i.key_pressed(Key::Escape))
                         {
                             close = true;
                         }
                     });
                 }
                 Modal::RenameLabel { old, new } => {
-                    ui.label(format!("Rename label \"{old}\" to:"));
+                    ui.label(fill(tr("Rename label \"{}\" to:"), &[&old]));
                     let r = ui.add(egui::TextEdit::singleline(new).desired_width(260.0));
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if (ui.button("Rename").clicked() || enter) && !new.trim().is_empty() {
+                        if (ui.button(tr("Rename")).clicked() || enter) && !new.trim().is_empty() {
                             apply_label_rename = Some((old.clone(), new.trim().to_string()));
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        if ui.button(tr("Cancel")).clicked()
+                            || ui.input(|i| i.key_pressed(Key::Escape))
                         {
                             close = true;
                         }
                     });
                 }
                 Modal::NewLabel(name) => {
-                    ui.label("Label name (e.g. Cambridge, London, Servers):");
+                    ui.label(tr("Label name (e.g. Cambridge, London, Servers):"));
                     let r = ui.add(egui::TextEdit::singleline(name).desired_width(260.0));
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if (ui.button("Create").clicked() || enter) && !name.trim().is_empty() {
+                        if (ui.button(tr("Create")).clicked() || enter) && !name.trim().is_empty() {
                             apply_new_label = Some(name.trim().replace([',', '\t'], " "));
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        if ui.button(tr("Cancel")).clicked()
+                            || ui.input(|i| i.key_pressed(Key::Escape))
                         {
                             close = true;
                         }
@@ -2124,20 +2170,21 @@ impl Dashboard {
                 }
                 Modal::ImportExport { import, path } => {
                     ui.label(if *import {
-                        "File path to import from:"
+                        tr("File path to import from:")
                     } else {
-                        "File path to export to:"
+                        tr("File path to export to:")
                     });
                     let r = ui.add(egui::TextEdit::singleline(path).desired_width(320.0));
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        let btn = if *import { "Import" } else { "Export" };
+                        let btn = if *import { tr("Import") } else { tr("Export") };
                         if (ui.button(btn).clicked() || enter) && !path.trim().is_empty() {
                             apply_transfer = Some((*import, PathBuf::from(path.trim())));
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        if ui.button(tr("Cancel")).clicked()
+                            || ui.input(|i| i.key_pressed(Key::Escape))
                         {
                             close = true;
                         }
@@ -2181,18 +2228,19 @@ impl Dashboard {
                             }
                         }
                         self.persist();
-                        self.status =
-                            format!("Imported {count} connection(s) from {}", path.display());
+                        self.status = fill(
+                            tr("Imported {} connection(s) from {}"),
+                            &[&count, &(path.display())],
+                        );
                     }
                     Err(e) => self.status = e,
                 }
             } else {
                 match saved::export_to(&path, &self.saved) {
                     Ok(()) => {
-                        self.status = format!(
-                            "Exported {} connection(s) to {}",
-                            self.saved.len(),
-                            path.display()
+                        self.status = fill(
+                            tr("Exported {} connection(s) to {}"),
+                            &[&(self.saved.len()), &(path.display())],
                         )
                     }
                     Err(e) => self.status = e,
@@ -2216,25 +2264,27 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.label(RichText::new("●").size(10.0).color(p.success));
             ui.label(
-                RichText::new(format!("{online} of {total} online"))
+                RichText::new(fill(tr("{} of {} online"), &[&online, &total]))
                     .size(12.0)
                     .color(p.text2),
             );
             if busy {
                 ui.spinner();
-                ui.label("Connecting to remote desktop…");
+                ui.label(tr("Connecting to remote desktop…"));
             } else if !self.status.is_empty() {
-                ui.label(RichText::new(&self.status).color(ui.visuals().warn_fg_color));
+                ui.label(
+                    RichText::new(crate::shared::i18n::tr_dyn(&self.status))
+                        .color(ui.visuals().warn_fg_color),
+                );
                 if let Some(last) = &self.last_request {
-                    let btn = theme::primary(format!(
-                        "{} Reconnect ({})",
-                        char::from(Icon::RefreshCw),
-                        last.address.as_str()
+                    let btn = theme::primary(fill(
+                        tr("{} Reconnect ({})"),
+                        &[&(char::from(Icon::RefreshCw)), &(last.address.as_str())],
                     ))
                     .small();
                     if ui
                         .add(btn)
-                        .on_hover_text(format!("Reconnect to {}", last.address.as_str()))
+                        .on_hover_text(fill(tr("Reconnect to {}"), &[&(last.address.as_str())]))
                         .clicked()
                     {
                         request = Some(last.clone());
@@ -2242,7 +2292,7 @@ impl Dashboard {
                 }
                 if ui
                     .small_button(char::from(Icon::X).to_string())
-                    .on_hover_text("Dismiss message")
+                    .on_hover_text(tr("Dismiss message"))
                     .clicked()
                 {
                     self.status.clear();
@@ -2251,7 +2301,7 @@ impl Dashboard {
                 let dup = if cfg!(target_os = "macos") {
                     "⌘D"
                 } else {
-                    "Ctrl+D"
+                    tr("Ctrl+D")
                 };
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     for (key, what) in [
@@ -2259,18 +2309,18 @@ impl Dashboard {
                             if cfg!(target_os = "macos") {
                                 "⌥↵"
                             } else {
-                                "Alt+↵"
+                                tr("Alt+↵")
                             },
-                            "Properties",
+                            tr("Properties"),
                         ),
-                        (dup, "Duplicate"),
-                        ("F2", "Rename"),
+                        (dup, tr("Duplicate")),
+                        ("F2", tr("Rename")),
                     ] {
                         ui.label(RichText::new(what).size(12.0).color(p.text3));
                         theme::keycap(ui, key);
                     }
                     ui.label(
-                        RichText::new("Double-click to connect")
+                        RichText::new(tr("Double-click to connect"))
                             .size(12.0)
                             .color(p.text3),
                     );
@@ -2508,7 +2558,7 @@ impl Dashboard {
             return;
         };
         let mut copy = orig;
-        copy.name = format!("{} (Copy)", copy.name);
+        copy.name = fill(tr("{} (Copy)"), &[&copy.name]);
         self.saved.insert(idx + 1, copy);
         self.selected = Some(idx + 1);
         self.persist();
@@ -2622,7 +2672,7 @@ impl Dashboard {
             let loaded = saved::load_preview(address).map(|(w, h, rgba)| {
                 let img =
                     ColorImage::from_rgba_unmultiplied([usize::from(w), usize::from(h)], &rgba);
-                ctx.load_texture(format!("preview:{key}"), img, TextureOptions::LINEAR)
+                ctx.load_texture(format!("preview:{}", key), img, TextureOptions::LINEAR)
             });
             self.previews.insert(key.to_string(), loaded);
         }
@@ -2666,7 +2716,7 @@ fn sidebar_item(
     ui.painter().text(
         Pos2::new(x, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        truncate_str(label, 21),
+        truncate_str(label, 28),
         FontId::proportional(14.0),
         text_color,
     );
@@ -2699,17 +2749,17 @@ fn now_secs() -> u64 {
 
 fn relative_time(epoch_secs: u64) -> String {
     if epoch_secs == 0 {
-        return "Never".into();
+        return tr("Never").into();
     }
     let diff = now_secs().saturating_sub(epoch_secs);
     if diff < 60 {
-        "Just now".into()
+        tr("Just now").into()
     } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
+        fill(tr("{}m ago"), &[&(diff / 60)])
     } else if diff < 86_400 {
-        format!("{}h ago", diff / 3600)
+        fill(tr("{}h ago"), &[&(diff / 3600)])
     } else {
-        format!("{}d ago", diff / 86_400)
+        fill(tr("{}d ago"), &[&(diff / 86_400)])
     }
 }
 

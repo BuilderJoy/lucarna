@@ -1,5 +1,6 @@
 //! App shell: switches between the dashboard and a live session.
 
+use crate::shared::i18n::{fill, tr};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -85,9 +86,9 @@ impl App {
             }
         };
         let secure = if ssh.is_some() {
-            Some("SSH encrypted")
+            Some(tr("SSH encrypted"))
         } else if !req.creds.pin.is_empty() {
-            Some("End-to-end encrypted")
+            Some(tr("End-to-end encrypted"))
         } else {
             None
         };
@@ -188,7 +189,7 @@ impl App {
                         })
                         .stroke(egui::Stroke::NONE)
                         .min_size(egui::vec2(36.0, 32.0));
-                    if ui.add(btn).on_hover_text("Address book").clicked() {
+                    if ui.add(btn).on_hover_text(tr("Address book")).clicked() {
                         select = Some(None);
                     }
                     for (i, t) in self.tabs.iter().enumerate() {
@@ -237,7 +238,7 @@ impl App {
                                                 .small()
                                                 .frame(false),
                                         )
-                                        .on_hover_text("Close session")
+                                        .on_hover_text(tr("Close session"))
                                         .clicked()
                                     {
                                         close = Some(i);
@@ -252,7 +253,7 @@ impl App {
                                 .stroke(egui::Stroke::NONE)
                                 .min_size(egui::vec2(30.0, 30.0)),
                         )
-                        .on_hover_text("New connection")
+                        .on_hover_text(tr("New connection"))
                         .clicked()
                     {
                         select = Some(None);
@@ -475,7 +476,7 @@ impl eframe::App for App {
                         ui.add_space(ui.available_height() / 2.0 - 40.0);
                         ui.add(egui::Spinner::new().size(32.0));
                         ui.add_space(8.0);
-                        ui.label(RichText::new("Waiting for the remote screen…").weak());
+                        ui.label(RichText::new(tr("Waiting for the remote screen…")).weak());
                     });
                     return;
                 }
@@ -607,7 +608,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 }
                 if live.bell_until.is_some_and(|t| Instant::now() < t) {
                     ui.label(
-                        RichText::new(format!("{} Bell", char::from(Icon::Bell)))
+                        RichText::new(fill(tr("{} Bell"), &[&(char::from(Icon::Bell))]))
                             .color(p.accent_text)
                             .strong(),
                     );
@@ -626,11 +627,11 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                         // Flat buttons: the Keys menu button would otherwise keep the default grey fill.
                         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                         let scales = [
-                            (Scale::Fit, "Fit".to_string(), "Fit to window"),
+                            (Scale::Fit, tr("Fit").to_string(), tr("Fit to window")),
                             (
                                 Scale::Actual,
                                 "1:1".to_string(),
-                                "Actual size (scroll bars)",
+                                tr("Actual size (scroll bars)"),
                             ),
                         ];
                         theme::segmented(ui, &mut live.scale, &scales);
@@ -640,21 +641,28 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                         let shortcut = if cfg!(target_os = "macos") {
                             "⌘⇧F"
                         } else {
-                            "Ctrl+Shift+F"
+                            tr("Ctrl+Shift+F")
                         };
                         let fs_icon = if fullscreen {
                             Icon::Minimize
                         } else {
                             Icon::Maximize
                         };
-                        if tool(ui, fs_icon, "Full screen", fullscreen, compact, shortcut) {
+                        if tool(
+                            ui,
+                            fs_icon,
+                            tr("Full screen"),
+                            fullscreen,
+                            compact,
+                            shortcut,
+                        ) {
                             ui.ctx()
                                 .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                         }
                         let keys = if compact {
                             char::from(Icon::Keyboard).to_string()
                         } else {
-                            format!("{} Keys", char::from(Icon::Keyboard))
+                            fill(tr("{} Keys"), &[&(char::from(Icon::Keyboard))])
                         };
                         ui.menu_button(RichText::new(keys).color(p.text2), |ui| {
                             ui.set_min_width(175.0);
@@ -665,7 +673,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                                 }
                             }
                             ui.separator();
-                            ui.label(RichText::new("AltGr / ES symbols").size(11.0).weak());
+                            ui.label(RichText::new(tr("AltGr / ES symbols")).size(11.0).weak());
                             for row in input::ALTGR_SYMBOLS.chunks(5) {
                                 ui.horizontal(|ui| {
                                     for &ch in row {
@@ -676,8 +684,9 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                                                 )
                                                 .min_size(egui::vec2(28.0, 24.0)),
                                             )
-                                            .on_hover_text(format!(
-                                                "Send '{ch}' to remote computer"
+                                            .on_hover_text(fill(
+                                                tr("Send '{}' to remote computer"),
+                                                &[&ch],
                                             ))
                                             .clicked()
                                         {
@@ -689,41 +698,41 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                             }
                         })
                         .response
-                        .on_hover_text("Send key combinations and AltGr symbols");
+                        .on_hover_text(tr("Send key combinations and AltGr symbols"));
                         if tool(
                             ui,
                             Icon::ShieldAlert,
-                            "Ctrl+Alt+Del",
+                            tr("Ctrl+Alt+Del"),
                             false,
                             compact,
-                            "Send Ctrl+Alt+Del to the remote machine",
+                            tr("Send Ctrl+Alt+Del to the remote machine"),
                         ) {
                             let _ = input::ctrl_alt_del(&live.outbound);
                         }
                         if tool(
                             ui,
                             Icon::Clipboard,
-                            "Clipboard",
+                            tr("Clipboard"),
                             live.clipboard_view.open,
                             compact,
-                            "View and manage synchronized clipboard text",
+                            tr("View and manage synchronized clipboard text"),
                         ) {
                             live.clipboard_view.open = !live.clipboard_view.open;
                         }
                         if tool(
                             ui,
                             Icon::MessageCircle,
-                            "Chat",
+                            tr("Chat"),
                             live.chat.open,
                             compact,
-                            "Chat with the person at the remote machine",
+                            tr("Chat with the person at the remote machine"),
                         ) {
                             live.chat.toggle(&live.outbound);
                         }
                         let files = if live.files.is_sftp_active() {
-                            "Files (SFTP)"
+                            tr("Files (SFTP)")
                         } else {
-                            "Files"
+                            tr("Files")
                         };
                         if tool(
                             ui,
@@ -731,17 +740,17 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                             files,
                             live.files_view.open,
                             compact,
-                            "Browse, download and upload files",
+                            tr("Browse, download and upload files"),
                         ) {
                             live.files_view.open = !live.files_view.open;
                         }
                         if tool(
                             ui,
                             Icon::Eye,
-                            "View only",
+                            tr("View only"),
                             live.view_only,
                             compact,
-                            "Don't send keyboard, mouse or clipboard to the server",
+                            tr("Don't send keyboard, mouse or clipboard to the server"),
                         ) {
                             live.view_only = !live.view_only;
                         }
@@ -759,8 +768,11 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .add(
-                    theme::danger(ui, format!("{} Disconnect", char::from(Icon::LogOut)))
-                        .min_size(egui::vec2(0.0, 36.0)),
+                    theme::danger(
+                        ui,
+                        fill(tr("{} Disconnect"), &[&(char::from(Icon::LogOut))]),
+                    )
+                    .min_size(egui::vec2(0.0, 36.0)),
                 )
                 .clicked()
             {

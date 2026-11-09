@@ -1,5 +1,6 @@
 //! Light and dark design tokens (amber accent, navy neutrals) and the egui visuals built from them.
 
+use crate::shared::i18n::tr;
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -271,7 +272,7 @@ pub fn window_header(
                     .fill(Color32::TRANSPARENT)
                     .stroke(Stroke::NONE)
                     .min_size(egui::vec2(32.0, 32.0));
-                    close = ui.add(x).on_hover_text("Close").clicked();
+                    close = ui.add(x).on_hover_text(tr("Close")).clicked();
                 });
             });
         });
@@ -327,12 +328,12 @@ pub fn switch(ui: &mut egui::Ui) {
         (
             Theme::Light,
             char::from(Icon::Sun).to_string(),
-            "Light theme",
+            tr("Light theme"),
         ),
         (
             Theme::Dark,
             char::from(Icon::Moon).to_string(),
-            "Dark theme",
+            tr("Dark theme"),
         ),
     ];
     if segmented(ui, &mut theme, &items) {
