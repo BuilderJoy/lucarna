@@ -18,6 +18,7 @@ use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Order, RichText, 
 use lucide_icons::Icon;
 
 use super::ft_server::{FileEvent, FileHook, VirtualDrives, is_risky};
+use super::os_input::{self, Setup};
 use super::session::{Gate, HostConfig, register_repeater_mode_ii, serve_stream};
 use crate::features::connection::{ConnectRequest, Credentials, ServerAddress, SessionOptions};
 use crate::shared::crypto::{
@@ -126,6 +127,9 @@ pub struct HostView {
     cancel_transfer: Arc<AtomicBool>,
     /// Set by the injector when the person here took the mouse (unix ms), read by the strip.
     mouse_blocked: Arc<AtomicU64>,
+    /// What this system still needs for remote control, checked every couple of seconds while the page is open.
+    setup: Vec<Setup>,
+    setup_checked: Option<Instant>,
     drives_loaded: bool,
     /// The PIN the host thread checks; changes after every session and every denied connection.
     pin_shared: Arc<Mutex<String>>,
@@ -174,6 +178,8 @@ impl Default for HostView {
             transfer: None,
             cancel_transfer: Arc::new(AtomicBool::new(false)),
             mouse_blocked: Arc::new(AtomicU64::new(0)),
+            setup: Vec::new(),
+            setup_checked: None,
             drives_loaded: false,
             pin_shared: Arc::new(Mutex::new(String::new())),
             consent_tx: None,
@@ -1026,6 +1032,65 @@ impl HostView {
         }
     }
 
+    /// Permissions or tools the system still wants before the other person can see and control this screen.
+    fn setup_card(&mut self, ui: &mut Ui) {
+        if self
+            .setup_checked
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(2))
+        {
+            self.setup = os_input::missing_setup();
+            self.setup_checked = Some(Instant::now());
+        }
+        if self.setup.is_empty() {
+            return;
+        }
+        ui.ctx().request_repaint_after(Duration::from_secs(2));
+        let p = theme::palette(ui.ctx());
+        for item in self.setup.clone() {
+            let (text, url) = match item {
+                Setup::ScreenRecording => (
+                    tr(
+                        "macOS needs your permission to record the screen. Without it the other person sees only the wallpaper.",
+                    ),
+                    Some(
+                        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                    ),
+                ),
+                Setup::Accessibility => (
+                    tr(
+                        "macOS needs the Accessibility permission so the other person can click and type.",
+                    ),
+                    Some(
+                        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                    ),
+                ),
+                Setup::LinuxTools => (
+                    tr(
+                        "Install xdotool and ImageMagick (the import command) so Lucarna can see and control this screen. Wayland sessions are not supported.",
+                    ),
+                    None,
+                ),
+            };
+            egui::Frame::NONE
+                .fill(p.danger_soft)
+                .stroke(Stroke::new(1.0, p.danger.gamma_multiply(0.5)))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(text).size(13.0).color(p.text));
+                        if let Some(url) = url
+                            && ui.button(tr("Open settings")).clicked()
+                        {
+                            let _ = std::process::Command::new("open").arg(url).spawn();
+                        }
+                    });
+                });
+            ui.add_space(8.0);
+        }
+    }
+
     /// First thing on the page, like any remote-support tool: your code and PIN, ready to read out.
     fn idle_view(&mut self, ui: &mut Ui) {
         let p = theme::palette(ui.ctx());
@@ -1039,6 +1104,7 @@ impl HostView {
             );
         });
         ui.add_space(18.0);
+        self.setup_card(ui);
         self.code_cards(ui);
         ui.add_space(16.0);
         ui.horizontal(|ui| {

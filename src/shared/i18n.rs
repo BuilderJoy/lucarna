@@ -272,6 +272,19 @@ static ES: &[(&str, &str)] = &[
     ),
     ("Dismiss message", "Descartar mensaje"),
     (
+        "macOS needs your permission to record the screen. Without it the other person sees only the wallpaper.",
+        "macOS necesita tu permiso para grabar la pantalla. Sin él, la otra persona ve solo el fondo.",
+    ),
+    (
+        "macOS needs the Accessibility permission so the other person can click and type.",
+        "macOS necesita el permiso de Accesibilidad para que la otra persona pueda hacer clic y escribir.",
+    ),
+    (
+        "Install xdotool and ImageMagick (the import command) so Lucarna can see and control this screen. Wayland sessions are not supported.",
+        "Instala xdotool e ImageMagick (el comando import) para que Lucarna pueda ver y controlar esta pantalla. Las sesiones Wayland no son compatibles.",
+    ),
+    ("Open settings", "Abrir ajustes"),
+    (
         "You have the mouse. Remote control is paused.",
         "Tienes el ratón. El control remoto está en pausa.",
     ),

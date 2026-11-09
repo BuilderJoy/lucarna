@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use super::os_input::{self, Button, Mods};
+
 const SHIFT: u32 = 0xffe1;
 const CONTROL: u32 = 0xffe3;
 const ALT: u32 = 0xffe9;
@@ -155,6 +157,9 @@ impl LocalActivityGuard {
 /// Sink for injecting remote keyboard and pointer events in user space.
 pub trait InputInjector: Send {
     fn inject(&mut self, event: HostInputEvent) -> io::Result<()>;
+
+    /// The size of the shared picture changed; injectors that need it to place the pointer keep it.
+    fn set_frame_size(&mut self, _width: u16, _height: u16) {}
 }
 
 /// Records decoded events in memory, enforcing `view_only` and `LocalActivityGuard`.
@@ -192,18 +197,27 @@ impl InputInjector for RecordingInjector {
     }
 }
 
-/// User-space OS input injector with local mouse priority and view-only enforcement.
+/// User-space OS input injector with local mouse priority and view-only enforcement. The system calls live in
+/// `os_input`, one implementation per operating system.
 pub struct SystemInputInjector {
     pub view_only: bool,
     pub guard: LocalActivityGuard,
     last_buttons: PointerButtons,
+    mods: Mods,
+    /// Size of the shared picture, to turn its coordinates into the system's units.
+    frame: (u16, u16),
+    /// Last button press (time, position, count), to give the system double and triple clicks.
+    last_click: Option<(Instant, (i32, i32), i64)>,
     /// Where the cursor was right after our last injected move. If it is somewhere else when the next remote
-    /// move arrives, a person moved the mouse. ponytail: one `xdotool` spawn per probe; read the pointer through
-    /// the X11 API if the cost shows.
+    /// move arrives, a person moved the mouse. ponytail: on Linux this is one `xdotool` spawn per probe; read
+    /// the pointer through the X11 API if the cost shows.
     probe: fn() -> Option<(u16, u16)>,
     expected: Option<(u16, u16)>,
     /// Unix milliseconds of the last remote event we dropped because the person here had the mouse (0 = never).
     blocked_at: Option<Arc<AtomicU64>>,
+    /// False in tests: the decisions run but nothing is sent to the operating system (a test must not move
+    /// the mouse of whoever runs it).
+    real: bool,
 }
 
 impl SystemInputInjector {
@@ -212,9 +226,13 @@ impl SystemInputInjector {
             view_only,
             guard: LocalActivityGuard::default(),
             last_buttons: PointerButtons::default(),
-            probe: local_pointer,
+            mods: Mods::default(),
+            frame: (0, 0),
+            last_click: None,
+            probe: os_input::pointer,
             expected: None,
             blocked_at: None,
+            real: true,
         }
     }
 
@@ -223,35 +241,29 @@ impl SystemInputInjector {
         self.blocked_at = marker;
         self
     }
-}
 
-/// The physical cursor position. Only where we can inject input (Linux with xdotool) is there anything to
-/// protect, so elsewhere this is `None` and no priority is applied.
-fn local_pointer() -> Option<(u16, u16)> {
-    #[cfg(target_os = "linux")]
-    {
-        let out = std::process::Command::new("xdotool")
-            .args(["getmouselocation", "--shell"])
-            .output()
-            .ok()?;
-        return parse_mouse_location(&String::from_utf8_lossy(&out.stdout));
+    /// 1 for a new click, 2 for a double click (same place, within 400 ms), and so on.
+    fn click_count(&mut self, at: (i32, i32), now: Instant) -> i64 {
+        let n = match self.last_click {
+            Some((t, p, n))
+                if now.saturating_duration_since(t) < Duration::from_millis(400)
+                    && (p.0 - at.0).abs() <= 4
+                    && (p.1 - at.1).abs() <= 4 =>
+            {
+                n + 1
+            }
+            _ => 1,
+        };
+        self.last_click = Some((now, at, n));
+        n
     }
-    #[allow(unreachable_code)]
-    None
-}
-
-/// `xdotool getmouselocation --shell` prints `X=…`, `Y=…`, `SCREEN=…`, `WINDOW=…`.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn parse_mouse_location(text: &str) -> Option<(u16, u16)> {
-    let get = |key: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(key))
-            .and_then(|v| v.trim().parse::<u16>().ok())
-    };
-    Some((get("X=")?, get("Y=")?))
 }
 
 impl InputInjector for SystemInputInjector {
+    fn set_frame_size(&mut self, width: u16, height: u16) {
+        self.frame = (width, height);
+    }
+
     fn inject(&mut self, event: HostInputEvent) -> io::Result<()> {
         if self.view_only {
             return Ok(());
@@ -279,12 +291,52 @@ impl InputInjector for SystemInputInjector {
                 let b = PointerButtons::from_mask(buttons);
                 let prev = self.last_buttons;
                 self.last_buttons = b;
-                inject_os_pointer(x, y, prev, b);
+                let at = match self.real.then(os_input::screen_size).flatten() {
+                    Some(os) => os_input::scale_point(x, y, self.frame, os),
+                    None => (i32::from(x), i32::from(y)),
+                };
+                let held = [
+                    (b.left, Button::Left),
+                    (b.right, Button::Right),
+                    (b.middle, Button::Middle),
+                ]
+                .into_iter()
+                .find_map(|(down, btn)| down.then_some(btn));
+                if self.real {
+                    os_input::pointer_to(at.0, at.1, held, self.mods);
+                }
+                for (btn, was, is) in [
+                    (Button::Left, prev.left, b.left),
+                    (Button::Middle, prev.middle, b.middle),
+                    (Button::Right, prev.right, b.right),
+                ] {
+                    if is && !was {
+                        let clicks = self.click_count(at, now);
+                        if self.real {
+                            os_input::button(btn, true, clicks, at, self.mods);
+                        }
+                    } else if !is && was {
+                        let clicks = self.last_click.map_or(1, |c| c.2);
+                        if self.real {
+                            os_input::button(btn, false, clicks, at, self.mods);
+                        }
+                    }
+                }
+                // The wheel arrives as a press and a release: act on the press only.
+                if self.real && b.wheel_up && !prev.wheel_up {
+                    os_input::wheel(true, self.mods);
+                }
+                if self.real && b.wheel_down && !prev.wheel_down {
+                    os_input::wheel(false, self.mods);
+                }
                 self.expected = (self.probe)();
             }
             HostInputEvent::Key { down, keysym } => {
                 if let Some(key) = NativeKey::from_keysym(keysym) {
-                    inject_os_key(down, key);
+                    self.mods.update(key, down);
+                    if self.real {
+                        os_input::key(down, key, self.mods);
+                    }
                 }
             }
         }
@@ -292,89 +344,9 @@ impl InputInjector for SystemInputInjector {
     }
 }
 
-fn inject_os_pointer(x: u16, y: u16, prev: PointerButtons, buttons: PointerButtons) {
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-        let _ = Command::new("xdotool")
-            .args(["mousemove", &x.to_string(), &y.to_string()])
-            .status();
-        for (btn_num, was_down, is_down) in [
-            ("1", prev.left, buttons.left),
-            ("2", prev.middle, buttons.middle),
-            ("3", prev.right, buttons.right),
-        ] {
-            if is_down && !was_down {
-                let _ = Command::new("xdotool")
-                    .args(["mousedown", btn_num])
-                    .status();
-            } else if !is_down && was_down {
-                let _ = Command::new("xdotool").args(["mouseup", btn_num]).status();
-            }
-        }
-        if buttons.wheel_up {
-            let _ = Command::new("xdotool").args(["click", "4"]).status();
-        }
-        if buttons.wheel_down {
-            let _ = Command::new("xdotool").args(["click", "5"]).status();
-        }
-    }
-    let _ = (x, y, prev, buttons);
-}
-
-fn inject_os_key(down: bool, key: NativeKey) {
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-        if !down {
-            return;
-        }
-        match key {
-            NativeKey::Char(c) => {
-                let _ = Command::new("xdotool")
-                    .args(["type", "--delay", "0", "--", &c.to_string()])
-                    .status();
-            }
-            other => {
-                let sym = match other {
-                    NativeKey::Backspace => Some("BackSpace"),
-                    NativeKey::Tab => Some("Tab"),
-                    NativeKey::Enter => Some("Return"),
-                    NativeKey::Escape => Some("Escape"),
-                    NativeKey::Delete => Some("Delete"),
-                    NativeKey::Insert => Some("Insert"),
-                    NativeKey::Home => Some("Home"),
-                    NativeKey::End => Some("End"),
-                    NativeKey::PageUp => Some("Prior"),
-                    NativeKey::PageDown => Some("Next"),
-                    NativeKey::ArrowLeft => Some("Left"),
-                    NativeKey::ArrowUp => Some("Up"),
-                    NativeKey::ArrowRight => Some("Right"),
-                    NativeKey::ArrowDown => Some("Down"),
-                    _ => None,
-                };
-                if let Some(s) = sym {
-                    let _ = Command::new("xdotool").args(["key", s]).status();
-                }
-            }
-        }
-    }
-    let _ = (down, key);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_xdotool_location_output_is_parsed() {
-        assert_eq!(
-            parse_mouse_location("X=640\nY=360\nSCREEN=0\nWINDOW=4194307\n"),
-            Some((640, 360))
-        );
-        assert_eq!(parse_mouse_location("nothing"), None);
-        assert_eq!(parse_mouse_location("X=-5\nY=3\n"), None);
-    }
 
     static FAKE_X: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -388,6 +360,7 @@ mod tests {
         let marker = Arc::new(AtomicU64::new(0));
         let mut inj = SystemInputInjector::new(false).with_blocked_marker(Some(marker.clone()));
         inj.probe = fake_pointer;
+        inj.real = false;
         inj.guard = LocalActivityGuard::new(Duration::from_millis(80));
         let remote = |x| HostInputEvent::Pointer {
             buttons: 0,
@@ -427,6 +400,7 @@ mod tests {
         let marker = Arc::new(AtomicU64::new(0));
         let mut inj = SystemInputInjector::new(true).with_blocked_marker(Some(marker.clone()));
         inj.probe = fake_pointer;
+        inj.real = false;
         inj.inject(HostInputEvent::Pointer {
             buttons: 0,
             x: 1,

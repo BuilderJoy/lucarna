@@ -285,6 +285,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
         // Capture initial frame to advertise accurate desktop geometry in ServerInit.
         let initial = self.capturer.capture()?;
         self.screen_size = (initial.width, initial.height);
+        self.injector.set_frame_size(initial.width, initial.height);
         self.damage.mark_full_dirty();
 
         let mut init = Vec::with_capacity(24 + self.config.desktop_name.len());
@@ -381,6 +382,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
         let frame = self.capturer.capture()?;
         let resized = (frame.width, frame.height) != self.screen_size;
         self.screen_size = (frame.width, frame.height);
+        self.injector.set_frame_size(frame.width, frame.height);
 
         let mut rects = self.damage.diff(&frame);
         // RFB requires every FramebufferUpdateRequest to eventually receive a response;

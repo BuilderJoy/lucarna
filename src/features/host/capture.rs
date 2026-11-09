@@ -334,30 +334,34 @@ pub fn parse_ppm_p6(data: &[u8]) -> io::Result<Frame> {
 }
 
 fn capture_os_screen() -> io::Result<Frame> {
-    #[cfg(target_os = "linux")]
-    {
-        // Try ImageMagick `import` or `gm` emitting P6 PPM to stdout in user space.
-        let out = Command::new("import")
-            .args(["-window", "root", "ppm:-"])
-            .output()?;
-        if out.status.success() {
-            return parse_ppm_p6(&out.stdout);
-        }
+    super::os_input::capture()
+}
+
+/// Linux: ImageMagick `import` writes the root window as a P6 PPM on stdout.
+pub(super) fn capture_with_import() -> io::Result<Frame> {
+    let out = Command::new("import")
+        .args(["-window", "root", "ppm:-"])
+        .output()?;
+    if out.status.success() {
+        return parse_ppm_p6(&out.stdout);
     }
-    #[cfg(target_os = "macos")]
-    {
-        let tmp = std::env::temp_dir().join(format!("lucarna-cap-{}.jpg", std::process::id()));
-        let status = Command::new("screencapture")
-            .args(["-x", "-m", "-t", "jpg"])
-            .arg(&tmp)
-            .status()?;
-        if status.success() {
-            let bytes = std::fs::read(&tmp)?;
-            let _ = std::fs::remove_file(&tmp);
-            if let Ok(frame) = decode_jpeg_frame(&bytes) {
-                return Ok(frame);
-            }
-        }
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "OS capture tool unavailable",
+    ))
+}
+
+/// macOS: `screencapture` needs the Screen Recording permission, or it returns the wallpaper only.
+pub(super) fn capture_with_screencapture() -> io::Result<Frame> {
+    let tmp = std::env::temp_dir().join(format!("lucarna-cap-{}.jpg", std::process::id()));
+    let status = Command::new("screencapture")
+        .args(["-x", "-m", "-t", "jpg"])
+        .arg(&tmp)
+        .status()?;
+    if status.success() {
+        let bytes = std::fs::read(&tmp)?;
+        let _ = std::fs::remove_file(&tmp);
+        return decode_jpeg_frame(&bytes);
     }
     Err(io::Error::new(
         io::ErrorKind::Unsupported,

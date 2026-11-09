@@ -7,6 +7,7 @@
 pub mod capture;
 pub mod ft_server;
 pub mod input_inject;
+pub mod os_input;
 pub mod session;
 pub mod view;
 
