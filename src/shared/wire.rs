@@ -83,3 +83,61 @@ impl io::Write for Duplex {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub struct PipeEnd {
+    pub rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    pub tx: std::sync::mpsc::Sender<Vec<u8>>,
+    pub buf: std::collections::VecDeque<u8>,
+}
+
+#[cfg(test)]
+pub fn pipe_pair() -> (PipeEnd, PipeEnd) {
+    let (tx_a, rx_b) = std::sync::mpsc::channel();
+    let (tx_b, rx_a) = std::sync::mpsc::channel();
+    (
+        PipeEnd {
+            rx: rx_a,
+            tx: tx_a,
+            buf: std::collections::VecDeque::new(),
+        },
+        PipeEnd {
+            rx: rx_b,
+            tx: tx_b,
+            buf: std::collections::VecDeque::new(),
+        },
+    )
+}
+
+#[cfg(test)]
+impl Read for PipeEnd {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        while self.buf.is_empty() {
+            match self.rx.recv() {
+                Ok(chunk) => self.buf.extend(chunk),
+                Err(_) => return Ok(0),
+            }
+        }
+        let n = out.len().min(self.buf.len());
+        for b in &mut out[..n] {
+            *b = self.buf.pop_front().unwrap();
+        }
+        Ok(n)
+    }
+}
+
+#[cfg(test)]
+impl io::Write for PipeEnd {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if !data.is_empty() {
+            self.tx
+                .send(data.to_vec())
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed"))?;
+        }
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}

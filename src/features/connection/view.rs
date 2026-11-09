@@ -14,6 +14,7 @@ use lucide_icons::Icon;
 use super::saved::{self, SavedConnection, SessionOptions};
 use super::widgets;
 use super::{Credentials, ServerAddress, SshTarget};
+use crate::features::host::HostView;
 use crate::shared::theme;
 
 #[derive(Clone)]
@@ -36,6 +37,13 @@ enum Filter {
     Online,
     Hidden,
     Label(String),
+}
+
+/// Top-level page of the start screen.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Connect,
+    Share,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -161,6 +169,8 @@ pub struct Dashboard {
     modal: Option<Modal>,
     logo: Option<TextureHandle>,
     previews: HashMap<String, Option<TextureHandle>>,
+    pub host_view: HostView,
+    mode: Mode,
     quick: String,
     quick_view_only: bool,
     quick_ssh_on: bool,
@@ -208,6 +218,8 @@ impl Default for Dashboard {
             modal: None,
             logo: None,
             previews: HashMap::new(),
+            host_view: HostView::default(),
+            mode: Mode::Connect,
             quick: String::new(),
             quick_view_only: false,
             quick_ssh_on: false,
@@ -318,6 +330,16 @@ impl Dashboard {
                 ui.add_enabled_ui(!busy, |ui| self.top_bar(ui));
             });
 
+        if self.mode == Mode::Share {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(p.bg))
+                .show(ui, |ui| self.host_view.show_page(ui));
+            if let Some(r) = self.host_view.show_join_dialog(&ctx) {
+                request = Some(r);
+            }
+            return request;
+        }
+
         // Bottom status bar: device count, shortcuts hint, connection status/error, and quick reconnect.
         let bottom_frame =
             egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(16, 6));
@@ -365,6 +387,10 @@ impl Dashboard {
             request = Some(r);
         }
 
+        if let Some(r) = self.host_view.show_join_dialog(&ctx) {
+            request = Some(r);
+        }
+
         // Properties dialog and quick modals.
         if !busy {
             if let Some(r) = self.show_properties_window(&ctx) {
@@ -397,7 +423,26 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.add(egui::Image::new((logo_id, egui::vec2(34.0, 34.0))).corner_radius(9));
             ui.label(RichText::new("Lucarna").size(18.0).strong());
-            ui.add_space(20.0);
+            ui.add_space(12.0);
+            let sharing = self.host_view.is_running();
+            let items = [
+                (Mode::Connect, "Connect".to_string(), "Connect to a device"),
+                (
+                    Mode::Share,
+                    if sharing {
+                        "Share this device ●".to_string()
+                    } else {
+                        "Share this device".to_string()
+                    },
+                    "Let someone connect to this computer",
+                ),
+            ];
+            theme::segmented(ui, &mut self.mode, &items);
+            ui.add_space(12.0);
+            if self.mode == Mode::Share {
+                ui.with_layout(Layout::right_to_left(Align::Center), theme::switch);
+                return;
+            }
 
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.omni)
@@ -405,24 +450,26 @@ impl Dashboard {
                         "{}  Search connections, labels or addresses",
                         char::from(Icon::Search)
                     ))
-                    .desired_width(520.0)
+                    .desired_width((ui.available_width() - 470.0).clamp(160.0, 520.0))
                     .margin(egui::vec2(12.0, 10.0)),
             );
             if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)) {
                 resp.request_focus();
             }
             if self.omni.is_empty() {
-                ui.painter().text(
-                    resp.rect.right_center() - egui::vec2(14.0, 0.0),
-                    egui::Align2::RIGHT_CENTER,
-                    if cfg!(target_os = "macos") {
-                        "⌘K"
-                    } else {
-                        "Ctrl K"
-                    },
-                    FontId::proportional(11.0),
-                    p.text3,
-                );
+                if resp.rect.width() > 240.0 {
+                    ui.painter().text(
+                        resp.rect.right_center() - egui::vec2(14.0, 0.0),
+                        egui::Align2::RIGHT_CENTER,
+                        if cfg!(target_os = "macos") {
+                            "⌘K"
+                        } else {
+                            "Ctrl K"
+                        },
+                        FontId::proportional(11.0),
+                        p.text3,
+                    );
+                }
             } else if ui
                 .small_button(char::from(Icon::X).to_string())
                 .on_hover_text("Clear search")
@@ -486,15 +533,17 @@ impl Dashboard {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
+        let sharing = self.host_view.is_running();
+        let mode = &mut self.mode;
         egui::Panel::bottom("device_card")
             .frame(egui::Frame::NONE)
             .resizable(false)
-            .show(ui, Self::device_card);
+            .show(ui, |ui| Self::device_card(ui, mode, sharing));
         self.sidebar_lists(ui);
     }
 
-    /// Entry point of Studio / QuickSupport mode; the host UI lands with BUI-44.
-    fn device_card(ui: &mut egui::Ui) {
+    /// Entry point of Studio / QuickSupport mode.
+    fn device_card(ui: &mut egui::Ui, mode: &mut Mode, sharing: bool) {
         let p = theme::palette(ui.ctx());
         egui::Frame::NONE
             .fill(p.card)
@@ -516,7 +565,12 @@ impl Dashboard {
                                 .size(13.0),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(RichText::new("Not shared").size(11.0).color(p.text3));
+                                let (text, color) = if sharing {
+                                    ("Sharing", p.success)
+                                } else {
+                                    ("Not shared", p.text3)
+                                };
+                                ui.label(RichText::new(text).size(11.0).color(color));
                             });
                         });
                         ui.add_space(4.0);
@@ -527,11 +581,15 @@ impl Dashboard {
                         );
                         ui.add_space(6.0);
                         let w = ui.available_width();
-                        ui.add_enabled(
-                            false,
-                            egui::Button::new("Share this screen").min_size(egui::vec2(w, 34.0)),
-                        )
-                        .on_disabled_hover_text("Coming with QuickSupport (BUI-44)");
+                        if ui
+                            .add(
+                                egui::Button::new("Share this screen")
+                                    .min_size(egui::vec2(w, 34.0)),
+                            )
+                            .clicked()
+                        {
+                            *mode = Mode::Share;
+                        }
                     },
                 );
             });
@@ -910,6 +968,9 @@ impl Dashboard {
                                 .clicked()
                             {
                                 self.quick_view_only = !self.quick_view_only;
+                            }
+                            if theme::chip(ui, Icon::KeyRound, "Join with code", false).clicked() {
+                                self.host_view.join_open = true;
                             }
                             if theme::chip(ui, Icon::Radio, "Via repeater", self.quick_rep_on)
                                 .clicked()
@@ -1527,6 +1588,7 @@ impl Dashboard {
                 let creds = Credentials {
                     user: c.user,
                     password: saved::password(&c.address).unwrap_or_default(),
+                    pin: String::new(),
                 };
                 Some(ConnectRequest {
                     repeater: ServerAddress::parse(&c.repeater),
@@ -1777,6 +1839,7 @@ impl Dashboard {
                                 let creds = Credentials {
                                     user: self.editor.user.trim().into(),
                                     password: self.editor.password.clone(),
+                                    pin: String::new(),
                                 };
                                 self.save_editor(target.clone());
                                 request = Some(ConnectRequest {
@@ -1936,6 +1999,7 @@ impl Dashboard {
                         let creds = Credentials {
                             user: self.editor.user.trim().into(),
                             password: self.editor.password.clone(),
+                            pin: String::new(),
                         };
                         self.save_editor(t.clone());
                         request = Some(ConnectRequest {
@@ -2418,6 +2482,7 @@ impl Dashboard {
         let creds = Credentials {
             user: self.editor.user.trim().into(),
             password,
+            pin: String::new(),
         };
         if let Some(target) = &ssh {
             let ssh_pw = if self.editor.ssh_password.is_empty() {
@@ -2528,6 +2593,7 @@ impl Dashboard {
                 creds: Credentials {
                     user: c.user.clone(),
                     password: saved::password(&c.address).unwrap_or_default(),
+                    pin: String::new(),
                 },
                 options: c.options.clone(),
             }
@@ -2538,6 +2604,7 @@ impl Dashboard {
                 creds: Credentials {
                     user: String::new(),
                     password: saved::password(&address).unwrap_or_default(),
+                    pin: String::new(),
                 },
                 address,
                 options: SessionOptions::default(),

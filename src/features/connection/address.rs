@@ -9,6 +9,12 @@ impl ServerAddress {
         if input.is_empty() {
             return None;
         }
+        if let Some(id) = input.strip_prefix("ID:")
+            && !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(Self(format!("ID:{id}")));
+        }
         if let Some((host, port)) = input.split_once("::") {
             return Some(Self(format!("{host}:{port}")));
         }

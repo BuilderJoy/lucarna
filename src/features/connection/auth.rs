@@ -1,10 +1,28 @@
 use des::cipher::{BlockCipherEncrypt, KeyInit};
 
 /// What the user typed to log in. `user` is empty for plain VNC password servers.
+/// `pin` is non-empty for QuickSupport / Studio sessions with end-to-end encryption.
 #[derive(Clone, Default)]
 pub struct Credentials {
     pub user: String,
     pub password: String,
+    pub pin: String,
+}
+
+#[cfg(test)]
+impl Credentials {
+    pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
+        Self {
+            user: user.into(),
+            password: password.into(),
+            pin: String::new(),
+        }
+    }
+
+    pub fn with_pin(mut self, pin: impl Into<String>) -> Self {
+        self.pin = pin.into();
+        self
+    }
 }
 
 /// VNC auth: DES-encrypt the challenge with the password, each key byte bit-reversed.

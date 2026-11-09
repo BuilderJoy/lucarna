@@ -43,8 +43,8 @@ struct LiveSession {
     bar_rect: Option<egui::Rect>,
     /// False until the first FramebufferUpdate lands; a full Raw frame can take seconds on slow links.
     has_frame: bool,
-    /// Whether the session runs through an SSH tunnel (shown as an encryption badge).
-    ssh: bool,
+    /// How the session is protected, shown as a badge: an SSH tunnel or the end-to-end PIN tunnel.
+    secure: Option<&'static str>,
     fullscreen_on_open: bool,
     /// Width the centred tool group took last frame, to centre it this frame.
     tools_w: f32,
@@ -54,7 +54,7 @@ struct LiveSession {
 struct Tab {
     events: mpsc::Receiver<Event>,
     pending: Option<(ServerAddress, SessionOptions)>,
-    ssh: bool,
+    secure: Option<&'static str>,
     /// What the tab shows until the server tells us its name.
     title: String,
     live: Option<LiveSession>,
@@ -84,6 +84,13 @@ impl App {
                 return;
             }
         };
+        let secure = if ssh.is_some() {
+            Some("SSH encrypted")
+        } else if !req.creds.pin.is_empty() {
+            Some("End-to-end encrypted")
+        } else {
+            None
+        };
         self.dashboard.last_request = Some(req.clone());
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
@@ -91,7 +98,7 @@ impl App {
         self.tabs.push(Tab {
             events: rx,
             pending: Some((req.address.clone(), req.options)),
-            ssh: ssh.is_some(),
+            secure,
             title: req.address.as_str().to_string(),
             live: None,
         });
@@ -318,7 +325,7 @@ fn handle_event(
                 scale,
                 bar_rect: None,
                 has_frame: false,
-                ssh: tab.ssh,
+                secure: tab.secure,
                 tools_w: 0.0,
                 fullscreen_on_open: opts.fullscreen,
             });
@@ -416,6 +423,7 @@ impl eframe::App for App {
             if let Some(req) = self.dashboard.show(ui, busy) {
                 self.connect(&ctx, req);
             }
+            self.dashboard.host_view.show_active_banner(&ctx);
             return;
         };
         // Round-trip measurement for the bar; the answer arrives as a normal update.
@@ -499,6 +507,7 @@ impl eframe::App for App {
             &live.clipboard,
             live.share_clipboard && !live.view_only,
         );
+        self.dashboard.host_view.show_active_banner(&ctx);
     }
 }
 
@@ -561,14 +570,14 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                     ui.visuals().warn_fg_color
                 };
                 ui.label(RichText::new("●").size(10.0).color(dot));
-                if live.ssh {
+                if let Some(label) = live.secure {
                     egui::Frame::NONE
                         .fill(p.success.gamma_multiply(0.16))
                         .corner_radius(egui::CornerRadius::same(14))
                         .inner_margin(egui::Margin::symmetric(10, 4))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new(format!("{} SSH encrypted", char::from(Icon::Lock)))
+                                RichText::new(format!("{} {label}", char::from(Icon::Lock)))
                                     .size(12.0)
                                     .strong()
                                     .color(p.success),

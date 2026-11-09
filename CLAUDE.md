@@ -22,6 +22,11 @@ ssh-keygen -t ed25519 -N "" -f ~/.ssh/lucarna_test && ssh-add ~/.ssh/lucarna_tes
 docker build -t lucarna-ssh-server -f tests/server/Dockerfile.ssh tests/server
 docker run -d --rm --name lucarna-ssh -p 2223:22 -e AUTHORIZED_KEY="$(cat ~/.ssh/lucarna_test.pub)" lucarna-ssh-server
 SSH_TEST_TARGET=lucarna@127.0.0.1:2223 VNC_TEST_PASSWORD=secret cargo test -- --ignored live_ssh live_sftp
+
+# Live Lucarna Studio Host (Phase 1 + Phase 2: no x11vnc, no sshd, port 5950):
+docker build -t lucarna-host-server -f tests/server/Dockerfile.host .
+docker run -d --rm --name lucarna-host -p 5950:5900 -e VNC_PASSWORD=studio lucarna-host-server
+VNC_HOST_TEST_ADDR=127.0.0.1:5950 VNC_TEST_PASSWORD=studio cargo test -- --ignored live_host
 ```
 
 VS Code can keep showing old rust-analyzer errors after files change outside the editor (arguments or match arms "missing" that the code already has). `cargo check --all-targets` is the truth; to refresh the panel, save any `.rs` file or run "rust-analyzer: Restart server". From a terminal, adding a blank line to `Cargo.toml` and then `git checkout Cargo.toml` forces a workspace reload and a fresh check (touching `.rs` files does not).
@@ -35,6 +40,7 @@ Vertical slices per feature, named in RFB (RFC 6143) domain language: `src/featu
 - A feature owns its domain types, wire messages (`protocol.rs`) and UI (`view.rs`). Only what its `mod.rs` re-exports is public; cross-feature use goes through those exports.
 - `shared/wire.rs`: big-endian read helpers and `invalid()` for `io::ErrorKind::InvalidData` errors.
 - `shared/theme.rs`: light/dark design tokens (`DARK`, `LIGHT`, amber `ACCENT`), egui visuals for both themes, `primary`/`danger` buttons and the sun/moon `toggle`. Views take colours from `theme::palette(ctx)`, never `Color32::from_rgb`; the remote-desktop illustration in previews is the only exception. The theme preference persists through egui memory. `theme::segmented` and `theme::switch` (sun/moon) are the shared segmented controls; they reverse their items inside right-to-left layouts, so never wrap them in `with_layout` (a layout that differs from the parent makes the container span the whole gap). `theme::window_header`, `tag`, `count_pill`, `chip` and `keycap` build the Clipboard and Files windows too (header with accent tile and close button, cards on `card`/`border`, 12 px caps column titles). The Clipboard window has no OS title bar (`title_bar(false)`; the header is ours). `connection/widgets.rs` holds label colours, tile wallpapers, the filled star, chips and keycaps. A test checks every text token for WCAG AA (4.5:1) on `surface` and `card`.
+- `shared/crypto.rs`: End-to-End Encryption (E2EE) over untrusted repeaters using ephemeral X25519 key exchange, PBKDF2-HMAC-SHA256 PIN verification, RFC 8439 ChaCha20-Poly1305 AEAD framing (`E2eeStream`, `E2eeReader`, `E2eeWriter`), and `BruteForceLimiter` (lockout after 3 failed PIN attempts).
 
 ### Threading / data flow
 
@@ -79,7 +85,7 @@ Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on 
 
 ### Saved connections & Address Book
 
-`connection/saved.rs`: names, addresses, usernames, labels, favorites, per-connection `SessionOptions` and `last_connected` timestamps in `connections.txt` under `eframe::storage_dir("Lucarna")` (backward-compatible with 2- and 3-column files); compressed RGBA desktop preview thumbnails in `previews/<address>.lcpv` (`Framebuffer::thumbnail`); passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. `connection::Dashboard` is the Address Book start screen (layout from the design canvas: top bar with search and theme switch, sidebar with label colours and a disabled "This device" card until BUI-44, "Connect to a device" card with SSH/View only/Via repeater chips, tiles with Online/Offline and SSH badges). Online/Offline comes from a TCP probe every 30 s while the Address Book is visible, direct connections only (no SSH, no repeater); it opens and closes a socket and sends no data. Before it was the RealVNC-style start screen with sidebar label filtering, grid/list views, context menus, keyboard shortcuts and the per-connection `Properties` dialog.
+`connection/saved.rs`: names, addresses, usernames, labels, favorites, per-connection `SessionOptions` and `last_connected` timestamps in `connections.txt` under `eframe::storage_dir("Lucarna")` (backward-compatible with 2- and 3-column files); compressed RGBA desktop preview thumbnails in `previews/<address>.lcpv` (`Framebuffer::thumbnail`); passwords **only** in the OS keychain (`keyring`, service `Lucarna`, account = normalized address). Never write a password to disk. The start screen has two pages, `Mode::Connect` (below) and `Mode::Share` ("Share this device", tabs in the top bar and the *This device* card): `host::HostView::show_page` walks the host through Waiting → Active with the session code and PIN, a permissions card and a safety card. While sharing, `show_active_banner` opens a separate always-on-top, undecorated window (`show_viewport_immediate`) with the red *End session now* button; `app.rs` calls it every frame. The person helping uses `show_join_dialog` (code and PIN as digit boxes fed by one hidden text field; a direct `host:port` replaces the code on a LAN), opened from the *Join with code* chip. The session bar badge reads *End-to-end encrypted* when the request carried a PIN. `connection::Dashboard` is the Address Book start screen (layout from the design canvas: top bar with search and theme switch, sidebar with label colours and a disabled "This device" card until BUI-44, "Connect to a device" card with SSH/View only/Via repeater chips, tiles with Online/Offline and SSH badges). Online/Offline comes from a TCP probe every 30 s while the Address Book is visible, direct connections only (no SSH, no repeater); it opens and closes a socket and sends no data. Before it was the RealVNC-style start screen with sidebar label filtering, grid/list views, context menus, keyboard shortcuts and the per-connection `Properties` dialog.
 
 ### Website (GitHub Pages)
 
@@ -88,3 +94,7 @@ Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on 
 ### Security rule
 
 Treat the server as untrusted: validate every size, length and rectangle before allocating or indexing (see `MAX_DIM`, `MAX_TEXT`, `read_string` max, `Framebuffer::contains` checks).
+
+### Embedded RFB Host (`features/host`)
+
+`features/host/` implements the user-space RFB 3.8 server engine for Studio & QuickSupport Mode: `capture.rs` (`Frame`, `DamageTracker` on a 64×64 tile grid with horizontal coalescing, `ScreenCapturer`), `input_inject.rs` (`NativeKey` X11 keysym decoder, `LocalActivityGuard` enforcing 2s physical mouse priority, `InputInjector`), `ft_server.rs` (`VirtualDrives` mapping `H:`, `M:`, `D:`, `V:` with `std::fs::canonicalize` sandboxing, and `FtServer` handling RFB message type 7 drives, Unicode `WIN32_FIND_DATAW` listings, 32 KiB streaming downloads, atomic `.lucarna-part` uploads and directory/file commands without SSH), and `session.rs` (`ZrleEncoder` with session-persistent zlib stream, `HostSession` handshake and message dispatch for `SetPixelFormat`, `SetEncodings`, `FramebufferUpdateRequest`, `KeyEvent`, `PointerEvent`, `ClientCutText`, and `FileTransfer` msg 7).

@@ -1,7 +1,7 @@
 //! Session aggregate: one live connection to a VNC server. Owns the socket and
 //! routes each server message to the feature that understands it.
 
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 use std::time::Duration;
@@ -15,6 +15,7 @@ use crate::features::file_transfer::{self, DualFiles, FileOps, RemoteFiles};
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::sftp::SftpClient;
 use crate::features::ssh::Tunnel;
+use crate::shared::crypto::{E2eeReader, E2eeStream, E2eeWriter, viewer_e2ee_handshake};
 use crate::shared::wire::{invalid, read_u8};
 
 pub use stats::Stats;
@@ -35,30 +36,73 @@ pub enum Event {
     Closed(String),
 }
 
+enum OutboundSink {
+    Tcp(TcpStream),
+    E2ee(E2eeWriter<TcpStream>),
+}
+
 /// Client-to-server channel, shared by the UI and the reader thread.
 pub struct Outbound {
-    stream: Mutex<TcpStream>,
+    sink: Mutex<OutboundSink>,
     stats: Stats,
 }
 
 impl Outbound {
-    pub fn send(&self, msg: &[u8]) -> io::Result<()> {
-        self.stream.lock().unwrap().write_all(msg)
-    }
-
-    pub fn close(&self) {
-        let _ = self.stream.lock().unwrap().shutdown(Shutdown::Both);
-    }
-
-    pub fn new(stream: TcpStream) -> Self {
+    fn with(sink: OutboundSink) -> Self {
         Self {
-            stream: Mutex::new(stream),
+            sink: Mutex::new(sink),
             stats: Stats::default(),
         }
     }
 
+    pub fn new_tcp(stream: TcpStream) -> Self {
+        Self::with(OutboundSink::Tcp(stream))
+    }
+
+    pub fn new_e2ee(writer: E2eeWriter<TcpStream>) -> Self {
+        Self::with(OutboundSink::E2ee(writer))
+    }
+
     pub fn stats(&self) -> &Stats {
         &self.stats
+    }
+
+    pub fn send(&self, msg: &[u8]) -> io::Result<()> {
+        let mut sink = self.sink.lock().unwrap();
+        match &mut *sink {
+            OutboundSink::Tcp(s) => s.write_all(msg),
+            OutboundSink::E2ee(w) => {
+                w.write_all(msg)?;
+                w.flush()
+            }
+        }
+    }
+
+    pub fn close(&self) {
+        let mut sink = self.sink.lock().unwrap();
+        match &mut *sink {
+            OutboundSink::Tcp(s) => {
+                let _ = s.shutdown(Shutdown::Both);
+            }
+            OutboundSink::E2ee(w) => {
+                let _ = w.flush();
+                let _ = w.get_ref().shutdown(Shutdown::Both);
+            }
+        }
+    }
+}
+
+enum SessionReader {
+    Plain(BufReader<TcpStream>),
+    E2ee(BufReader<E2eeReader<TcpStream>>),
+}
+
+impl Read for SessionReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::E2ee(r) => r.read(buf),
+        }
     }
 }
 
@@ -92,14 +136,28 @@ pub fn run(
         if repeater.is_some() {
             handshake::via_repeater(&mut s, address)?;
         }
-        let init = handshake::perform(&mut s, creds)?;
-        s.set_read_timeout(None)?;
+        let (outbound, mut s, init) = if !creds.pin.is_empty() {
+            let keys = viewer_e2ee_handshake(&mut s, &creds.pin)?;
+            let mut e2ee_stream = E2eeStream::new(s, keys);
+            let init = handshake::perform(&mut e2ee_stream, creds)?;
+            e2ee_stream.get_ref().set_read_timeout(None)?;
+            remote_screen::negotiate(&mut e2ee_stream, &[file_transfer::ENC_PROTOCOL_VERSION])?;
+            let (reader, writer) = e2ee_stream.into_split()?;
+            let outbound = Arc::new(Outbound::new_e2ee(writer));
+            let reader = SessionReader::E2ee(BufReader::with_capacity(1 << 16, reader));
+            (outbound, reader, init)
+        } else {
+            let init = handshake::perform(&mut s, creds)?;
+            s.set_read_timeout(None)?;
+            remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
+            let outbound = Arc::new(Outbound::new_tcp(s.try_clone()?));
+            let reader = SessionReader::Plain(BufReader::with_capacity(1 << 16, s));
+            (outbound, reader, init)
+        };
         let screen = Arc::new(Mutex::new(Framebuffer::new(
             init.width.into(),
             init.height.into(),
         )?));
-        remote_screen::negotiate(&mut s, &[file_transfer::ENC_PROTOCOL_VERSION])?;
-        let outbound = Arc::new(Outbound::new(s.try_clone()?));
         remote_screen::request_update(&outbound, false, &screen)?;
         let (tx_files, notify_files) = (tx.clone(), notify.clone());
         let vnc_files = Arc::new(RemoteFiles::new(outbound.clone(), move |u| {
@@ -122,8 +180,6 @@ pub fn run(
             files: files.clone(),
             clipboard: clipboard.clone(),
         });
-        // Server messages are parsed a few bytes at a time; unbuffered, each read is a syscall.
-        let mut s = BufReader::with_capacity(1 << 16, s);
         let mut decoder = remote_screen::Decoder::default();
         let mut receiver = file_transfer::Receiver::default();
 
@@ -219,7 +275,15 @@ pub fn test(
     if repeater.is_some() {
         handshake::via_repeater(&mut s, address).map_err(|e| format!("Repeater error: {e}"))?;
     }
-    match handshake::perform(&mut s, creds) {
+    let init_res = if !creds.pin.is_empty() {
+        let keys =
+            viewer_e2ee_handshake(&mut s, &creds.pin).map_err(|e| format!("E2EE error: {e}"))?;
+        let mut e2ee_stream = E2eeStream::new(s, keys);
+        handshake::perform(&mut e2ee_stream, creds)
+    } else {
+        handshake::perform(&mut s, creds)
+    };
+    match init_res {
         Ok(init) => {
             let ssh_tag = if ssh.is_some() { " (via SSH)" } else { "" };
             Ok(format!(
@@ -257,6 +321,7 @@ mod tests {
             &Credentials {
                 user: String::new(),
                 password: "wrong-pw".into(),
+                pin: String::new(),
             },
             tx,
             || {},
@@ -274,6 +339,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -452,6 +518,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -485,6 +552,7 @@ mod tests {
             let creds = Credentials {
                 user: String::new(),
                 password: password.clone(),
+                pin: String::new(),
             };
             let mut s = connect(&address).unwrap();
             s.set_read_timeout(Some(TIMEOUT)).unwrap();
@@ -497,7 +565,7 @@ mod tests {
             m.extend((encodings.len() as u16).to_be_bytes());
             encodings.iter().for_each(|e| m.extend(e.to_be_bytes()));
             s.write_all(&m).unwrap();
-            let out = Outbound::new(s.try_clone().unwrap());
+            let out = Outbound::new_tcp(s.try_clone().unwrap());
             remote_screen::request_update(&out, false, &screen).unwrap();
             let mut r = BufReader::new(s);
             assert_eq!(read_u8(&mut r).unwrap(), 0, "expected a FramebufferUpdate");
@@ -547,6 +615,7 @@ mod tests {
                 &Credentials {
                     user: String::new(),
                     password,
+                    pin: String::new(),
                 },
                 tx,
                 || {},
@@ -570,6 +639,199 @@ mod tests {
                 _ => {}
             }
         }
+        outbound.close();
+    }
+
+    /// End-to-end live test against the containerized Lucarna Studio Host (`tests/server/Dockerfile.host`).
+    /// Validates Phase 1 (RFB 3.8 handshake, 64×64 dirty-tile ZRLE screen capture, X11 keyboard/mouse injection)
+    /// and Phase 2 (Virtual Drives `M:\`, `D:\`, `H:\`, Unicode listings, upload, rename, download, delete without SSH).
+    #[test]
+    #[ignore = "needs a live Lucarna Host container (Dockerfile.host)"]
+    fn live_host() {
+        let addr_str = std::env::var("VNC_HOST_TEST_ADDR")
+            .or_else(|_| std::env::var("VNC_TEST_ADDR"))
+            .unwrap_or_else(|_| "127.0.0.1:5950".into());
+        let address = ServerAddress::parse(&addr_str).unwrap();
+        let password = std::env::var("VNC_TEST_PASSWORD").unwrap_or_else(|_| "studio".into());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            run(
+                &address,
+                None,
+                None,
+                &Credentials {
+                    user: String::new(),
+                    password,
+                    pin: String::new(),
+                },
+                tx,
+                || {},
+            )
+        });
+
+        let Event::Connected {
+            outbound,
+            screen,
+            files,
+            ..
+        } = rx.recv_timeout(Duration::from_secs(15)).expect("connected")
+        else {
+            panic!("failed to connect to Lucarna Studio Host")
+        };
+
+        // 1. Verify initial screen capture arrives over ZRLE and is non-blank.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left).expect("initial ScreenUpdated") {
+                Event::ScreenUpdated => break,
+                Event::Closed(r) => panic!("closed: {r}"),
+                _ => {}
+            }
+        }
+        assert!(
+            screen.lock().unwrap().pixels.iter().any(|&b| b != 0),
+            "captured studio host screen must not be blank"
+        );
+
+        let next_files = || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                match rx.recv_timeout(left).expect("file transfer event") {
+                    Event::Files(u) => break u,
+                    Event::Closed(r) => panic!("closed during FT: {r}"),
+                    _ => {}
+                }
+            }
+        };
+
+        // 2. Open File Transfer and verify Virtual Drives M:\, D:\, H:\.
+        files.open();
+        assert!(matches!(next_files(), file_transfer::Update::Access(true)));
+        let file_transfer::Update::Drives(drives) = next_files() else {
+            panic!("expected virtual drives list")
+        };
+        assert!(
+            drives.iter().any(|(d, _)| d == "M:\\"),
+            "M:\\ Music drive missing: {drives:?}"
+        );
+        assert!(
+            drives.iter().any(|(d, _)| d == "D:\\"),
+            "D:\\ Downloads drive missing: {drives:?}"
+        );
+        assert!(
+            drives.iter().any(|(d, _)| d == "H:\\"),
+            "H:\\ Home drive missing: {drives:?}"
+        );
+
+        // 3. List M:\Jingles\ and download `cuna_apertura.wav`.
+        files.list("M:\\Jingles\\");
+        let file_transfer::Update::Listing { entries, .. } = next_files() else {
+            panic!("expected M:\\Jingles\\ listing")
+        };
+        assert!(entries.iter().any(|e| e.name == "cuna_apertura.wav"));
+
+        let tmp = std::env::temp_dir().join(format!("lucarna-live-host-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        files.download("M:\\Jingles\\cuna_apertura.wav", &tmp);
+        let cuna_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of cuna_apertura.wav failed: {u:?}"),
+            }
+        };
+        let cuna_bytes = std::fs::read(&cuna_dest).unwrap();
+        assert!(cuna_bytes.starts_with(b"RIFF____WAVEfmt"));
+
+        // 4. Create dir, upload multi-block audio file, rename, download back, and delete.
+        files.delete("M:\\Jingles\\LiveTest\\pista_final.wav");
+        files.delete("M:\\Jingles\\LiveTest");
+        let _ = next_files();
+        let _ = next_files();
+
+        files.create_dir("M:\\Jingles\\LiveTest");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        let local_src = tmp.join("nueva_pista.wav");
+        let payload: Vec<u8> = (0..50_000u32)
+            .map(|i| (i.wrapping_mul(73) & 0xff) as u8)
+            .collect();
+        std::fs::write(&local_src, &payload).unwrap();
+        files.upload(&local_src, "M:\\Jingles\\LiveTest\\");
+        loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Uploaded(name) => {
+                    assert_eq!(name, "nueva_pista.wav");
+                    break;
+                }
+                u => panic!("upload failed: {u:?}"),
+            }
+        }
+
+        files.rename(
+            "M:\\Jingles\\LiveTest\\nueva_pista.wav",
+            "M:\\Jingles\\LiveTest\\pista_final.wav",
+        );
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        files.download("M:\\Jingles\\LiveTest\\pista_final.wav", &tmp);
+        let final_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of pista_final.wav failed: {u:?}"),
+            }
+        };
+        assert_eq!(std::fs::read(&final_dest).unwrap(), payload);
+
+        files.delete("M:\\Jingles\\LiveTest\\pista_final.wav");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+        files.delete("M:\\Jingles\\LiveTest");
+        assert!(matches!(
+            next_files(),
+            file_transfer::Update::Command { ok: true, .. }
+        ));
+
+        // 5. Phase 1 Input Injection: click inside xterm, type "STUDIO_LIVE_OK" + Enter,
+        // and verify the container's studio_console.sh wrote it to D:\teclas_recibidas.txt.
+        outbound.send(&[5, 1, 1, 0x90, 1, 0x2c]).unwrap(); // Pointer click at (400, 300)
+        outbound.send(&[5, 0, 1, 0x90, 1, 0x2c]).unwrap();
+        for ch in "STUDIO_LIVE_OK".chars() {
+            crate::features::input::type_char(&outbound, ch).unwrap();
+        }
+        // Send Enter (0xff0d).
+        outbound.send(&[4, 1, 0, 0, 0, 0, 0xff, 0x0d]).unwrap();
+        outbound.send(&[4, 0, 0, 0, 0, 0, 0xff, 0x0d]).unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+
+        files.download("D:\\teclas_recibidas.txt", &tmp);
+        let keys_dest = loop {
+            match next_files() {
+                file_transfer::Update::Progress { .. } => {}
+                file_transfer::Update::Downloaded(d) => break d,
+                u => panic!("download of D:\\teclas_recibidas.txt failed: {u:?}"),
+            }
+        };
+        let keys_log = std::fs::read_to_string(&keys_dest).unwrap();
+        assert!(
+            keys_log.contains("STUDIO_LIVE_OK"),
+            "expected typed text in D:\\teclas_recibidas.txt, got: {keys_log:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
         outbound.close();
     }
 }
