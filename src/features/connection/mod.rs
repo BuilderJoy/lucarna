@@ -6,6 +6,7 @@ pub mod handshake;
 mod mslogon;
 mod saved;
 mod view;
+mod widgets;
 
 pub use address::{ServerAddress, SshTarget};
 pub use auth::Credentials;

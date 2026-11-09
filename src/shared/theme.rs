@@ -174,21 +174,64 @@ pub fn danger(ui: &egui::Ui, text: impl Into<String>) -> egui::Button<'static> {
         .stroke(Stroke::new(1.0, p.danger.gamma_multiply(0.6)))
 }
 
-/// Sun / moon switch; the choice is remembered across restarts.
-pub fn toggle(ui: &mut egui::Ui) {
+/// Segmented control: a track with one raised segment per item. Returns true when the value changed.
+/// Items read in the given order even when the caller sits in a right-to-left layout.
+pub fn segmented<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    items: &[(T, String, &str)],
+) -> bool {
+    let p = palette(ui.ctx());
+    let mut changed = false;
+    let rtl = ui.layout().prefer_right_to_left();
+    egui::Frame::NONE
+        .fill(p.elevated)
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let ordered: Vec<_> = if rtl {
+                    items.iter().rev().collect()
+                } else {
+                    items.iter().collect()
+                };
+                for (v, label, tip) in ordered {
+                    let on = *value == *v;
+                    let text = RichText::new(label).color(if on { p.text } else { p.text3 });
+                    let btn = egui::Button::new(text)
+                        .fill(if on { p.card } else { Color32::TRANSPARENT })
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(7))
+                        .min_size(egui::vec2(34.0, 28.0));
+                    if ui.add(btn).on_hover_text(*tip).clicked() && !on {
+                        *value = *v;
+                        changed = true;
+                    }
+                }
+            });
+        });
+    changed
+}
+
+/// Sun | moon switch; the choice is remembered across restarts.
+pub fn switch(ui: &mut egui::Ui) {
     use lucide_icons::Icon;
-    let dark = ui.ctx().theme() == Theme::Dark;
-    let (icon, tip, next) = if dark {
-        (Icon::Sun, "Switch to light theme", ThemePreference::Light)
-    } else {
-        (Icon::Moon, "Switch to dark theme", ThemePreference::Dark)
-    };
-    if ui
-        .button(char::from(icon).to_string())
-        .on_hover_text(tip)
-        .clicked()
-    {
-        ui.ctx().set_theme(next);
+    let mut theme = ui.ctx().theme();
+    let items = [
+        (
+            Theme::Light,
+            char::from(Icon::Sun).to_string(),
+            "Light theme",
+        ),
+        (
+            Theme::Dark,
+            char::from(Icon::Moon).to_string(),
+            "Dark theme",
+        ),
+    ];
+    if segmented(ui, &mut theme, &items) {
+        ui.ctx().set_theme(ThemePreference::from(theme));
     }
 }
 

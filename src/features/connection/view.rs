@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{
@@ -9,6 +12,7 @@ use eframe::egui::{
 use lucide_icons::Icon;
 
 use super::saved::{self, SavedConnection, SessionOptions};
+use super::widgets;
 use super::{Credentials, ServerAddress, SshTarget};
 use crate::shared::theme;
 
@@ -29,6 +33,7 @@ enum Filter {
     All,
     Favorites,
     Recent,
+    Online,
     Hidden,
     Label(String),
 }
@@ -156,8 +161,34 @@ pub struct Dashboard {
     modal: Option<Modal>,
     logo: Option<TextureHandle>,
     previews: HashMap<String, Option<TextureHandle>>,
+    quick: String,
+    quick_view_only: bool,
+    quick_ssh_on: bool,
+    quick_ssh: String,
+    quick_rep_on: bool,
+    quick_rep: String,
+    /// Which saved direct connections answered the last TCP probe (key: address).
+    reach: HashMap<String, bool>,
+    reach_rx: Option<mpsc::Receiver<(String, bool)>>,
+    last_probe: Option<Instant>,
     pub last_request: Option<ConnectRequest>,
     pub status: String,
+}
+
+const PROBE_EVERY: Duration = Duration::from_secs(30);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
+
+/// True when something accepts TCP connections at `address`. Only opens and closes a socket.
+fn reachable(address: &str) -> bool {
+    let Some(addr) = ServerAddress::parse(address) else {
+        return false;
+    };
+    let Some((host, port)) = addr.host_port() else {
+        return false;
+    };
+    (host, port)
+        .to_socket_addrs()
+        .is_ok_and(|mut it| it.any(|a| TcpStream::connect_timeout(&a, PROBE_TIMEOUT).is_ok()))
 }
 
 impl Default for Dashboard {
@@ -177,6 +208,15 @@ impl Default for Dashboard {
             modal: None,
             logo: None,
             previews: HashMap::new(),
+            quick: String::new(),
+            quick_view_only: false,
+            quick_ssh_on: false,
+            quick_ssh: String::new(),
+            quick_rep_on: false,
+            quick_rep: String::new(),
+            reach: HashMap::new(),
+            reach_rx: None,
+            last_probe: None,
             last_request: None,
             status: String::new(),
         };
@@ -188,6 +228,44 @@ impl Default for Dashboard {
 }
 
 impl Dashboard {
+    fn is_online(&self, c: &SavedConnection) -> bool {
+        self.reach.get(c.address.as_str()).copied().unwrap_or(false)
+    }
+
+    /// Direct connections only: through SSH or a repeater the address isn't reachable from here.
+    fn status_of(&self, c: &SavedConnection) -> Option<bool> {
+        (c.ssh.is_empty() && c.repeater.is_empty())
+            .then(|| self.reach.get(c.address.as_str()).copied())
+            .flatten()
+    }
+
+    /// Re-checks every 30 s, only while the Address Book is on screen, and never blocks the UI.
+    fn probe(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.reach_rx {
+            while let Ok((k, v)) = rx.try_recv() {
+                self.reach.insert(k, v);
+            }
+        }
+        if self.last_probe.is_none_or(|t| t.elapsed() >= PROBE_EVERY) {
+            self.last_probe = Some(Instant::now());
+            let (tx, rx) = mpsc::channel();
+            self.reach_rx = Some(rx);
+            for c in self
+                .saved
+                .iter()
+                .filter(|c| c.ssh.is_empty() && c.repeater.is_empty())
+            {
+                let (tx, ctx, key) = (tx.clone(), ctx.clone(), c.address.as_str().to_string());
+                std::thread::spawn(move || {
+                    let ok = reachable(&key);
+                    let _ = tx.send((key, ok));
+                    ctx.request_repaint();
+                });
+            }
+        }
+        ctx.request_repaint_after(PROBE_EVERY);
+    }
+
     /// Updates the `last_connected` timestamp for any saved entry matching `address`.
     pub fn mark_connected(&mut self, address: &ServerAddress) {
         let now = now_secs();
@@ -228,19 +306,16 @@ impl Dashboard {
     pub fn show(&mut self, ui: &mut egui::Ui, busy: bool) -> Option<ConnectRequest> {
         let ctx = ui.ctx().clone();
         let p = theme::palette(&ctx);
+        self.probe(&ctx);
         let mut request = None;
 
         // Top omni-bar: logo, quick-connect / search bar, view controls, and + New button.
         let top_frame =
-            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(16, 10));
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(20, 12));
         egui::Panel::top("address_book_top")
             .frame(top_frame)
             .show(ui, |ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if let Some(r) = self.top_bar(ui) {
-                        request = Some(r);
-                    }
-                });
+                ui.add_enabled_ui(!busy, |ui| self.top_bar(ui));
             });
 
         // Bottom status bar: device count, shortcuts hint, connection status/error, and quick reconnect.
@@ -257,10 +332,10 @@ impl Dashboard {
         // Left sidebar: Address book categories & user labels.
         let side_frame = egui::Frame::side_top_panel(ui.style())
             .fill(p.surface)
-            .inner_margin(egui::Margin::symmetric(12, 12));
+            .inner_margin(egui::Margin::symmetric(14, 20));
         egui::Panel::left("address_book_sidebar")
             .resizable(false)
-            .exact_size(210.0)
+            .exact_size(248.0)
             .frame(side_frame)
             .show(ui, |ui| {
                 ui.add_enabled_ui(!busy, |ui| self.sidebar(ui));
@@ -269,7 +344,7 @@ impl Dashboard {
         // Main canvas: connection tiles (Grid) or rows (List).
         let center_frame = egui::Frame::central_panel(ui.style())
             .fill(p.bg)
-            .inner_margin(egui::Margin::symmetric(20, 16));
+            .inner_margin(egui::Margin::symmetric(32, 28));
         egui::CentralPanel::default()
             .frame(center_frame)
             .show(ui, |ui| {
@@ -304,8 +379,8 @@ impl Dashboard {
         request
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) -> Option<ConnectRequest> {
-        let mut request = None;
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let p = theme::palette(ui.ctx());
         let logo_id = self
             .logo
             .get_or_insert_with(|| {
@@ -320,60 +395,54 @@ impl Dashboard {
             .id();
 
         ui.horizontal(|ui| {
-            ui.image((logo_id, egui::vec2(32.0, 32.0)));
-            ui.label(RichText::new("Lucarna").size(19.0).strong());
-            ui.add_space(12.0);
+            ui.add(egui::Image::new((logo_id, egui::vec2(34.0, 34.0))).corner_radius(9));
+            ui.label(RichText::new("Lucarna").size(18.0).strong());
+            ui.add_space(20.0);
 
-            // Omni search & quick-connect bar.
-            let right_controls_width = 330.0;
-            let omni_width = (ui.available_width() - right_controls_width).clamp(180.0, 520.0);
-            let parsed_addr = ServerAddress::parse(&self.omni);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.omni)
                     .hint_text(format!(
-                        "{}  Enter a VNC Server address or search connections…",
+                        "{}  Search connections, labels or addresses",
                         char::from(Icon::Search)
                     ))
-                    .desired_width(omni_width)
-                    .margin(egui::vec2(10.0, 6.0)),
+                    .desired_width(520.0)
+                    .margin(egui::vec2(12.0, 10.0)),
             );
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if !self.omni.is_empty()
-                && ui
-                    .small_button(char::from(Icon::X).to_string())
-                    .on_hover_text("Clear search")
-                    .clicked()
+            if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)) {
+                resp.request_focus();
+            }
+            if self.omni.is_empty() {
+                ui.painter().text(
+                    resp.rect.right_center() - egui::vec2(14.0, 0.0),
+                    egui::Align2::RIGHT_CENTER,
+                    if cfg!(target_os = "macos") {
+                        "⌘K"
+                    } else {
+                        "Ctrl K"
+                    },
+                    FontId::proportional(11.0),
+                    p.text3,
+                );
+            } else if ui
+                .small_button(char::from(Icon::X).to_string())
+                .on_hover_text("Clear search")
+                .clicked()
             {
                 self.omni.clear();
             }
-            if let Some(addr) = parsed_addr {
-                let connect_btn = theme::primary(format!("{} Connect", char::from(Icon::Play)));
-                if ui
-                    .add(connect_btn)
-                    .on_hover_text(format!("Connect directly to {}", addr.as_str()))
-                    .clicked()
-                    || enter
-                {
-                    request = Some(self.quick_connect_request(addr.clone()));
-                }
-                if ui
-                    .button(format!("{} Save", char::from(Icon::Plus)))
-                    .on_hover_text("Save this address to your Address Book")
-                    .clicked()
-                {
-                    self.open_new_connection(Some(addr.as_str()));
-                }
-            }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.menu_button(char::from(Icon::Ellipsis).to_string(), |ui| {
-                    if ui
-                        .button(format!("{}  New connection…\t⌘N", char::from(Icon::Plus)))
-                        .clicked()
-                    {
-                        self.open_new_connection(None);
-                        ui.close();
-                    }
+                if ui
+                    .add(
+                        theme::primary(format!("{}  New connection", char::from(Icon::Plus)))
+                            .min_size(egui::vec2(0.0, 40.0)),
+                    )
+                    .on_hover_text("⌘N / Ctrl+N")
+                    .clicked()
+                {
+                    self.open_new_connection(None);
+                }
+                ui.menu_button(char::from(Icon::Settings).to_string(), |ui| {
                     if ui
                         .button(format!("{}  New label…", char::from(Icon::Tag)))
                         .clicked()
@@ -389,10 +458,9 @@ impl Dashboard {
                         ))
                         .clicked()
                     {
-                        let default_path = default_backup_path();
                         self.modal = Some(Modal::ImportExport {
                             import: true,
-                            path: default_path,
+                            path: default_backup_path(),
                         });
                         ui.close();
                     }
@@ -403,90 +471,81 @@ impl Dashboard {
                         ))
                         .clicked()
                     {
-                        let default_path = default_backup_path();
                         self.modal = Some(Modal::ImportExport {
                             import: false,
-                            path: default_path,
+                            path: default_backup_path(),
                         });
                         ui.close();
                     }
                 })
                 .response
                 .on_hover_text("Address book actions");
-                theme::toggle(ui);
-
-                let new_btn = theme::primary(format!("{} New", char::from(Icon::Plus)));
-                if ui
-                    .add(new_btn)
-                    .on_hover_text("Create a new connection (⌘N / Ctrl+N)")
-                    .clicked()
-                {
-                    self.open_new_connection(None);
-                }
-
-                ui.separator();
-
-                let sort_name = match self.sort_by {
-                    SortBy::Name => "Name",
-                    SortBy::Recent => "Recent",
-                    SortBy::Address => "Server",
-                };
-                ui.menu_button(
-                    format!("{} {sort_name}", char::from(Icon::ArrowUpDown)),
-                    |ui| {
-                        if ui
-                            .selectable_label(self.sort_by == SortBy::Name, "Name (A–Z)")
-                            .clicked()
-                        {
-                            self.sort_by = SortBy::Name;
-                            ui.close();
-                        }
-                        if ui
-                            .selectable_label(self.sort_by == SortBy::Recent, "Recently connected")
-                            .clicked()
-                        {
-                            self.sort_by = SortBy::Recent;
-                            ui.close();
-                        }
-                        if ui
-                            .selectable_label(self.sort_by == SortBy::Address, "Server address")
-                            .clicked()
-                        {
-                            self.sort_by = SortBy::Address;
-                            ui.close();
-                        }
-                    },
-                );
-
-                if ui
-                    .selectable_label(
-                        self.view_mode == ViewMode::List,
-                        format!("{} List", char::from(Icon::List)),
-                    )
-                    .on_hover_text("List view")
-                    .clicked()
-                {
-                    self.view_mode = ViewMode::List;
-                }
-                if ui
-                    .selectable_label(
-                        self.view_mode == ViewMode::Grid,
-                        format!("{} Grid", char::from(Icon::LayoutGrid)),
-                    )
-                    .on_hover_text("Thumbnail grid view")
-                    .clicked()
-                {
-                    self.view_mode = ViewMode::Grid;
-                }
+                theme::switch(ui);
             });
         });
-
-        request
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("ADDRESS BOOK").size(11.0).strong().weak());
-        ui.add_space(6.0);
+        egui::Panel::bottom("device_card")
+            .frame(egui::Frame::NONE)
+            .resizable(false)
+            .show(ui, Self::device_card);
+        self.sidebar_lists(ui);
+    }
+
+    /// Entry point of Studio / QuickSupport mode; the host UI lands with BUI-44.
+    fn device_card(ui: &mut egui::Ui) {
+        let p = theme::palette(ui.ctx());
+        egui::Frame::NONE
+            .fill(p.card)
+            .stroke(Stroke::new(1.0, p.border))
+            .corner_radius(CornerRadius::same(12))
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.scope_builder(
+                    egui::UiBuilder::new().layout(Layout::top_down(Align::Min)),
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}  This device",
+                                    char::from(Icon::Monitor)
+                                ))
+                                .strong()
+                                .size(13.0),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new("Not shared").size(11.0).color(p.text3));
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Let someone connect to this computer with Studio Host.")
+                                .size(12.0)
+                                .color(p.text2),
+                        );
+                        ui.add_space(6.0);
+                        let w = ui.available_width();
+                        ui.add_enabled(
+                            false,
+                            egui::Button::new("Share this screen").min_size(egui::vec2(w, 34.0)),
+                        )
+                        .on_disabled_hover_text("Coming with QuickSupport (BUI-44)");
+                    },
+                );
+            });
+    }
+
+    fn sidebar_lists(&mut self, ui: &mut egui::Ui) {
+        let p = theme::palette(ui.ctx());
+        ui.label(
+            RichText::new("ADDRESS BOOK")
+                .size(11.0)
+                .strong()
+                .color(p.text3),
+        );
+        ui.add_space(8.0);
 
         let total = self.saved.iter().filter(|c| !c.hidden).count();
         let favs = self
@@ -506,6 +565,7 @@ impl Dashboard {
             &format!("{}  All connections", char::from(Icon::LayoutGrid)),
             total,
             self.filter == Filter::All,
+            None,
         )
         .clicked()
         {
@@ -516,6 +576,7 @@ impl Dashboard {
             &format!("{}  Favorites", char::from(Icon::Star)),
             favs,
             self.filter == Filter::Favorites,
+            None,
         )
         .clicked()
         {
@@ -526,10 +587,27 @@ impl Dashboard {
             &format!("{}  Recent", char::from(Icon::Clock)),
             recent,
             self.filter == Filter::Recent,
+            None,
         )
         .clicked()
         {
             self.filter = Filter::Recent;
+        }
+        let online = self
+            .saved
+            .iter()
+            .filter(|c| !c.hidden && self.is_online(c))
+            .count();
+        if sidebar_item(
+            ui,
+            &format!("{}  Online", char::from(Icon::Monitor)),
+            online,
+            self.filter == Filter::Online,
+            None,
+        )
+        .clicked()
+        {
+            self.filter = Filter::Online;
         }
         if (hidden > 0 || self.filter == Filter::Hidden)
             && sidebar_item(
@@ -537,15 +615,16 @@ impl Dashboard {
                 &format!("{}  Hidden", char::from(Icon::EyeOff)),
                 hidden,
                 self.filter == Filter::Hidden,
+                None,
             )
             .clicked()
         {
             self.filter = Filter::Hidden;
         }
 
-        ui.add_space(16.0);
+        ui.add_space(22.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("LABELS").size(11.0).strong().weak());
+            ui.label(RichText::new("LABELS").size(11.0).strong().color(p.text3));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .small_button(char::from(Icon::Plus).to_string())
@@ -571,7 +650,7 @@ impl Dashboard {
             egui::ScrollArea::vertical().id_salt("labels_scroll").show(ui, |ui| {
                 for (label, count) in labels {
                     let active = matches!(&self.filter, Filter::Label(l) if l.eq_ignore_ascii_case(&label));
-                    let resp = sidebar_item(ui, &format!("{}  {label}", char::from(Icon::Tag)), count, active);
+                    let resp = sidebar_item(ui, &label, count, active, Some(widgets::label_color(&label)));
                     if resp.clicked() {
                         self.filter = Filter::Label(label.clone());
                     }
@@ -600,21 +679,69 @@ impl Dashboard {
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) -> Option<ConnectRequest> {
+        let quick_request = self.quick_card(ui);
+        ui.add_space(24.0);
+        let p = theme::palette(ui.ctx());
         let indices = self.visible_indices();
         let active_title = match &self.filter {
             Filter::All => "All connections".to_string(),
             Filter::Favorites => "Favorites".to_string(),
             Filter::Recent => "Recently connected".to_string(),
+            Filter::Online => "Online".to_string(),
             Filter::Hidden => "Hidden connections".to_string(),
             Filter::Label(l) => format!("{}  {l}", char::from(Icon::Tag)),
         };
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new(&active_title).size(18.0).strong());
-            ui.label(RichText::new(format!("({})", indices.len())).weak());
-            if let Filter::Label(l) = &self.filter {
-                let l = l.clone();
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(&active_title).size(16.0).strong());
+            egui::Frame::NONE
+                .fill(p.elevated)
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::symmetric(8, 1))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(indices.len().to_string())
+                            .size(12.0)
+                            .strong()
+                            .color(p.text2),
+                    )
+                });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let items = [
+                    (
+                        ViewMode::Grid,
+                        char::from(Icon::LayoutGrid).to_string(),
+                        "Grid view",
+                    ),
+                    (
+                        ViewMode::List,
+                        char::from(Icon::List).to_string(),
+                        "List view",
+                    ),
+                ];
+                theme::segmented(ui, &mut self.view_mode, &items);
+                let sort_name = match self.sort_by {
+                    SortBy::Name => "Name",
+                    SortBy::Recent => "Last connected",
+                    SortBy::Address => "Server",
+                };
+                ui.menu_button(
+                    format!("{}  {sort_name}", char::from(Icon::ArrowUpDown)),
+                    |ui| {
+                        for (by, label) in [
+                            (SortBy::Name, "Name (A–Z)"),
+                            (SortBy::Recent, "Recently connected"),
+                            (SortBy::Address, "Server address"),
+                        ] {
+                            if ui.selectable_label(self.sort_by == by, label).clicked() {
+                                self.sort_by = by;
+                                ui.close();
+                            }
+                        }
+                    },
+                );
+                if let Filter::Label(l) = &self.filter {
+                    let l = l.clone();
                     if ui
                         .small_button(format!("{} Add connection here", char::from(Icon::Plus)))
                         .clicked()
@@ -622,10 +749,10 @@ impl Dashboard {
                         self.open_new_connection(None);
                         self.editor.labels_input = l;
                     }
-                });
-            }
+                }
+            });
         });
-        ui.add_space(12.0);
+        ui.add_space(16.0);
 
         if indices.is_empty() {
             ui.vertical_centered(|ui| {
@@ -649,7 +776,7 @@ impl Dashboard {
                     self.open_new_connection(None);
                 }
             });
-            return None;
+            return quick_request;
         }
 
         let known_labels: Vec<String> = self.all_labels().into_iter().map(|(l, _)| l).collect();
@@ -660,11 +787,12 @@ impl Dashboard {
             .auto_shrink([false, false])
             .show(ui, |ui| match self.view_mode {
                 ViewMode::Grid => {
-                    let card_w = 228.0;
-                    let card_h = 204.0;
-                    let spacing = 14.0;
-                    let avail = ui.available_width().max(card_w);
-                    let cols = ((avail + spacing) / (card_w + spacing)).floor().max(1.0) as usize;
+                    let card_h = 254.0;
+                    let spacing = 20.0;
+                    let avail = ui.available_width().max(260.0);
+                    let cols =
+                        (((avail + spacing) / (260.0 + spacing)).floor().max(1.0) as usize).min(5);
+                    let card_w = ((avail - spacing * (cols as f32 - 1.0)) / cols as f32).floor();
                     for row in indices.chunks(cols) {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = spacing;
@@ -692,7 +820,115 @@ impl Dashboard {
                 }
             });
 
-        action.and_then(|a| self.apply_action(a))
+        quick_request.or(action.and_then(|a| self.apply_action(a)))
+    }
+
+    /// "Connect to a device": address field, Connect, and per-connection chips.
+    fn quick_card(&mut self, ui: &mut egui::Ui) -> Option<ConnectRequest> {
+        let p = theme::palette(ui.ctx());
+        let mut request = None;
+        egui::Frame::NONE
+            .fill(p.card)
+            .stroke(Stroke::new(1.0, p.border))
+            .corner_radius(CornerRadius::same(14))
+            .inner_margin(egui::Margin::symmetric(24, 20))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(220.0);
+                        ui.label(RichText::new("Connect to a device").size(18.0).strong());
+                        ui.label(
+                            RichText::new("Address, user@host or repeater ID")
+                                .size(13.0)
+                                .color(p.text2),
+                        );
+                    });
+                    ui.vertical(|ui| {
+                        let addr = ServerAddress::parse(&self.quick);
+                        let saved_already = addr
+                            .as_ref()
+                            .is_some_and(|a| self.saved.iter().any(|c| &c.address == a));
+                        ui.horizontal(|ui| {
+                            let reserve = if addr.is_some() && !saved_already {
+                                220.0
+                            } else {
+                                140.0
+                            };
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.quick)
+                                    .font(FontId::monospace(15.0))
+                                    .hint_text("192.168.1.40:5900")
+                                    .desired_width((ui.available_width() - reserve).max(160.0))
+                                    .margin(egui::vec2(14.0, 14.0)),
+                            );
+                            let enter =
+                                resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                            let go = ui
+                                .add_enabled(
+                                    addr.is_some(),
+                                    theme::primary(format!(
+                                        "Connect  {}",
+                                        char::from(Icon::ArrowRight)
+                                    ))
+                                    .min_size(egui::vec2(112.0, 48.0)),
+                                )
+                                .clicked();
+                            if (go || (enter && addr.is_some()))
+                                && let Some(a) = addr.clone()
+                            {
+                                let mut r = self.quick_connect_request(a);
+                                if self.quick_view_only {
+                                    r.options.view_only = true;
+                                }
+                                if self.quick_ssh_on && !self.quick_ssh.trim().is_empty() {
+                                    r.ssh = self.quick_ssh.trim().to_string();
+                                }
+                                if self.quick_rep_on {
+                                    r.repeater = ServerAddress::parse(self.quick_rep.trim());
+                                }
+                                request = Some(r);
+                            }
+                            if let Some(a) = &addr
+                                && !saved_already
+                                && ui
+                                    .add(egui::Button::new("Save").min_size(egui::vec2(0.0, 48.0)))
+                                    .on_hover_text("Save this address to your Address Book")
+                                    .clicked()
+                            {
+                                self.open_new_connection(Some(a.as_str()));
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if widgets::chip(ui, Icon::Lock, "SSH tunnel", self.quick_ssh_on) {
+                                self.quick_ssh_on = !self.quick_ssh_on;
+                            }
+                            if widgets::chip(ui, Icon::Eye, "View only", self.quick_view_only) {
+                                self.quick_view_only = !self.quick_view_only;
+                            }
+                            if widgets::chip(ui, Icon::Radio, "Via repeater", self.quick_rep_on) {
+                                self.quick_rep_on = !self.quick_rep_on;
+                            }
+                            if self.quick_ssh_on {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.quick_ssh)
+                                        .hint_text("user@host[:port]")
+                                        .desired_width(170.0),
+                                );
+                            }
+                            if self.quick_rep_on {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.quick_rep)
+                                        .hint_text("repeater host:port")
+                                        .desired_width(170.0),
+                                );
+                            }
+                        });
+                    });
+                });
+            });
+        request
     }
 
     fn draw_tile(
@@ -706,134 +942,203 @@ impl Dashboard {
         let is_selected = self.selected == Some(idx);
         let c = self.saved[idx].clone();
         let has_preview = self.ensure_preview(ui.ctx(), &c.address).is_some();
+        let status = self.status_of(&c);
+        let p = theme::palette(ui.ctx());
 
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-        let hovered = resp.hovered();
-        let accent = ui.visuals().selection.bg_fill;
-
-        let p = theme::palette(ui.ctx());
-        let bg = if is_selected || hovered {
-            p.elevated
-        } else {
-            p.card
-        };
-        let stroke = if is_selected {
-            Stroke::new(2.0, accent)
-        } else if hovered {
-            Stroke::new(1.0, p.border_strong)
+        let hovered = ui.rect_contains_pointer(rect);
+        let stroke = if is_selected || hovered {
+            Stroke::new(if is_selected { 2.0 } else { 1.5 }, theme::ACCENT)
         } else {
             Stroke::new(1.0, p.border)
         };
-        ui.painter()
-            .rect(rect, CornerRadius::same(10), bg, stroke, StrokeKind::Inside);
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(14),
+            p.card,
+            stroke,
+            StrokeKind::Inside,
+        );
 
-        // Preview screen inside top portion of the card (16:10 ratio).
         let preview_rect = Rect::from_min_size(
-            rect.min + Vec2::new(10.0, 10.0),
-            Vec2::new(size.x - 20.0, 122.0),
+            rect.min + Vec2::new(8.0, 8.0),
+            Vec2::new(size.x - 16.0, 148.0),
         );
         self.paint_desktop_preview(ui, preview_rect, &c);
+        if status == Some(false) {
+            ui.painter().rect_filled(
+                preview_rect,
+                CornerRadius::same(9),
+                p.bg.gamma_multiply(0.6),
+            );
+        }
+        // Status and SSH badges over the preview.
+        let badge =
+            |ui: &egui::Ui, at: Pos2, align: egui::Align2, text: &str, dot: Option<Color32>| {
+                let galley = ui.painter().layout_no_wrap(
+                    text.to_string(),
+                    FontId::proportional(11.0),
+                    Color32::from_rgb(0xf1, 0xf5, 0xf9),
+                );
+                let w = galley.size().x + if dot.is_some() { 26.0 } else { 14.0 };
+                let r = align.align_size_within_rect(
+                    Vec2::new(w, 22.0),
+                    Rect::from_min_size(at, Vec2::ZERO),
+                );
+                ui.painter()
+                    .rect_filled(r, CornerRadius::same(11), Color32::from_black_alpha(184));
+                let mut x = r.left() + 8.0;
+                if let Some(d) = dot {
+                    ui.painter()
+                        .circle_filled(Pos2::new(x + 3.5, r.center().y), 3.5, d);
+                    x += 13.0;
+                }
+                ui.painter().galley(
+                    Pos2::new(x, r.center().y - galley.size().y / 2.0),
+                    galley,
+                    Color32::WHITE,
+                );
+            };
+        if let Some(on) = status {
+            let dot = if on {
+                p.success
+            } else {
+                Color32::from_rgb(0x94, 0xa3, 0xb8)
+            };
+            badge(
+                ui,
+                preview_rect.left_top() + Vec2::new(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                if on { "Online" } else { "Offline" },
+                Some(dot),
+            );
+        }
+        if !c.ssh.is_empty() {
+            badge(
+                ui,
+                preview_rect.right_top() + Vec2::new(-8.0, 8.0),
+                egui::Align2::RIGHT_TOP,
+                &format!("{} SSH", char::from(Icon::Lock)),
+                None,
+            );
+        }
+        // Hover: dim the preview and offer Connect.
+        if hovered {
+            ui.painter().rect_filled(
+                preview_rect,
+                CornerRadius::same(9),
+                Color32::from_black_alpha(115),
+            );
+            let pill = Rect::from_center_size(preview_rect.center(), Vec2::new(112.0, 38.0));
+            let pill_resp = ui.interact(pill, ui.scope_id().with(("connect", idx)), Sense::click());
+            ui.painter()
+                .rect_filled(pill, CornerRadius::same(19), theme::ACCENT);
+            ui.painter().text(
+                pill.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("Connect  {}", char::from(Icon::ArrowRight)),
+                FontId::proportional(13.0),
+                theme::ON_ACCENT,
+            );
+            if pill_resp.clicked() {
+                return Some(TileAction::Connect(idx, None));
+            }
+        }
 
-        // Text metadata below the preview.
-        let text_left = rect.left() + 12.0;
-        let text_right = rect.right() - 12.0;
-        let title_y = preview_rect.bottom() + 8.0;
-
+        let text_left = rect.left() + 14.0;
+        let title_y = preview_rect.bottom() + 13.0;
+        let max_chars = ((size.x - 96.0) / 8.0).max(8.0) as usize;
         ui.painter().text(
             Pos2::new(text_left, title_y),
             egui::Align2::LEFT_TOP,
-            truncate_str(&c.name, 22),
+            truncate_str(&c.name, max_chars),
             FontId::proportional(14.5),
             p.text,
         );
-
         let who = if c.user.is_empty() {
             c.address.as_str().to_string()
         } else {
             format!("{}@{}", c.user, c.address.as_str())
         };
         ui.painter().text(
-            Pos2::new(text_left, title_y + 19.0),
+            Pos2::new(text_left, title_y + 24.0),
             egui::Align2::LEFT_TOP,
-            truncate_str(&who, 28),
-            FontId::monospace(11.0),
+            truncate_str(&who, ((size.x - 28.0) / 7.2) as usize),
+            FontId::monospace(12.0),
             p.text2,
         );
 
-        // Bottom row: labels on the left, relative time on the right.
-        let footer_y = rect.bottom() - 22.0;
-        let mut tag_x = text_left;
-        for label in c.labels.iter().take(2) {
-            let tag_text = truncate_str(label, 10);
-            let pill_w = (tag_text.len() as f32 * 6.5 + 14.0).min(82.0);
-            let pill_rect =
-                Rect::from_min_size(Pos2::new(tag_x, footer_y), Vec2::new(pill_w, 16.0));
-            ui.painter()
-                .rect_filled(pill_rect, CornerRadius::same(4), p.accent_soft);
-            ui.painter().text(
-                pill_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                tag_text,
-                FontId::proportional(10.5),
-                p.accent_text,
+        // Footer: first label as a coloured chip, time of last connection on the right.
+        let footer_y = rect.bottom() - 30.0;
+        if let Some(label) = c.labels.first() {
+            let tag = truncate_str(label, 12);
+            let galley = ui
+                .painter()
+                .layout_no_wrap(tag, FontId::proportional(11.0), p.text2);
+            let chip = Rect::from_min_size(
+                Pos2::new(text_left, footer_y),
+                Vec2::new(galley.size().x + 28.0, 22.0),
             );
-            tag_x += pill_w + 4.0;
-        }
-        if c.labels.len() > 2 {
-            ui.painter().text(
-                Pos2::new(tag_x + 2.0, footer_y + 8.0),
-                egui::Align2::LEFT_CENTER,
-                format!("+{}", c.labels.len() - 2),
-                FontId::proportional(10.0),
+            ui.painter()
+                .rect_filled(chip, CornerRadius::same(6), p.elevated);
+            ui.painter().rect_filled(
+                Rect::from_center_size(
+                    Pos2::new(chip.left() + 11.0, chip.center().y),
+                    Vec2::splat(7.0),
+                ),
+                CornerRadius::same(2),
+                widgets::label_color(label),
+            );
+            ui.painter().galley(
+                Pos2::new(chip.left() + 20.0, chip.center().y - galley.size().y / 2.0),
+                galley,
                 p.text2,
             );
         }
-
-        let rel = relative_time(c.last_connected);
         ui.painter().text(
-            Pos2::new(text_right, footer_y + 8.0),
+            Pos2::new(rect.right() - 14.0, footer_y + 11.0),
             egui::Align2::RIGHT_CENTER,
-            rel,
-            FontId::proportional(10.5),
+            relative_time(c.last_connected),
+            FontId::proportional(12.0),
             p.text3,
         );
 
-        // Favorite star button in top-right of the title row.
+        // Favorite star and properties dots in the title row.
         let fav_rect = Rect::from_min_size(
-            Pos2::new(rect.right() - 52.0, title_y - 2.0),
-            Vec2::new(20.0, 20.0),
+            Pos2::new(rect.right() - 62.0, title_y - 5.0),
+            Vec2::new(26.0, 26.0),
         );
         let fav_resp = ui.interact(fav_rect, ui.scope_id().with(("fav", idx)), Sense::click());
-        let star_color = if c.favorite {
-            accent
-        } else if fav_resp.hovered() {
-            p.text
+        if c.favorite {
+            widgets::star(
+                ui.painter(),
+                fav_rect.center(),
+                8.0,
+                Color32::from_rgb(0xf5, 0xa7, 0x0a),
+            );
         } else {
-            p.text3
-        };
-        ui.painter().text(
-            fav_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            char::from(Icon::Star).to_string(),
-            FontId::proportional(13.5),
-            star_color,
-        );
+            ui.painter().text(
+                fav_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                char::from(Icon::Star).to_string(),
+                FontId::proportional(14.5),
+                if fav_resp.hovered() { p.text } else { p.text3 },
+            );
+        }
         if fav_resp.on_hover_text("Toggle favorite").clicked() {
             return Some(TileAction::ToggleFavorite(idx));
         }
-
-        // Context menu button "⋯" in the title row.
         let dots_rect = Rect::from_min_size(
-            Pos2::new(rect.right() - 30.0, title_y - 2.0),
-            Vec2::new(20.0, 20.0),
+            Pos2::new(rect.right() - 34.0, title_y - 5.0),
+            Vec2::new(26.0, 26.0),
         );
         let dots_resp = ui.interact(dots_rect, ui.scope_id().with(("dots", idx)), Sense::click());
         ui.painter().text(
             dots_rect.center(),
             egui::Align2::CENTER_CENTER,
             char::from(Icon::Ellipsis).to_string(),
-            FontId::proportional(14.0),
-            if dots_resp.hovered() { p.text } else { p.text2 },
+            FontId::proportional(14.5),
+            if dots_resp.hovered() { p.text } else { p.text3 },
         );
         if dots_resp.clicked() {
             self.selected = Some(idx);
@@ -981,20 +1286,19 @@ impl Dashboard {
 
     fn paint_desktop_preview(&mut self, ui: &mut egui::Ui, rect: Rect, c: &SavedConnection) {
         let tex = self.ensure_preview(ui.ctx(), &c.address);
+        let pal = theme::palette(ui.ctx());
         let p = ui.painter();
-
-        // Outer monitor bezel.
-        p.rect(
-            rect,
-            CornerRadius::same(6),
-            Color32::from_rgb(0x09, 0x0d, 0x16),
-            Stroke::new(1.0, theme::palette(ui.ctx()).border),
-            StrokeKind::Inside,
-        );
         let screen = rect.shrink(3.0);
 
         if let Some(tex) = tex {
-            // Aspect-fit the captured remote desktop inside `screen`.
+            // Captured remote desktop, aspect-fit on a dark bezel.
+            p.rect(
+                rect,
+                CornerRadius::same(9),
+                Color32::from_rgb(0x09, 0x0d, 0x16),
+                Stroke::new(1.0, pal.border),
+                StrokeKind::Inside,
+            );
             let [tw, th] = tex.size();
             let scale = (screen.width() / tw as f32).min(screen.height() / th as f32);
             let img_size = Vec2::new(tw as f32 * scale, th as f32 * scale);
@@ -1006,74 +1310,44 @@ impl Dashboard {
                 Color32::WHITE,
             );
         } else {
-            // Stylized remote desktop illustration when no live snapshot has been saved yet.
+            // No snapshot yet: a tinted wallpaper with two window shapes.
+            p.rect_filled(rect, CornerRadius::same(9), widgets::wallpaper(&c.name));
+            let at = |fx: f32, fy: f32, fw: f32, fh: f32| {
+                Rect::from_min_size(
+                    rect.min + Vec2::new(rect.width() * fx, rect.height() * fy),
+                    Vec2::new(rect.width() * fw, rect.height() * fh),
+                )
+            };
             p.rect_filled(
-                screen,
+                at(0.14, 0.16, 0.52, 0.54),
                 CornerRadius::same(4),
-                Color32::from_rgb(0x11, 0x1b, 0x2e),
+                Color32::from_white_alpha(224),
             );
-            if screen.width() > 100.0 {
-                let win_w = screen.width() * 0.62;
-                let win_h = screen.height() * 0.56;
-                let win_rect = Rect::from_center_size(
-                    screen.center() - Vec2::new(0.0, 4.0),
-                    Vec2::new(win_w, win_h),
-                );
-                p.rect(
-                    win_rect,
-                    CornerRadius::same(4),
-                    Color32::from_rgb(0x19, 0x26, 0x3e),
-                    Stroke::new(1.0, Color32::from_rgb(0x33, 0x46, 0x66)),
-                    StrokeKind::Inside,
-                );
-                let bar_rect = Rect::from_min_size(win_rect.min, Vec2::new(win_w, 10.0));
-                p.rect_filled(
-                    bar_rect,
-                    CornerRadius::same(4),
-                    Color32::from_rgb(0x24, 0x34, 0x52),
-                );
-                p.circle_filled(
-                    Pos2::new(bar_rect.left() + 6.0, bar_rect.center().y),
-                    2.0,
-                    theme::ACCENT,
-                );
-                p.circle_filled(
-                    Pos2::new(bar_rect.left() + 12.0, bar_rect.center().y),
-                    2.0,
-                    Color32::from_rgb(0x64, 0x74, 0x8b),
-                );
-                p.text(
-                    win_rect.center() + Vec2::new(0.0, 3.0),
-                    egui::Align2::CENTER_CENTER,
-                    initials(&c.name),
-                    FontId::proportional(16.0),
-                    theme::ACCENT,
-                );
-                // Taskbar strip at the bottom of the simulated screen.
-                let taskbar = Rect::from_min_max(
-                    Pos2::new(screen.left() + 4.0, screen.bottom() - 8.0),
-                    screen.max - Vec2::splat(2.0),
-                );
-                p.rect_filled(
-                    taskbar,
-                    CornerRadius::same(2),
-                    Color32::from_rgb(0x0b, 0x11, 0x1e),
-                );
-            } else {
-                p.text(
-                    screen.center(),
-                    egui::Align2::CENTER_CENTER,
-                    initials(&c.name),
-                    FontId::proportional(12.0),
-                    theme::ACCENT,
-                );
-            }
+            p.rect_filled(
+                at(0.44, 0.34, 0.44, 0.44),
+                CornerRadius::same(4),
+                Color32::from_white_alpha(166),
+            );
+            let strip = Rect::from_min_max(
+                Pos2::new(rect.left(), rect.bottom() - 12.0),
+                rect.right_bottom(),
+            );
+            p.rect_filled(
+                strip,
+                CornerRadius {
+                    nw: 0,
+                    ne: 0,
+                    sw: 9,
+                    se: 9,
+                },
+                Color32::from_black_alpha(90),
+            );
         }
 
         // Option badges overlaid on the bottom-left of the screen if non-default.
         if screen.width() > 100.0 {
             let mut bx = screen.left() + 5.0;
-            let by = screen.bottom() - 17.0;
+            let by = screen.bottom() - 19.0;
             for (flag, label) in [
                 (c.options.view_only, "VIEW ONLY"),
                 (c.options.scale_1_1, "1:1"),
@@ -1862,34 +2136,75 @@ impl Dashboard {
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui, busy: bool) -> Option<ConnectRequest> {
         let mut request = None;
-        let count = self.visible_indices().len();
+        let p = theme::palette(ui.ctx());
+        let total = self.saved.iter().filter(|c| !c.hidden).count();
+        let online = self
+            .saved
+            .iter()
+            .filter(|c| !c.hidden && self.is_online(c))
+            .count();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{count} device(s)")).strong().size(12.0));
-            ui.separator();
+            ui.label(RichText::new("●").size(10.0).color(p.success));
+            ui.label(
+                RichText::new(format!("{online} of {total} online"))
+                    .size(12.0)
+                    .color(p.text2),
+            );
             if busy {
                 ui.spinner();
                 ui.label("Connecting to remote desktop…");
             } else if !self.status.is_empty() {
                 ui.label(RichText::new(&self.status).color(ui.visuals().warn_fg_color));
                 if let Some(last) = &self.last_request {
-                    let btn = theme::primary(format!("{} Reconnect ({})", char::from(Icon::RefreshCw), last.address.as_str()))
+                    let btn = theme::primary(format!(
+                        "{} Reconnect ({})",
+                        char::from(Icon::RefreshCw),
+                        last.address.as_str()
+                    ))
                     .small();
-                    if ui.add(btn).on_hover_text(format!("Reconnect to {}", last.address.as_str())).clicked() {
+                    if ui
+                        .add(btn)
+                        .on_hover_text(format!("Reconnect to {}", last.address.as_str()))
+                        .clicked()
+                    {
                         request = Some(last.clone());
                     }
                 }
-                if ui.small_button(char::from(Icon::X).to_string()).on_hover_text("Dismiss message").clicked() {
+                if ui
+                    .small_button(char::from(Icon::X).to_string())
+                    .on_hover_text("Dismiss message")
+                    .clicked()
+                {
                     self.status.clear();
                 }
             } else {
-                let dup = if cfg!(target_os = "macos") { "⌘D" } else { "Ctrl+D" };
-                ui.label(
-                    RichText::new(format!(
-                        "Double-click: Connect · Right-click: Options · F2: Rename · {dup}: Duplicate · Alt+Enter: Properties"
-                    ))
-                    .size(11.5)
-                    .weak(),
-                );
+                let dup = if cfg!(target_os = "macos") {
+                    "⌘D"
+                } else {
+                    "Ctrl+D"
+                };
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    for (key, what) in [
+                        (
+                            if cfg!(target_os = "macos") {
+                                "⌥↵"
+                            } else {
+                                "Alt+↵"
+                            },
+                            "Properties",
+                        ),
+                        (dup, "Duplicate"),
+                        ("F2", "Rename"),
+                    ] {
+                        ui.label(RichText::new(what).size(12.0).color(p.text3));
+                        widgets::keycap(ui, key);
+                    }
+                    ui.label(
+                        RichText::new("Double-click to connect")
+                            .size(12.0)
+                            .color(p.text3),
+                    );
+                });
             }
         });
         request
@@ -1907,6 +2222,7 @@ impl Dashboard {
                 Filter::All => true,
                 Filter::Favorites => c.favorite,
                 Filter::Recent => c.last_connected > 0,
+                Filter::Online => self.is_online(c),
                 Filter::Label(l) => c.labels.iter().any(|cl| cl.eq_ignore_ascii_case(l)),
             })
             .filter(|(_, c)| {
@@ -2241,16 +2557,22 @@ impl Dashboard {
     }
 }
 
-fn sidebar_item(ui: &mut Ui, label: &str, count: usize, selected: bool) -> egui::Response {
-    let desired = Vec2::new(ui.available_width(), 34.0);
+fn sidebar_item(
+    ui: &mut Ui,
+    label: &str,
+    count: usize,
+    selected: bool,
+    dot: Option<Color32>,
+) -> egui::Response {
+    let desired = Vec2::new(ui.available_width(), 40.0);
     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
     let p = theme::palette(ui.ctx());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), p.accent_soft);
+            .rect_filled(rect, CornerRadius::same(9), p.accent_soft);
     } else if resp.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), p.elevated);
+            .rect_filled(rect, CornerRadius::same(9), p.elevated);
     }
     let (text_color, count_color) = if selected {
         (p.accent_text, p.accent_text)
@@ -2259,30 +2581,30 @@ fn sidebar_item(ui: &mut Ui, label: &str, count: usize, selected: bool) -> egui:
     } else {
         (p.text2, p.text3)
     };
+    let mut x = rect.left() + 12.0;
+    if let Some(d) = dot {
+        ui.painter().rect_filled(
+            Rect::from_center_size(Pos2::new(x + 5.0, rect.center().y), Vec2::splat(10.0)),
+            CornerRadius::same(3),
+            d,
+        );
+        x += 22.0;
+    }
     ui.painter().text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Pos2::new(x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         truncate_str(label, 21),
-        FontId::proportional(13.5),
+        FontId::proportional(14.0),
         text_color,
     );
     ui.painter().text(
-        Pos2::new(rect.right() - 10.0, rect.center().y),
+        Pos2::new(rect.right() - 12.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        FontId::proportional(11.5),
+        FontId::proportional(12.0),
         count_color,
     );
     resp
-}
-
-fn initials(name: &str) -> String {
-    let mut chars = name.split_whitespace().filter_map(|w| w.chars().next());
-    let first = chars.next().unwrap_or('V');
-    match chars.next() {
-        Some(second) => format!("{first}{second}").to_uppercase(),
-        None => name.chars().take(2).collect::<String>().to_uppercase(),
-    }
 }
 
 fn truncate_str(s: &str, max_chars: usize) -> String {
