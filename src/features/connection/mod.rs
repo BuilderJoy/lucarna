@@ -8,6 +8,6 @@ mod saved;
 mod view;
 
 pub use address::{ServerAddress, SshTarget};
-pub use auth::Credentials;
+pub use auth::{Credentials, vnc_response};
 pub use saved::{SessionOptions, ssh_password};
 pub use view::{ConnectRequest, Dashboard};

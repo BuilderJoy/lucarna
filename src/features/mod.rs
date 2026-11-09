@@ -4,6 +4,7 @@ pub mod chat;
 pub mod clipboard;
 pub mod connection;
 pub mod file_transfer;
+pub mod host;
 pub mod input;
 pub mod remote_screen;
 pub mod sftp;

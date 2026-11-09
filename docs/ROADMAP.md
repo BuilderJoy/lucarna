@@ -24,6 +24,7 @@ Plan para llegar desde el visor básico actual hasta un cliente que se pueda usa
 | Fase 8.1: túnel SSH integrado (cliente `ssh` del sistema, llaves o contraseña en el llavero) | ✅ (contraseña SSH desde Windows pendiente de prueba manual) |
 | Fase 8.2: archivos por SFTP v3 nativo (motor dual de archivos, independiente de la política VNC) | ✅ |
 | Fase 8.3: contenedor sshd de pruebas, tests en vivo de túnel y SFTP, guía de Windows | ✅ (guía pendiente de validar en un Windows real) |
+| Modo Estudio Fase 1 (`BUI-41`): motor Host RFB 3.8 en espacio de usuario (`src/features/host/`), captura + dirty-tiles 64×64 ZRLE e inyección con prioridad de ratón local | ✅ (2026-11-08) |
 | Todo lo demás | ❌ (ver fases) |
 
 **Límite importante del diseño actual:** el bucle de `session/mod.rs` corta la conexión si recibe un tipo de mensaje que no conoce, y no hay forma de saltarse un mensaje RFB desconocido porque el protocolo no manda su longitud. **Regla:** no se anuncia una codificación ni se activa una función del servidor hasta que su parser está listo y probado.

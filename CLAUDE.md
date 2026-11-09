@@ -85,3 +85,7 @@ Protocol notes in `docs/ultravnc-ft.md`. `contentParam` is **little-endian** on 
 ### Security rule
 
 Treat the server as untrusted: validate every size, length and rectangle before allocating or indexing (see `MAX_DIM`, `MAX_TEXT`, `read_string` max, `Framebuffer::contains` checks).
+
+### Embedded RFB Host (`features/host`)
+
+`features/host/` implements the user-space RFB 3.8 server engine for Studio & QuickSupport Mode: `capture.rs` (`Frame`, `DamageTracker` on a 64×64 tile grid with horizontal coalescing, `ScreenCapturer`), `input_inject.rs` (`NativeKey` X11 keysym decoder, `LocalActivityGuard` enforcing 2s physical mouse priority, `InputInjector`), and `session.rs` (`ZrleEncoder` with session-persistent zlib stream, `HostSession` handshake and message dispatch for `SetPixelFormat`, `SetEncodings`, `FramebufferUpdateRequest`, `KeyEvent`, `PointerEvent`, `ClientCutText`).
