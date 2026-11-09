@@ -29,6 +29,7 @@ enum Filter {
     Favorites,
     Recent,
     Hidden,
+    ShareHost,
     Label(String),
 }
 
@@ -155,6 +156,7 @@ pub struct Dashboard {
     modal: Option<Modal>,
     logo: Option<TextureHandle>,
     previews: HashMap<String, Option<TextureHandle>>,
+    pub host_view: crate::features::host::HostView,
     pub last_request: Option<ConnectRequest>,
     pub status: String,
 }
@@ -176,6 +178,7 @@ impl Default for Dashboard {
             modal: None,
             logo: None,
             previews: HashMap::new(),
+            host_view: crate::features::host::HostView::default(),
             last_request: None,
             status: String::new(),
         };
@@ -432,6 +435,18 @@ impl Dashboard {
                     self.open_new_connection(None);
                 }
 
+                let share_active = self.filter == Filter::ShareHost || self.host_view.is_running();
+                if ui
+                    .selectable_label(
+                        share_active,
+                        format!("{} Share / E2EE", char::from(Icon::Radio)),
+                    )
+                    .on_hover_text("Share this computer or join an E2EE QuickSupport session")
+                    .clicked()
+                {
+                    self.filter = Filter::ShareHost;
+                }
+
                 ui.separator();
 
                 let sort_name = match self.sort_by {
@@ -552,6 +567,26 @@ impl Dashboard {
         }
 
         ui.add_space(16.0);
+        ui.label(
+            RichText::new("STUDIO & QUICKSUPPORT")
+                .size(11.0)
+                .strong()
+                .weak(),
+        );
+        ui.add_space(6.0);
+        let host_count = usize::from(self.host_view.is_running());
+        if sidebar_item(
+            ui,
+            &format!("{}  Share this computer", char::from(Icon::Radio)),
+            host_count,
+            self.filter == Filter::ShareHost,
+        )
+        .clicked()
+        {
+            self.filter = Filter::ShareHost;
+        }
+
+        ui.add_space(16.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("LABELS").size(11.0).strong().weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -608,12 +643,16 @@ impl Dashboard {
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) -> Option<ConnectRequest> {
+        if self.filter == Filter::ShareHost {
+            return self.host_view.show_panel(ui);
+        }
         let indices = self.visible_indices();
         let active_title = match &self.filter {
             Filter::All => "All connections".to_string(),
             Filter::Favorites => "Favorites".to_string(),
             Filter::Recent => "Recently connected".to_string(),
             Filter::Hidden => "Hidden connections".to_string(),
+            Filter::ShareHost => "Share this computer".to_string(),
             Filter::Label(l) => format!("{}  {l}", char::from(Icon::Tag)),
         };
 
@@ -1945,6 +1984,7 @@ impl Dashboard {
             .enumerate()
             .filter(|(_, c)| match &self.filter {
                 Filter::Hidden => c.hidden,
+                Filter::ShareHost => false,
                 _ if c.hidden => false,
                 Filter::All => true,
                 Filter::Favorites => c.favorite,

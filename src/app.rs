@@ -224,6 +224,7 @@ impl eframe::App for App {
             if let Some(req) = self.dashboard.show(ui, self.events.is_some()) {
                 self.connect(&ctx, req);
             }
+            self.dashboard.host_view.show_active_banner(&ctx);
             return;
         };
         // Our own shortcut: consumed before input forwarding so the remote machine never sees it.
@@ -299,6 +300,7 @@ impl eframe::App for App {
         live.files_view.show(&ctx, &*live.files);
         live.chat.show(&ctx, &live.outbound);
         live.clipboard_view.show(&ctx, &live.clipboard);
+        self.dashboard.host_view.show_active_banner(&ctx);
     }
 }
 

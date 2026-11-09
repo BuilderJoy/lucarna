@@ -8,6 +8,7 @@ pub mod capture;
 pub mod ft_server;
 pub mod input_inject;
 pub mod session;
+pub mod view;
 
 pub use capture::{
     DamageTracker, DirtyRect, Frame, ScreenCapturer, SyntheticCapturer, SystemCapturer, TILE_SIZE,
@@ -18,3 +19,4 @@ pub use input_inject::{
     PointerButtons, RecordingInjector, SystemInputInjector,
 };
 pub use session::{HostConfig, HostSession, ZrleEncoder, cli_host, serve_stream};
+pub use view::{HostStatus, HostView};
