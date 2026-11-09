@@ -271,6 +271,11 @@ static ES: &[(&str, &str)] = &[
         "Desconectar a la otra persona y dejar de compartir",
     ),
     ("Dismiss message", "Descartar mensaje"),
+    (
+        "{} arrived and runs code if you open it. Open it only if you expected it.",
+        "{} llegó y ejecuta código si lo abres. Ábrelo solo si lo esperabas.",
+    ),
+    ("Dismiss", "Descartar"),
     ("Received {} ({})", "Recibido {} ({})"),
     ("Sent {} ({})", "Enviado {} ({})"),
     ("Deleted {}", "Eliminado {}"),

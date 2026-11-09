@@ -122,6 +122,8 @@ pub struct HostView {
     failed_pins: u32,
     /// File transfer is off until the person sharing turns it on.
     pub allow_files: bool,
+    /// A file that runs code arrived: shown in its own strip until dismissed or two minutes pass.
+    risky_alert: Option<(String, Instant)>,
     drives_loaded: bool,
     /// The PIN the host thread checks; changes after every session and every denied connection.
     pin_shared: Arc<Mutex<String>>,
@@ -166,6 +168,7 @@ impl Default for HostView {
             last_session: None,
             failed_pins: 0,
             allow_files: false,
+            risky_alert: None,
             drives_loaded: false,
             pin_shared: Arc::new(Mutex::new(String::new())),
             consent_tx: None,
@@ -470,6 +473,9 @@ impl HostView {
                     let (text, alert) = match event {
                         FileEvent::Received { name, size } => {
                             let risky = is_risky(&name);
+                            if risky {
+                                self.risky_alert = Some((name.clone(), Instant::now()));
+                            }
                             let base = fill(tr("Received {} ({})"), &[&name, &human_bytes(size)]);
                             if risky {
                                 (
@@ -1276,6 +1282,52 @@ impl HostView {
         if stop {
             self.stop_sharing();
         }
+        self.show_risky_strip(ui);
+    }
+
+    /// Second strip under the first, so a file that can run code is not missed in the activity list.
+    fn show_risky_strip(&mut self, ui: &mut Ui) {
+        if self
+            .risky_alert
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() > RISKY_ALERT_FOR)
+        {
+            self.risky_alert = None;
+        }
+        let Some((name, _)) = self.risky_alert.clone() else {
+            return;
+        };
+        let mut dismiss = false;
+        egui::Panel::top("risky_file_strip")
+            .frame(
+                egui::Frame::NONE
+                    .fill(Color32::from_rgb(0x8a, 0x2a, 0x00))
+                    .inner_margin(egui::Margin::symmetric(16, 6)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}  {}",
+                            char::from(Icon::TriangleAlert),
+                            fill(
+                                tr("{} arrived and runs code if you open it. Open it only if you expected it."),
+                                &[&name]
+                            )
+                        ))
+                        .strong()
+                        .color(Color32::WHITE),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(tr("Dismiss")).clicked() {
+                            dismiss = true;
+                        }
+                    });
+                });
+            });
+        if dismiss {
+            self.risky_alert = None;
+        }
     }
 
     fn waiting_view(&mut self, ui: &mut Ui) {
@@ -2036,6 +2088,8 @@ fn digit_boxes(
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the person sharing has to answer "wants to connect"; silence is a no.
 pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the "a file that runs code arrived" strip stays.
+const RISKY_ALERT_FOR: Duration = Duration::from_secs(120);
 /// Sharing that nobody used stops by itself after this long.
 const WAIT_LIMIT: Duration = Duration::from_secs(15 * 60);
 
@@ -2287,6 +2341,31 @@ fn run_repeater_host_loop(repeater_addr: String, session_code: String, run: Host
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_risky_file_raises_the_strip_and_a_plain_one_does_not() {
+        let mut v = HostView::default();
+        let (tx, rx) = mpsc::channel();
+        v.events_rx = Some(rx);
+        tx.send(HostUiEvent::File(FileEvent::Received {
+            name: "notes.txt".into(),
+            size: 5,
+        }))
+        .unwrap();
+        v.poll_events();
+        assert!(v.risky_alert.is_none());
+        tx.send(HostUiEvent::File(FileEvent::Received {
+            name: "setup.exe".into(),
+            size: 5,
+        }))
+        .unwrap();
+        v.poll_events();
+        assert_eq!(
+            v.risky_alert.as_ref().map(|(n, _)| n.as_str()),
+            Some("setup.exe")
+        );
+        assert!(v.audit_log.first().is_some_and(|e| e.is_alert));
+    }
 
     #[test]
     fn the_pin_changes_after_every_visit_and_the_host_thread_sees_it() {
