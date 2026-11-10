@@ -353,16 +353,15 @@ impl HostView {
         };
 
         // If a repeater is used and the user typed a 6-9 digit code (e.g. "582-914"), format as "ID:582914"
+        // Without a repeater the bare code goes on: the session looks it up on the local network.
         let normalized = normalize_code(raw_target);
-        let addr_str = if repeater.is_some()
-            && !raw_target.contains(':')
+        let is_code = !raw_target.contains(':')
             && !raw_target.contains('.')
-            && (6..=9).contains(&normalized.len())
-            && normalized.chars().all(|c| c.is_ascii_digit())
-        {
-            format!("ID:{normalized}")
-        } else {
-            raw_target.to_string()
+            && super::discovery::is_code(&normalized);
+        let addr_str = match (is_code, &repeater) {
+            (true, Some(_)) => format!("ID:{normalized}"),
+            (true, None) => normalized,
+            (false, _) => raw_target.to_string(),
         };
 
         let address = ServerAddress::parse(&addr_str)?;
@@ -448,7 +447,7 @@ impl HostView {
             if use_repeater {
                 run_repeater_host_loop(repeater_addr, session_code, run);
             } else {
-                run_listener_host_loop(bind_addr, use_e2ee, run);
+                run_listener_host_loop(bind_addr, session_code, use_e2ee, run);
             }
         });
     }
@@ -2324,7 +2323,7 @@ fn ask_consent(run: &HostRun, peer: &str, e2ee: bool) -> bool {
     false
 }
 
-fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
+fn run_listener_host_loop(bind_addr: String, session_code: String, use_e2ee: bool, run: HostRun) {
     let listener = match TcpListener::bind(&bind_addr) {
         Ok(l) => l,
         Err(e) => {
@@ -2336,6 +2335,10 @@ fn run_listener_host_loop(bind_addr: String, use_e2ee: bool, run: HostRun) {
         }
     };
     let _ = listener.set_nonblocking(true);
+    // Lets a viewer on the same network find this computer from the session code alone.
+    if let Ok(local) = listener.local_addr() {
+        super::discovery::respond(session_code, local.port(), Arc::clone(&run.stop_flag));
+    }
     run.notify(HostUiEvent::Waiting {
         endpoint: bind_addr.clone(),
         e2ee: use_e2ee,
@@ -2523,7 +2526,7 @@ mod tests {
             cooldown: Duration::from_millis(100),
         };
         let (a, r) = (addr.clone(), run.clone());
-        let handle = std::thread::spawn(move || run_listener_host_loop(a, true, r));
+        let handle = std::thread::spawn(move || run_listener_host_loop(a, String::new(), true, r));
         match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
             HostUiEvent::Waiting { .. } => {}
             _ => panic!("the host did not start waiting"),

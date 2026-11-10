@@ -4,6 +4,7 @@
 //!
 //! | File | What it holds |
 //! |---|---|
+//! | `discovery.rs` | Finding a sharing computer on the local network from its session code (UDP broadcast, port 5951), so the viewer needs only the code and the PIN. |
 //! | `view.rs` | The "Share this device" page, the strips across the top of the window, and the two background loops that wait for a viewer (`run_listener_host_loop`, `run_repeater_host_loop`). |
 //! | `session.rs` | One connection: the RFB handshake, the message loop (`HostSession::step`), the ZRLE encoder and `HostConfig`. |
 //! | `capture.rs` | `Frame` (one picture of the screen, 4 bytes per pixel: blue, green, red, unused), `DamageTracker` (which 64×64 tiles changed) and `SystemCapturer`. |
@@ -49,6 +50,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod capture;
+pub mod discovery;
 pub mod ft_server;
 pub mod input_inject;
 #[cfg(target_os = "macos")]

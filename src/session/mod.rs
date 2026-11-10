@@ -37,6 +37,7 @@ use crate::features::chat;
 use crate::features::clipboard::RemoteClipboard;
 use crate::features::connection::{Credentials, ServerAddress, SshTarget, handshake};
 use crate::features::file_transfer::{self, DualFiles, FileOps, RemoteFiles};
+use crate::features::host::discovery;
 use crate::features::remote_screen::{self, Framebuffer};
 use crate::features::sftp::SftpClient;
 use crate::features::ssh::Tunnel;
@@ -264,9 +265,13 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// Tries every resolved address (IPv6 and IPv4) with a timeout, instead of the OS default of minutes.
 fn connect(address: &ServerAddress) -> io::Result<TcpStream> {
     let mut last = io::Error::new(io::ErrorKind::NotFound, "host not found");
-    address
-        .as_str()
-        .to_socket_addrs()?
+    // A session code instead of a host name: ask the local network who shares under it.
+    let addrs: Vec<_> = match address.host_port() {
+        Some((code, _)) if discovery::is_code(code) => vec![discovery::find(code)?],
+        _ => address.as_str().to_socket_addrs()?.collect(),
+    };
+    addrs
+        .into_iter()
         .find_map(|a| {
             TcpStream::connect_timeout(&a, TIMEOUT)
                 .map_err(|e| last = e)

@@ -735,6 +735,10 @@ static ES: &[(&str, &str)] = &[
         "separadas por comas, p. ej. Oficina, Servidores",
     ),
     ("connection closed", "conexión cerrada"),
+    (
+        "No device with that code on this network",
+        "No hay ningún equipo con ese código en esta red",
+    ),
     ("file", "el archivo"),
     ("folder", "la carpeta"),
     (
