@@ -12,6 +12,8 @@ mod mac_capture;
 pub mod os_input;
 pub mod session;
 pub mod view;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod x11_capture;
 
 pub use capture::{
     DamageTracker, DirtyRect, Frame, ScreenCapturer, SyntheticCapturer, SystemCapturer, TILE_SIZE,
