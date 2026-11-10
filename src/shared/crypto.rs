@@ -1,10 +1,29 @@
-//! Cryptographic primitives for End-to-End Encryption (E2EE) over untrusted repeaters:
-//! - HMAC-SHA256 and PBKDF2-HMAC-SHA256 (RFC 8018)
-//! - ChaCha20 Stream Cipher (RFC 8439 §2.4)
-//! - Poly1305 Authenticator (RFC 8439 §2.5)
-//! - ChaCha20-Poly1305 AEAD (RFC 8439 §2.8)
-//! - Ephemeral X25519 Key Exchange + PIN Authentication
-//! - Framed AEAD Stream with Replay Protection & 3-Attempt Brute-Force Lockout
+//! End-to-end encryption between a viewer and a Lucarna host, so that a repeater in the middle only moves bytes
+//! it cannot read. Diagram: `docs/e2ee-handshake.md`.
+//!
+//! # Two stages
+//!
+//! **1. Handshake** (`host_e2ee_handshake`, `viewer_e2ee_handshake`). Both people know the PIN; it is never
+//! sent. SPAKE2 (the `spake2` crate) turns "we both know the same PIN" into a shared secret key, in a way that
+//! a recording of the exchange cannot be used to try PINs later. Each side then proves it got the same key
+//! with an HMAC. A wrong PIN is counted by `BruteForceLimiter`.
+//!
+//! **2. The session** (`E2eeStream`, or its halves `E2eeReader` and `E2eeWriter`). `keys_from_shared` derives
+//! one key per direction. Whatever is written is cut into chunks of at most 16 KiB, and each chunk travels as
+//! a frame: a 4-byte length, the encrypted bytes and a 16-byte tag. The tag makes any change in transit
+//! detectable, and a counter in each frame's nonce means a frame cannot be replayed or reordered.
+//!
+//! # What is in this file
+//!
+//! | Part | Items |
+//! |---|---|
+//! | Building blocks | `hmac_sha256`, `pbkdf2_sha256`, `constant_time_eq` |
+//! | The cipher (RFC 8439), written by hand | `chacha20_xor`, `poly1305_mac`, `aead_seal`, `aead_open` |
+//! | Codes shown to people | `generate_session_code`, `generate_pin`, `generate_password`, `format_code` |
+//! | Handshake | `host_e2ee_handshake`, `viewer_e2ee_handshake`, `peer_point_ok`, `keys_from_shared` |
+//! | Encrypted stream | `E2eeStream`, `E2eeReader`, `E2eeWriter`, `make_nonce` |
+//!
+//! The cipher is to be replaced by the audited `chacha20poly1305` crate, with the same bytes on the wire.
 
 use std::io::{self, Read, Write};
 
