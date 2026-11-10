@@ -592,7 +592,7 @@ fn bar_contents(ui: &mut egui::Ui, live: &mut LiveSession, fullscreen: bool) {
                 let (w, h) = live.screen.lock().unwrap().size();
                 let stats = live.outbound.stats();
                 let info = match stats.encoding() {
-                    Some(e) => format!("{e} · {w}×{h}"),
+                    Some(e) => format!("{e} · {w}×{h} · {} fps", stats.fps()),
                     None => format!("{w}×{h}"),
                 };
                 ui.label(RichText::new(info).monospace().size(12.0).color(p.text2));

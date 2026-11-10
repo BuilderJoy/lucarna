@@ -1,6 +1,8 @@
 //! Embedded RFB 3.8 Host session loop and session-persistent ZRLE tile encoder.
 
 use std::io::{self, Read, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use flate2::{Compress, Compression, FlushCompress};
 
@@ -145,6 +147,19 @@ impl std::fmt::Debug for Gate {
     }
 }
 
+/// How fast the host is working, written by the host thread and read by the Share page.
+#[derive(Debug, Default)]
+pub struct HostPerf {
+    /// Microseconds the last screen capture took.
+    pub capture_us: AtomicU64,
+    /// Microseconds the last update took to encode (changed frames only).
+    pub encode_us: AtomicU64,
+    /// Bytes of the last update that carried a change.
+    pub bytes: AtomicU64,
+    /// Updates with a real change sent in the last full second.
+    pub fps: AtomicU64,
+}
+
 /// Configuration for an embedded RFB Host session.
 #[derive(Clone, Debug)]
 pub struct HostConfig {
@@ -161,6 +176,7 @@ pub struct HostConfig {
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Unix milliseconds of the last remote input held back because the person here moved the mouse.
     pub mouse_blocked: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    pub perf: Option<std::sync::Arc<HostPerf>>,
 }
 
 impl Default for HostConfig {
@@ -175,6 +191,7 @@ impl Default for HostConfig {
             on_file: None,
             cancel: None,
             mouse_blocked: None,
+            perf: None,
         }
     }
 }
@@ -191,6 +208,8 @@ pub struct HostSession<C: ScreenCapturer, I: InputInjector> {
     supports_desktop_size: bool,
     screen_size: (u16, u16),
     pub client_clipboard: Option<String>,
+    /// Start of the current one-second window and the changed frames sent in it.
+    fps_window: (Instant, u64),
 }
 
 impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
@@ -219,6 +238,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
             supports_desktop_size: false,
             screen_size: (0, 0),
             client_clipboard: None,
+            fps_window: (Instant::now(), 0),
         }
     }
 
@@ -379,7 +399,9 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
     }
 
     fn send_framebuffer_update(&mut self, s: &mut impl Write) -> io::Result<()> {
+        let started = Instant::now();
         let frame = self.capturer.capture()?;
+        let captured = Instant::now();
         let resized = (frame.width, frame.height) != self.screen_size;
         self.screen_size = (frame.width, frame.height);
         self.injector.set_frame_size(frame.width, frame.height);
@@ -387,6 +409,7 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
         let mut rects = self.damage.diff(&frame);
         // RFB requires every FramebufferUpdateRequest to eventually receive a response;
         // if nothing changed, pace at ~60 Hz and send a 1×1 top-left refresh so lock-step viewers keep polling.
+        let changed = !rects.is_empty();
         if rects.is_empty() {
             std::thread::sleep(std::time::Duration::from_millis(16));
             rects.push(DirtyRect {
@@ -431,6 +454,21 @@ impl<C: ScreenCapturer, I: InputInjector> HostSession<C, I> {
             }
         }
 
+        self.fps_window.1 += u64::from(changed);
+        if let Some(perf) = &self.config.perf {
+            let us = |d: Duration| d.as_micros() as u64;
+            perf.capture_us
+                .store(us(captured - started), Ordering::Relaxed);
+            if changed {
+                perf.encode_us
+                    .store(us(captured.elapsed()), Ordering::Relaxed);
+                perf.bytes.store(msg.len() as u64, Ordering::Relaxed);
+            }
+            if self.fps_window.0.elapsed() >= Duration::from_secs(1) {
+                perf.fps.store(self.fps_window.1, Ordering::Relaxed);
+                self.fps_window = (Instant::now(), 0);
+            }
+        }
         s.write_all(&msg)?;
         s.flush()
     }
@@ -586,6 +624,7 @@ pub fn cli_host() -> Option<i32> {
             on_file: None,
             cancel: None,
             mouse_blocked: None,
+            perf: None,
         };
         let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
         while !limiter.is_locked() {
@@ -677,6 +716,7 @@ pub fn cli_host() -> Option<i32> {
         on_file: None,
         cancel: None,
         mouse_blocked: None,
+        perf: None,
     };
     let mut limiter = crate::shared::crypto::BruteForceLimiter::new();
 
@@ -778,6 +818,29 @@ mod tests {
         }
     }
 
+    /// The numbers every speed change is compared against: `cargo test --release -- --ignored --nocapture live_host_speed`.
+    /// Captures this screen five times (it does not touch the mouse or keyboard).
+    #[test]
+    #[ignore]
+    fn live_host_speed_baseline() {
+        let mut capturer = SystemCapturer::new((1280, 720));
+        let mut zrle = ZrleEncoder::new();
+        for _ in 0..5 {
+            let t = Instant::now();
+            let frame = capturer.capture().unwrap();
+            let capture = t.elapsed();
+            let (w, h) = (usize::from(frame.width), usize::from(frame.height));
+            let t = Instant::now();
+            let out = zrle.encode_rect(&frame.pixels, w, h).unwrap();
+            println!(
+                "{w}x{h}: capture {} ms, full-frame ZRLE {} ms, {} KB",
+                capture.as_millis(),
+                t.elapsed().as_millis(),
+                out.len() / 1024
+            );
+        }
+    }
+
     #[test]
     fn zrle_encoder_roundtrips_solid_and_patterned_rects_with_viewer_decoder() {
         let mut enc = ZrleEncoder::new();
@@ -814,6 +877,7 @@ mod tests {
             on_file: None,
             cancel: None,
             mouse_blocked: None,
+            perf: None,
             gate: Some(Gate(std::sync::Arc::new(move || {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 allow
@@ -893,6 +957,7 @@ mod tests {
                 on_file: None,
                 cancel: None,
                 mouse_blocked: None,
+                perf: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1.clone(), f1, f2]);
             let injector = RecordingInjector::new(false);
@@ -999,6 +1064,7 @@ mod tests {
                 on_file: None,
                 cancel: None,
                 mouse_blocked: None,
+                perf: None,
             };
             let capturer = SyntheticCapturer::new(vec![f1]);
             let injector = RecordingInjector::new(false);

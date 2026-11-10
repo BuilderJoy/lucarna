@@ -819,6 +819,10 @@ static ES: &[(&str, &str)] = &[
     ("{} Upload", "{} Subir"),
     ("{} chars · Latin-1", "{} caracteres · Latin-1"),
     ("{} items", "{} elementos"),
+    (
+        "{} fps · capture {} ms · encode {} ms · {} KB",
+        "{} fps · captura {} ms · codificación {} ms · {} KB",
+    ),
     ("{} of {} online", "{} de {} en línea"),
     ("{} shared folders", "{} carpetas compartidas"),
     (
