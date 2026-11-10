@@ -832,8 +832,11 @@ mod tests {
             let (w, h) = (usize::from(frame.width), usize::from(frame.height));
             let t = Instant::now();
             let out = zrle.encode_rect(&frame.pixels, w, h).unwrap();
+            let colours: std::collections::HashSet<&[u8]> =
+                frame.pixels.chunks_exact(4).step_by(97).collect();
             println!(
-                "{w}x{h}: capture {} ms, full-frame ZRLE {} ms, {} KB",
+                "{w}x{h}: {} colours sampled, capture {} ms, full-frame ZRLE {} ms, {} KB",
+                colours.len(),
                 capture.as_millis(),
                 t.elapsed().as_millis(),
                 out.len() / 1024

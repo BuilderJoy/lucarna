@@ -1,5 +1,30 @@
-//! Session aggregate: one live connection to a VNC server. Owns the socket and
-//! routes each server message to the feature that understands it.
+//! One live connection to a VNC server, seen from the viewer. Owns the socket and routes each server message
+//! to the feature that understands it.
+//!
+//! # The life of a session (`run`)
+//!
+//! `run` is called on its own thread, one per connection, and returns when the connection ends:
+//! 1. **Reach the server**: directly, through a repeater, or through an SSH tunnel (`ssh::Tunnel`).
+//! 2. **Encrypt** when the request has a PIN: `viewer_e2ee_handshake`, then everything goes through `E2eeStream`.
+//! 3. **RFB handshake** (`connection::handshake::perform`): version, password, screen size and name.
+//! 4. **Negotiate** the pixel format and encodings (`remote_screen::negotiate`) and ask for the first picture.
+//! 5. Send `Event::Connected` to the UI with the handles it needs.
+//! 6. **Loop**: read one byte (the message type) and let the right feature read the rest.
+//!
+//! # Reading and writing
+//!
+//! - **Reading** happens only here, in the loop at the end of `run`. RFB messages do not carry their length,
+//!   so an unknown message type cannot be skipped: it ends the session. To support a new server message, add
+//!   a match arm in that loop.
+//! - **Writing** goes through `Outbound`, a lock around the sending half of the socket. The UI thread
+//!   (keyboard, mouse, clipboard) and this thread (asking for the next picture) both use it.
+//! - `Outbound::close` shuts the socket; the blocked read fails, the loop ends and the UI gets `Event::Closed`.
+//!
+//! # Talking to the UI
+//!
+//! The session thread sends `Event`s over a channel and calls `notify`, which asks egui to redraw. The
+//! picture itself is not sent: both sides share the `Framebuffer` behind a lock, and `ScreenUpdated` only says
+//! "look again".
 
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};

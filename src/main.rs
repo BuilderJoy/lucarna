@@ -1,3 +1,23 @@
+//! Lucarna: a VNC (RFB) viewer that can also share this computer.
+//!
+//! # Where to start reading
+//!
+//! | You want to understand | Read |
+//! |---|---|
+//! | How the window, tabs and session bar work | `app.rs` |
+//! | How a connection to a server runs | `session/mod.rs` |
+//! | One capability (screen, keyboard, clipboard, files, chat, SSH) | its folder under `features/` |
+//! | Sharing this computer | `features/host/mod.rs` |
+//! | Encryption with a PIN | `shared/crypto.rs` |
+//! | Colours, translations, byte helpers | `shared/` |
+//!
+//! # The three ways this program starts
+//!
+//! `main` checks them in order:
+//! 1. **askpass**: `ssh` ran us to ask for a saved SSH password. Answer and exit; no window.
+//! 2. **`--host`**: share this computer from a terminal; no window.
+//! 3. **The app**: open the window and hand control to `app::App`.
+
 // Release builds on Windows are GUI apps: no console window behind Lucarna.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

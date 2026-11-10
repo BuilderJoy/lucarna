@@ -1,4 +1,26 @@
-//! App shell: switches between the dashboard and a live session.
+//! App shell: the window, the tabs and the session bar.
+//!
+//! # The pieces
+//!
+//! - `App`: the whole window. Holds the start screen (`Dashboard`) and a list of tabs.
+//! - `Tab`: one connection. While it is connecting it only has a channel to listen on; once the server
+//!   answers it gets a `LiveSession`.
+//! - `LiveSession`: everything one open connection needs on screen: the picture (`ScreenView`), keyboard and
+//!   mouse forwarding (`InputForwarder`), and the Clipboard, Chat and Files windows.
+//!
+//! # What happens every frame (`App::ui`)
+//!
+//! egui redraws the whole window many times per second, and `ui` runs each time:
+//! 1. `poll_events`: read what the background threads sent (`session::Event`) and apply it with `handle_event`.
+//! 2. Draw the host strip (if this computer is being shared) and the tab strip.
+//! 3. No active session: draw the `Dashboard`. It returns a `ConnectRequest` when the person asks to connect.
+//! 4. Active session: draw the bar (`bar_contents`), the remote screen and its windows, then send the local
+//!    keyboard and mouse to the server.
+//!
+//! # Connecting
+//!
+//! `App::connect` starts a thread that runs `session::run` and keeps the receiving end of its channel in a new
+//! `Tab`. The UI thread never waits on the network; it only reads that channel.
 
 use crate::shared::i18n::{fill, tr};
 use std::sync::{Arc, Mutex, mpsc};

@@ -693,6 +693,46 @@ mod sys {
 
 pub use sys::{button, capture, key, missing_setup, pointer, pointer_to, screen_size, wheel};
 
+/// What the system keeps between captures: a running screen stream on macOS, a connection to the X server on
+/// Linux, nothing on Windows.
+#[derive(Default)]
+pub struct Grabber {
+    /// `None`: not tried yet. `Some(None)`: the stream failed, so the `screencapture` command is used.
+    #[cfg(target_os = "macos")]
+    stream: Option<Option<super::mac_capture::ScreenStream>>,
+    /// Same two states for the X server; the fallback is the `import` command.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    x11: Option<Option<super::x11_capture::X11Screen>>,
+}
+
+impl Grabber {
+    pub fn grab(&mut self) -> io::Result<Frame> {
+        #[cfg(target_os = "macos")]
+        {
+            let stream = self
+                .stream
+                .get_or_insert_with(|| super::mac_capture::ScreenStream::start().ok());
+            match stream.as_ref().map(|s| s.latest()) {
+                Some(Ok(frame)) => return Ok(frame),
+                Some(Err(_)) => *stream = None,
+                None => {}
+            }
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let x11 = self
+                .x11
+                .get_or_insert_with(|| super::x11_capture::X11Screen::open().ok());
+            match x11.as_ref().map(|s| s.grab()) {
+                Some(Ok(frame)) => return Ok(frame),
+                Some(Err(_)) => *x11 = None,
+                None => {}
+            }
+        }
+        capture()
+    }
+}
+
 /// `xdotool getmouselocation --shell` prints `X=…`, `Y=…`, `SCREEN=…`, `WINDOW=…`.
 #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 pub fn parse_mouse_location(text: &str) -> Option<(u16, u16)> {
