@@ -16,6 +16,10 @@ struct Inner {
     pinged: Option<Instant>,
     rtts: VecDeque<Duration>,
     encoding: Option<&'static str>,
+    /// Start of the current one-second window, the updates counted in it and the last full count.
+    window: Option<Instant>,
+    count: u32,
+    fps: u32,
 }
 
 /// Written by the reader thread, read by the UI. There is no RFB ping, so the round trip is the time
@@ -40,6 +44,13 @@ impl Stats {
     /// Called for every `FramebufferUpdate`; `encoding` is the one used for its large rectangles.
     pub fn update_received(&self, encoding: Option<&'static str>) {
         let mut s = self.0.lock().unwrap();
+        s.count += 1;
+        let window = *s.window.get_or_insert_with(Instant::now);
+        if window.elapsed() >= Duration::from_secs(1) {
+            s.fps = s.count;
+            s.count = 0;
+            s.window = Some(Instant::now());
+        }
         if let Some(t) = s.pinged.take() {
             if s.rtts.len() == SAMPLES {
                 s.rtts.pop_front();
@@ -53,6 +64,15 @@ impl Stats {
 
     pub fn latency(&self) -> Option<Duration> {
         self.0.lock().unwrap().rtts.iter().min().copied()
+    }
+
+    /// Screen updates received in the last full second; 0 once they stop arriving.
+    pub fn fps(&self) -> u32 {
+        let s = self.0.lock().unwrap();
+        match s.window {
+            Some(w) if w.elapsed() < Duration::from_secs(2) => s.fps,
+            _ => 0,
+        }
     }
 
     pub fn encoding(&self) -> Option<&'static str> {

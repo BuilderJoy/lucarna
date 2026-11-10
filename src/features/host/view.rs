@@ -19,7 +19,7 @@ use lucide_icons::Icon;
 
 use super::ft_server::{FileEvent, FileHook, VirtualDrives, is_risky};
 use super::os_input::{self, Setup};
-use super::session::{Gate, HostConfig, register_repeater_mode_ii, serve_stream};
+use super::session::{Gate, HostConfig, HostPerf, register_repeater_mode_ii, serve_stream};
 use crate::features::connection::{ConnectRequest, Credentials, ServerAddress, SessionOptions};
 use crate::shared::crypto::{
     BruteForceLimiter, PIN_DIGITS, format_code, generate_password, generate_pin,
@@ -127,6 +127,8 @@ pub struct HostView {
     cancel_transfer: Arc<AtomicBool>,
     /// Set by the injector when the person here took the mouse (unix ms), read by the strip.
     mouse_blocked: Arc<AtomicU64>,
+    /// Capture and encode timings of the session in progress.
+    perf: Arc<HostPerf>,
     /// What this system still needs for remote control, checked every couple of seconds while the page is open.
     setup: Vec<Setup>,
     setup_checked: Option<Instant>,
@@ -178,6 +180,7 @@ impl Default for HostView {
             transfer: None,
             cancel_transfer: Arc::new(AtomicBool::new(false)),
             mouse_blocked: Arc::new(AtomicU64::new(0)),
+            perf: Arc::default(),
             setup: Vec::new(),
             setup_checked: None,
             drives_loaded: false,
@@ -411,6 +414,7 @@ impl HostView {
         let allow_files = self.allow_files;
         let cancel = Arc::clone(&self.cancel_transfer);
         let mouse_blocked = Arc::clone(&self.mouse_blocked);
+        let perf = Arc::clone(&self.perf);
         let ctx = ctx.clone();
         self.waiting_since = None;
 
@@ -425,6 +429,7 @@ impl HostView {
                     gate: None,
                     cancel: Some(cancel),
                     mouse_blocked: Some(mouse_blocked),
+                    perf: Some(perf),
                     on_file: Some(FileHook(Arc::new({
                         let (tx, ctx) = (tx.clone(), ctx.clone());
                         move |e| {
@@ -1337,6 +1342,27 @@ impl HostView {
                             .strong()
                             .color(Color32::WHITE),
                     );
+                    if active {
+                        let ms = |v: &AtomicU64| v.load(Ordering::Relaxed) / 1000;
+                        let (fps, kb) = (
+                            self.perf.fps.load(Ordering::Relaxed),
+                            self.perf.bytes.load(Ordering::Relaxed) / 1024,
+                        );
+                        ui.label(
+                            RichText::new(fill(
+                                tr("{} fps · capture {} ms · encode {} ms · {} KB"),
+                                &[
+                                    &fps,
+                                    &ms(&self.perf.capture_us),
+                                    &ms(&self.perf.encode_us),
+                                    &kb,
+                                ],
+                            ))
+                            .monospace()
+                            .size(12.0)
+                            .color(Color32::WHITE),
+                        );
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if pending {
                             if ui.add(theme::primary(tr("Allow"))).clicked() {
