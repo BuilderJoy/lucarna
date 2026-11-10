@@ -15,9 +15,14 @@ fn main() -> eframe::Result {
     if let Some(code) = features::ssh::askpass() {
         std::process::exit(code);
     }
+    // `--host [addr] [--password <pw>]` runs the embedded RFB 3.8 + Native File Transfer Host.
+    if let Some(code) = features::host::cli_host() {
+        std::process::exit(code);
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1024.0, 768.0])
+            .with_inner_size([1280.0, 820.0])
+            .with_min_inner_size([900.0, 600.0])
             // Matches StartupWMClass in packaging/linux/lucarna.desktop, so the desktop shows our icon.
             .with_app_id("lucarna")
             .with_icon(eframe::icon_data::from_png_bytes(LOGO_PNG).expect("valid logo.png")),
@@ -27,7 +32,8 @@ fn main() -> eframe::Result {
         "Lucarna",
         options,
         Box::new(|cc| {
-            app::apply_theme(&cc.egui_ctx);
+            shared::theme::apply(&cc.egui_ctx);
+            shared::i18n::init(&cc.egui_ctx);
             Ok(Box::<app::App>::default())
         }),
     )

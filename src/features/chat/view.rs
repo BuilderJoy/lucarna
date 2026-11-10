@@ -1,3 +1,4 @@
+use crate::shared::i18n::{fill, tr};
 use eframe::egui::{self, Key, Rect, RichText};
 use lucide_icons::Icon;
 
@@ -44,11 +45,11 @@ impl ChatView {
             return;
         }
         let mut open = true;
-        let window = egui::Window::new(format!("{} Chat", char::from(Icon::MessageCircle)))
+        let window = egui::Window::new(fill(tr("{} Chat"), &[&(char::from(Icon::MessageCircle))]))
             .open(&mut open)
             .default_size([340.0, 300.0])
             .show(ctx, |ui| {
-                let accent = ui.visuals().selection.bg_fill;
+                let accent = crate::shared::theme::palette(ui.ctx()).accent_text;
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
                     .auto_shrink(false)
@@ -68,7 +69,7 @@ impl ChatView {
                     });
                 let reply = ui.add(
                     egui::TextEdit::singleline(&mut self.input)
-                        .hint_text("Type and press Enter")
+                        .hint_text(tr("Type and press Enter"))
                         .char_limit(2000)
                         .desired_width(f32::INFINITY),
                 );

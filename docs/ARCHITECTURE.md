@@ -36,6 +36,7 @@ flowchart TB
 
     session["session/mod.rs<br/>único lector del socket;<br/>despacha cada mensaje"]
     wire["shared/wire.rs<br/>lectura big-endian, invalid(),<br/>Latin-1"]
+    theme["shared/theme.rs<br/>tokens claro/oscuro, visuals"]
 
     app --> connection & screen & input & clipboard & ft & chat
     app -- "lanza un hilo por conexión" --> session

@@ -144,6 +144,7 @@ mod tests {
         Credentials {
             user: user.into(),
             password: "pw".into(),
+            pin: String::new(),
         }
     }
 

@@ -8,5 +8,5 @@ mod view;
 mod zrle;
 
 pub use framebuffer::{Cursor, Framebuffer};
-pub use protocol::{Decoder, negotiate, read_update, request_update, skip_colour_map};
+pub use protocol::{Decoder, negotiate, ping, read_update, request_update, skip_colour_map};
 pub use view::{Scale, ScreenView, Viewport};

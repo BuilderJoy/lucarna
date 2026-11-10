@@ -1,0 +1,59 @@
+# Containerized test environment for Lucarna Studio Host (Phase 1 + Phase 2).
+# Runs Lucarna itself as the RFB 3.8 + Native File Transfer server (`lucarna --host`),
+# WITHOUT x11vnc and WITHOUT sshd.
+#
+# Build from the repository root:
+#   docker build -t lucarna-host-server -f tests/server/Dockerfile.host .
+# Run:
+#   docker run -d --rm --name lucarna-host -p 5950:5900 -e VNC_PASSWORD=studio lucarna-host-server
+
+FROM rust:1-bookworm AS builder
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY assets ./assets
+COPY src ./src
+RUN cargo build --release --bin lucarna
+
+FROM debian:bookworm-slim
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 DISPLAY=:0
+
+# Only user-space X11 display + capture/input helpers; NO x11vnc and NO openssh-server.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb xterm xdotool imagemagick fonts-dejavu-core \
+    libgl1 libxkbcommon-x11-0 libwayland-client0 ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/sh studio
+
+COPY --from=builder /src/target/release/lucarna /usr/local/bin/lucarna
+COPY tests/server/studio_console.sh /studio_console.sh
+RUN chmod +x /studio_console.sh
+
+USER studio
+WORKDIR /home/studio
+
+# Pre-populate Virtual Drives: M:\ (~/Music), D:\ (~/Downloads), H:\ (~)
+RUN mkdir -p /home/studio/Music/Jingles /home/studio/Music/Programas /home/studio/Downloads && \
+    printf 'RIFF____WAVEfmt cuna_apertura_radio_studio_sample_payload_1234567890\n' \
+        > /home/studio/Music/Jingles/cuna_apertura.wav && \
+    head -c 65536 /dev/urandom >> /home/studio/Music/Jingles/cuna_apertura.wav && \
+    printf 'RIFF____WAVEfmt identificador_emisora_fm_stereo_payload\n' \
+        > /home/studio/Music/Jingles/identificador_emisora.wav && \
+    head -c 32768 /dev/urandom >> /home/studio/Music/Jingles/identificador_emisora.wav && \
+    printf 'ID3_PODCAST_EPISODIO_01_ENTREVISTA_ESTUDIO_PRINCIPAL\n' \
+        > /home/studio/Music/Programas/podcast_episodio_01.mp3 && \
+    head -c 100000 /dev/urandom >> /home/studio/Music/Programas/podcast_episodio_01.mp3 && \
+    printf '08:00 - Apertura Musical (M:\\Jingles\\cuna_apertura.wav)\n08:05 - Bloque Central (M:\\Programas\\podcast_episodio_01.mp3)\n' \
+        > /home/studio/Downloads/escaleta_programa.txt && \
+    printf 'Notas de Cabina: Transferencia directa por RFB Msg 7 sin SSH.\n' \
+        > /home/studio/notas_cabina.txt
+
+EXPOSE 5900
+
+CMD Xvfb :0 -screen 0 1280x720x24 & \
+    sleep 1; \
+    xterm -T "Lucarna Studio A" -geometry 150x40+20+20 -fa "DejaVu Sans Mono" -fs 11 -bg "#141824" -fg "#e2e8f0" -e /studio_console.sh & \
+    sleep 1; \
+    WIN_ID=$(xdotool search --onlyvisible --name "Lucarna Studio A" | head -n 1); \
+    if [ -n "$WIN_ID" ]; then xdotool windowfocus "$WIN_ID" windowactivate "$WIN_ID"; fi; \
+    exec /usr/local/bin/lucarna --host 0.0.0.0:5900 --password "${VNC_PASSWORD:-studio}"
