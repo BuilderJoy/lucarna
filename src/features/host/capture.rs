@@ -243,6 +243,7 @@ impl ScreenCapturer for SyntheticCapturer {
 pub struct SystemCapturer {
     fallback_size: (u16, u16),
     tick: u16,
+    grabber: super::os_input::Grabber,
 }
 
 impl Default for SystemCapturer {
@@ -256,6 +257,7 @@ impl SystemCapturer {
         Self {
             fallback_size,
             tick: 0,
+            grabber: Default::default(),
         }
     }
 
@@ -281,7 +283,9 @@ impl SystemCapturer {
 
 impl ScreenCapturer for SystemCapturer {
     fn capture(&mut self) -> io::Result<Frame> {
-        capture_os_screen().or_else(|_| Ok(self.studio_test_frame()))
+        self.grabber
+            .grab()
+            .or_else(|_| Ok(self.studio_test_frame()))
     }
 }
 
@@ -331,10 +335,6 @@ pub fn parse_ppm_p6(data: &[u8]) -> io::Result<Frame> {
         pixels.extend_from_slice(&[rgb[2], rgb[1], rgb[0], 0]);
     }
     Frame::new(w as u16, h as u16, pixels)
-}
-
-fn capture_os_screen() -> io::Result<Frame> {
-    super::os_input::capture()
 }
 
 /// Linux: ImageMagick `import` writes the root window as a P6 PPM on stdout.

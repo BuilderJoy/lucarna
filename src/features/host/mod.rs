@@ -7,6 +7,8 @@
 pub mod capture;
 pub mod ft_server;
 pub mod input_inject;
+#[cfg(target_os = "macos")]
+mod mac_capture;
 pub mod os_input;
 pub mod session;
 pub mod view;

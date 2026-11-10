@@ -693,6 +693,31 @@ mod sys {
 
 pub use sys::{button, capture, key, missing_setup, pointer, pointer_to, screen_size, wheel};
 
+/// What the system keeps between captures: on macOS a running screen stream, elsewhere nothing.
+#[derive(Default)]
+pub struct Grabber {
+    /// `None`: not tried yet. `Some(None)`: the stream failed, so the `screencapture` command is used.
+    #[cfg(target_os = "macos")]
+    stream: Option<Option<super::mac_capture::ScreenStream>>,
+}
+
+impl Grabber {
+    pub fn grab(&mut self) -> io::Result<Frame> {
+        #[cfg(target_os = "macos")]
+        {
+            let stream = self
+                .stream
+                .get_or_insert_with(|| super::mac_capture::ScreenStream::start().ok());
+            match stream.as_ref().map(|s| s.latest()) {
+                Some(Ok(frame)) => return Ok(frame),
+                Some(Err(_)) => *stream = None,
+                None => {}
+            }
+        }
+        capture()
+    }
+}
+
 /// `xdotool getmouselocation --shell` prints `X=…`, `Y=…`, `SCREEN=…`, `WINDOW=…`.
 #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 pub fn parse_mouse_location(text: &str) -> Option<(u16, u16)> {
